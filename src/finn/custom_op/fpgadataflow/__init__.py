@@ -77,6 +77,7 @@ from finn.custom_op.fpgadataflow.matrixvectoractivation import MVAU
 from finn.custom_op.fpgadataflow.outer_shuffle import OuterShuffle
 from finn.custom_op.fpgadataflow.pool import Pool
 from finn.custom_op.fpgadataflow.replicate_stream import ReplicateStream
+from finn.custom_op.fpgadataflow.requant import Requant
 from finn.custom_op.fpgadataflow.shuffle import Shuffle
 from finn.custom_op.fpgadataflow.split import StreamingSplit
 from finn.custom_op.fpgadataflow.streamingdataflowpartition import StreamingDataflowPartition
@@ -116,3 +117,4 @@ custom_op["SplitMultiHeads"] = SplitMultiHeads
 custom_op["MergeMultiHeads"] = MergeMultiHeads
 custom_op["ReplicateStream"] = ReplicateStream
 custom_op["HWSoftmax"] = HWSoftmax
+custom_op["Requant"] = Requant
