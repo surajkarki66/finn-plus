@@ -10,6 +10,7 @@ from finn.custom_op.fpgadataflow.requant import Requant
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.util.basic import get_dsp_block, make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
+from finn.util.settings import get_settings
 
 
 class Requant_rtl(Requant, RTLBackend):
@@ -87,7 +88,7 @@ class Requant_rtl(Requant, RTLBackend):
         out_stream_width = ((pe * n + 7) // 8) * 8
 
         top_module_name = self.get_verilog_top_module_name()
-        rtllib_dir = os.environ["FINN_ROOT"] + "/finn-rtllib/requant/hdl/"
+        rtllib_dir = os.path.join(get_settings().finn_rtllib, "requant/hdl/")
 
         # Generate SystemVerilog implementation module (with _impl suffix)
         sv_template_path = rtllib_dir + "requant_wrapper_template.sv"
@@ -133,7 +134,7 @@ class Requant_rtl(Requant, RTLBackend):
 
     def get_rtl_file_list(self, abspath=False):
         """Return list of RTL files needed for this node."""
-        rtllib_dir = os.environ["FINN_ROOT"] + "/finn-rtllib/requant/hdl/"
+        rtllib_dir = os.path.join(get_settings().finn_rtllib, "requant/hdl/")
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
 
         rtl_files = [
