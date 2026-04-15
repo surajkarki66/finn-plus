@@ -51,6 +51,7 @@ from finn.util.logging import log
 
 
 print("ORT version: " + str(onnxruntime.__version__))
+print("ORT path: " + str(onnxruntime.__file__))
 
 
 class MoveAddPastMul(Transformation):
