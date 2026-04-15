@@ -28,6 +28,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import numpy as np
+import onnxruntime
 import qonnx.core.data_layout as DataLayout
 from copy import deepcopy
 from onnx import TensorProto
@@ -43,9 +44,13 @@ from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.infer_shapes import InferShapes
 from qonnx.util.basic import get_by_name
 
+
 # Groups node inputs by dynamic vs. initializer category
 from finn.transformation.util import group_inputs_by_category, is_scalar
 from finn.util.logging import log
+
+
+print("ORT version: " + str(onnxruntime.__version__))
 
 
 class MoveAddPastMul(Transformation):
