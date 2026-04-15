@@ -2,9 +2,9 @@
 
 .n2_setup_general:
   before_script:
-    - ml lang/Python/3.13.1-GCCcore-14.2.0
+    - ml lang/Python/3.12.3-GCCcore-13.3.0
     - ml tools/git-lfs/3.6.1
-    - ml tools/UnZip/6.0-GCCcore-14.2.0
+    - ml tools/UnZip/6.0-GCCcore-13.3.0
     - ml devel/ncurses/5.9
     - ulimit -s unlimited # Increase stack size limit
 
