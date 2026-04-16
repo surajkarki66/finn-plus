@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""HLSBackend specialization for generic pooling operators:
+MaxPool, AvgPool, AccPool and QuantAvgPool."""
 
 import numpy as np
 
@@ -52,82 +54,86 @@ class Pool_hls(Pool, HLSBackend):
     """
 
     def get_nodeattr_types(self):
+        """Get dictionary of custom node attributes with their types and default values."""
         my_attrs = {}
         my_attrs.update(Pool.get_nodeattr_types(self))
         my_attrs.update(HLSBackend.get_nodeattr_types(self))
         return my_attrs
 
     def global_includes(self):
-        self.code_gen_dict["$GLOBALS$"] = ['#include "activations.hpp"']
-        self.code_gen_dict["$GLOBALS$"] += ['#include "maxpool.h"']
-        self.code_gen_dict["$GLOBALS$"] += ['#include "pool.hpp"']
+        """List include directives for generated HLS code."""
+        self.code_gen_dict["$GLOBALS$"] = ['#include "pool.hpp"']
 
     def defines(self, var):
-        self.code_gen_dict["$DEFINES$"] = []
-
-        ifm_ch = self.get_nodeattr("Channels")
-        self.code_gen_dict["$DEFINES$"] += ["#define Channels {}".format(ifm_ch)]
-
-        pe = self.get_nodeattr("PE")
-        self.code_gen_dict["$DEFINES$"] += ["#define PE {}".format(pe)]
-
-        k = self.get_nodeattr("KernelSize")
-        k_prod = int(np.prod(k))
-        self.code_gen_dict["$DEFINES$"] += ["#define KernelSize {}".format(k_prod)]
-
-        odims = self.get_nodeattr("OutImgDims")
-        total_odim = np.prod(odims)
-        self.code_gen_dict["$DEFINES$"] += ["#define OFMDimTotal {}".format(total_odim)]
-
-        numReps = self.get_nodeattr("BatchSize")
-        self.code_gen_dict["$DEFINES$"] += ["#define numReps {}".format(numReps)]
+        """Constant and type definitions for generated HLS code."""
+        k = int(np.prod(self.get_nodeattr("KernelSize")))
+        cf = int(self.get_nodeattr("Channels") / self.get_nodeattr("PE"))
+        osz = np.prod(self.get_nodeattr("OutImgDims"))
+        self.code_gen_dict["$DEFINES$"] = [
+            "constexpr unsigned  ISIZE = {};".format(osz * cf * k),
+            "constexpr unsigned  K = {};".format(k),
+        ]
 
     def docompute(self):
-        idt = self.get_input_datatype()
-        i_hls_dt = idt.get_hls_datatype_str()
-        odt = self.get_output_datatype()
-        o_hls_dt = odt.get_hls_datatype_str()
-        size = self.get_nodeattr("Size")
-        accum_bits = self.get_nodeattr("AccumBits")
-        self.code_gen_dict["$DOCOMPUTE$"] = []
-
+        """Generates the computational part of the HLS C++ code."""
+        pe = self.get_nodeattr("PE")
         fxn = self.get_nodeattr("Function")
+        idt = self.get_input_datatype()
+        odt = self.get_output_datatype()
+        o_hls_dt = "hls::vector<%s, %d>" % (odt.get_hls_datatype_str(), pe)
+
+        self.code_gen_dict["$DOCOMPUTE$"] = []
         if fxn == "MaxPool":
+            self.code_gen_dict["$DOCOMPUTE$"] += ["MaxPoolFunction<{}> pool_fxn;".format(o_hls_dt)]
+        elif fxn == "AccPool":
+            self.code_gen_dict["$DOCOMPUTE$"] += ["AccPoolFunction<{}> pool_fxn;".format(o_hls_dt)]
+        elif fxn == "AvgPool":
+            n = np.prod(self.get_nodeattr("KernelSize"))
+            accum_bits = self.get_nodeattr("AccumBits")
+            act_hls_dt = "hls::vector<ap_%sint<%d>, %d>" % (
+                "" if idt.signed() else "u",
+                accum_bits,
+                pe,
+            )
             self.code_gen_dict["$DOCOMPUTE$"] += [
-                "MaxPoolFunction<{},KernelSize> pool_fxn;".format(i_hls_dt)
+                "AvgPoolFunction<{},{},{}> pool_fxn;".format(o_hls_dt, act_hls_dt, n)
             ]
         elif fxn == "QuantAvgPool":
-            if idt.signed():
-                act_hls_dt = "ap_int<{}>".format(accum_bits)
-            else:
-                act_hls_dt = "ap_uint<{}>".format(accum_bits)
+            shift = self.get_nodeattr("Size")
+            accum_bits = self.get_nodeattr("AccumBits")
+            act_hls_dt = "hls::vector<ap_%sint<%d>, %d>" % (
+                "" if idt.signed() else "u",
+                accum_bits,
+                pe,
+            )
             self.code_gen_dict["$DOCOMPUTE$"] += [
-                "QuantAvgPoolFunction<{},{},{}> pool_fxn;".format(act_hls_dt, o_hls_dt, size)
+                "QuantAvgPoolFunction<{},{},{}> pool_fxn;".format(o_hls_dt, act_hls_dt, shift)
             ]
         else:
             raise Exception("Pool_Batch doesn't currently support " + fxn)
 
-        self.code_gen_dict["$DOCOMPUTE$"] += [
-            """Pool_batch<Channels, PE, KernelSize,Slice<{} >, Slice< {} > >
-        (in0_V, out0_V, pool_fxn, OFMDimTotal*numReps);""".format(
-                i_hls_dt, o_hls_dt
-            )
-        ]
+        self.code_gen_dict["$DOCOMPUTE$"] += ["Pool_batch<ISIZE, K>(in0_V, out0_V, pool_fxn);"]
+
+    def pragmas(self):
+        """Generate HLS pragmas to apply to the HLS C++ coede."""
+        super().pragmas()
+        self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS dataflow disable_start_propagation")
+        self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS aggregate variable=in0_V compact=bit")
+        self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS aggregate variable=out0_V compact=bit")
 
     def blackboxfunction(self):
-        packed_ibits = self.get_instream_width()
-        packed_in_hls_type = "ap_uint<%d>" % packed_ibits
+        """Blackbox function interface from which the IP will be generated."""
+        pe = self.get_nodeattr("PE")
+        idt = self.get_input_datatype()
+        odt = self.get_output_datatype()
+        i_hls_dt = "hls::vector<%s, %d>" % (idt.get_hls_datatype_str(), pe)
+        o_hls_dt = "hls::vector<%s, %d>" % (odt.get_hls_datatype_str(), pe)
 
-        packed_obits = self.get_outstream_width()
-        packed_out_hls_type = "ap_uint<%d>" % packed_obits
         self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-            "void %s(hls::stream<%s > &in0_V, hls::stream<%s > &out0_V)"
-            % (
-                self.onnx_node.name,
-                packed_in_hls_type,
-                packed_out_hls_type,
-            )
+            "void %s(hls::stream<%s> &in0_V, hls::stream<%s> &out0_V)"
+            % (self.onnx_node.name, i_hls_dt, o_hls_dt)
         ]
 
     def execute_node(self, context, graph):
+        """Execute the node in HLS C++ simulation."""
         HLSBackend.execute_node(self, context, graph)

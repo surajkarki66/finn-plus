@@ -50,7 +50,7 @@ import finn.core.onnx_exec as oxe
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
 from finn.transformation.streamline import Streamline
 from finn.util.basic import make_build_dir
-from finn.util.test import get_test_model_trained
+from tests.testing_util.test import get_test_model_trained
 
 
 @pytest.mark.streamline
@@ -90,7 +90,9 @@ def test_streamline_fc(size, wbits, abits):
     model = model.transform(RemoveUnusedTensors())
     assert len(model.graph.initializer) == 11
     assert len(model.graph.value_info) == 21
-    assert len(model.graph.quantization_annotation) == 20
+    # The first tensor (input to the Reshape) doesn't have a quantization annotation (why?),
+    # but it does have a layout annotation now, which is also stored as "quantization_annotation"
+    assert len(model.graph.quantization_annotation) == 21
     produced_ctx = oxe.execute_onnx(model, input_dict, True)
     produced = produced_ctx[model.graph.output[0].name]
     assert np.isclose(expected, produced, atol=1e-3).all()

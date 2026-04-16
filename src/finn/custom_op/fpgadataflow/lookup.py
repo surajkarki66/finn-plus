@@ -157,10 +157,6 @@ class Lookup(HWCustomOp):
         obits = self.get_output_datatype().bitwidth()
         return obits * folded_oshape[-1]
 
-    def get_number_output_values(self):
-        folded_oshape = self.get_folded_output_shape()
-        return np.prod(folded_oshape[:-1])
-
     def execute_node(self, context, graph):
         # create a standard add node to help calculate the result
         node = self.onnx_node
@@ -184,8 +180,7 @@ class Lookup(HWCustomOp):
             outputs=[outp],
         )
 
-        opset_version = 13
-        opset_imports = [helper.make_opsetid("", opset_version)]
+        opset_imports = [helper.make_opsetid("", 13)]
         onnx_kwargs = {"opset_imports": opset_imports}
         model_gather = qonnx_make_model(graph_gather, **onnx_kwargs)
         idict = {node.input[0]: inp_values, node.input[1]: data_values}

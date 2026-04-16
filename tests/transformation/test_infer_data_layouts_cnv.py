@@ -51,7 +51,7 @@ import finn.transformation.streamline.absorb as absorb
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
 from finn.transformation.streamline import Streamline
 from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
-from finn.util.test import get_test_model_trained
+from tests.testing_util.test import get_test_model_trained
 
 export_onnx_path_cnv = "test_infer_data_layouts.onnx"
 
@@ -105,7 +105,7 @@ def test_infer_data_layouts_cnv():
     model = model.transform(to_hw.InferBinaryMatrixVectorActivation())
     model = model.transform(to_hw.InferQuantizedMatrixVectorActivation())
     model = model.transform(to_hw.InferConvInpGen())
-    model = model.transform(to_hw.InferStreamingMaxPool())
+    model = model.transform(to_hw.InferPool())
     model = model.transform(GiveUniqueNodeNames())
     model = model.transform(GiveReadableTensorNames())
     model = model.transform(InferDataLayouts())

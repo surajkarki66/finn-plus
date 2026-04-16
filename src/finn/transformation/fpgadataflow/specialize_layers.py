@@ -26,10 +26,18 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Transformations for specializing FINN layers to HLS or RTL implementations.
+
+This module provides functionality to automatically select and specialize FINN dataflow
+layers to their optimal hardware implementation variants (HLS or RTL) based on FPGA
+target, layer constraints, and user preferences.
+"""
+
 import numpy as np
 from onnx import helper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
+from qonnx.transformation.general import GiveUniqueNodeNames
 
 from finn.custom_op.fpgadataflow.hls import custom_op as hls_variants
 from finn.custom_op.fpgadataflow.rtl import custom_op as rtl_variants
@@ -38,6 +46,11 @@ from finn.util.logging import log
 
 
 def _determine_impl_style(node, fpgapart, model):
+    """Determine the optimal implementation style (HLS or RTL) for a given node.
+
+    Analyzes node constraints, FPGA capabilities, and user preferences to select
+    the best hardware implementation variant for a dataflow layer.
+    """
     optype = node.op_type
 
     # check if there is an HLS or RTL variant or both
@@ -72,6 +85,11 @@ def _determine_impl_style(node, fpgapart, model):
                     return "rtl"
                 else:
                     return "hls"
+            elif optype == "LayerNorm":
+                if _layernorm_rtl_possible(node, fpgapart):
+                    return "rtl"
+                else:
+                    return "hls"
             return "rtl"
         # but if no rtl variant, set impl_style to hls
         elif hls_variant:
@@ -88,18 +106,6 @@ def _determine_impl_style(node, fpgapart, model):
     # check if user setting can be fulfilled
     # otherwise change impl_style
     elif impl_style == "hls":
-        if optype == "ConvolutionInputGenerator":
-            if not _swg_hls_possible(node):
-                warn_str = (
-                    """Settings are not supported in HLS. Node %s will automatically be
-                        set to RTL variant."""
-                    % node.name
-                )
-                log.warning(warn_str)
-                return "rtl"
-            else:
-                return "hls"
-
         if hls_variant:
             return "hls"
         elif rtl_variant:
@@ -155,6 +161,18 @@ def _determine_impl_style(node, fpgapart, model):
                 log.warning(warn_str)
                 return "hls"
 
+        elif optype == "LayerNorm":
+            if _layernorm_rtl_possible(node, fpgapart):
+                return "rtl"
+            else:
+                warn_str = """There is no RTL variant for %s. The node will automatically be
+                        set to HLS variant. The RTL Layernorm layer currently only supports
+                        float32 inputs and uses DSP58, so only versal devices supported.""" % (
+                    node.name,
+                )
+                log.warning(warn_str)
+                return "hls"
+
         if rtl_variant:
             return "rtl"
         elif hls_variant:
@@ -181,7 +199,10 @@ def _determine_impl_style(node, fpgapart, model):
 
 
 def _dwc_determine_impl_style(node):
-    # when possible use rtl variant
+    """Determine implementation style for StreamingDataWidthConverter nodes.
+
+    When possible, uses RTL variant based on width ratio compatibility.
+    """
     dwc = getCustomOp(node)
     dwc_in_width = dwc.get_nodeattr("inWidth")
     dwc_out_width = dwc.get_nodeattr("outWidth")
@@ -194,48 +215,15 @@ def _dwc_determine_impl_style(node):
         return "hls"
 
 
-def _swg_hls_possible(node):
-    # there are some constraints to
-    # the HLS variant of the SWG
-    # first constraint to check is
-    # if user has set dynamic_mode to 1
-    # this is only supported in rtl variant
-    swg = getCustomOp(node)
-    if swg.get_nodeattr("dynamic_mode"):
-        return False
-    # the 2D HLS implementation for SWG
-    # can only be used for square inputs
-    # and no dilation
-    if swg.get_nodeattr("is1D"):
-        return True
-    else:
-        # extract all attributes to check
-        k = swg.get_nodeattr("ConvKernelDim")
-        ifm_dim = swg.get_nodeattr("IFMDim")
-        ofm_dim = swg.get_nodeattr("OFMDim")
-        s = swg.get_nodeattr("Stride")
-        d = swg.get_nodeattr("Dilation")
-        # check if square and dilation=1
-        if (
-            k[0] == k[1]
-            and ifm_dim[0] == ifm_dim[1]
-            and ofm_dim[0] == ofm_dim[1]
-            and s[0] == s[1]
-            and d[0] == d[1] == 1
-        ):
-            return True
-        else:
-            return False
-
-
 def _mvu_rtl_possible(n, fpgapart, model):
-    # Checks whether RTL-based MVU is supported
-    # Currently, for DSP48 we only support computations up to
-    # 8sx8u (8-bit signed weights x 8-bit (un)signed activations)
-    # and for DSP58 we support up to 8sx9s.
-    # Please note, DSP48E1 does only support narrow range for weights
-    # Next to that, embedded thresholding functionality is not supported
-    # and neither binaryxnormode computation.
+    """Check whether RTL-based MVU implementation is supported for given node.
+
+    RTL-MVU constraints:
+    - DSP48: supports up to 8sx8u (8-bit signed weights x 8-bit activations)
+    - DSP58: supports up to 8sx9s
+    - DSP48E1: only supports narrow range weights
+    - No embedded thresholding or binaryXnor mode supported
+    """
     node_inst = getCustomOp(n)
     # first check if no Activation or binary xnor mode and return False
     # immediately if one of them is True
@@ -253,25 +241,35 @@ def _mvu_rtl_possible(n, fpgapart, model):
     dsp_block = get_dsp_block(fpgapart)
     # check if weights are narrow
     weights = model.get_initializer(n.input[1])
-    narrow_weights = False if np.min(weights) == wdt.min() else True
+    # if dynamic input, set minimum of weights to wdt.min()
+    # otherwise set it to the minimum value in the weight matrix
+    if weights is None:
+        weights_min = wdt.min()
+    else:
+        weights_min = np.min(weights)
+    narrow_weights = False if weights_min == wdt.min() else True
     # if non narrow weights and only DSP48E1 available return False
     if not narrow_weights and dsp_block == "DSP48E1":
         return False
 
     # if none of the above constraints have been triggered
     # we now check if input and weight data types are in range
+    # we only use rtl mvau if the dtypes are at least 2 bit
     idt = node_inst.get_input_datatype()
-    inp_width_in_range = (idt.bitwidth() <= 8) or (idt.bitwidth() == 9 and idt.signed())
-    weight_width_in_range = wdt.bitwidth() <= 8
+    inp_width_in_range = (2 <= idt.bitwidth() <= 8) or (idt.bitwidth() == 9 and idt.signed())
+    weight_width_in_range = 2 <= wdt.bitwidth() <= 8
 
     return inp_width_in_range and weight_width_in_range
 
 
 def _vvu_rtl_possible(n, fpgapart):
-    # Checks whether RTL-based VVU is supported
-    # Currently, we only support RTL-VVU on DSP58 up to 8sx9s inputs
-    # (8-bit signed weights x (9-bit signed OR 8-bit (un)signed) activations).
-    # Next to that, embedded thresholding functionality is not supported.
+    """Check whether RTL-based VVU implementation is supported for given node.
+
+    RTL-VVU constraints:
+    - Only supported on Versal DSP58
+    - Supports up to 8sx9s inputs (8-bit signed weights x 9-bit signed or 8-bit activations)
+    - No embedded thresholding functionality supported
+    """
     node_inst = getCustomOp(n)
     if not node_inst.get_nodeattr("noActivation"):
         return False
@@ -287,20 +285,48 @@ def _vvu_rtl_possible(n, fpgapart):
     return in_width_in_range and weight_width_in_range and signed_weights
 
 
+def _layernorm_rtl_possible(n, fpgapart):
+    # Checks whether RTL-based Layernorm is supported
+    # Currently, we only support float32 inputs and versal fabric
+    if not is_versal(fpgapart):
+        return False
+    node_inst = getCustomOp(n)
+    idt = node_inst.get_input_datatype(0)
+    if idt != "FLOAT32":
+        return False
+    else:
+        return True
+
+
 class SpecializeLayers(Transformation):
     """Specialize all layers to either HLS or RTL variants"""
 
     def __init__(self, fpgapart):
+        """Initialize the SpecializeLayers transformation.
+
+        Args:
+            fpgapart: Target FPGA part string for implementation selection
+        """
         super().__init__()
         self.fpgapart = fpgapart
 
     def apply(self, model):
+        """Apply layer specialization transformation to model.
+
+        Converts all dataflow layers to their optimal HLS or RTL implementation
+        variants based on target FPGA and layer constraints.
+        """
         graph = model.graph
         node_ind = 0
         graph_modified = False
         for node in graph.node:
             # Skip nodes that are not hw layers
             if not node.domain == "finn.custom_op.fpgadataflow":
+                continue
+            # For shuffle nodes the specialisation happens after
+            # the ShuffleDecomposition transformation with a
+            # dedicated InferInnerOuterShuffle transformation
+            if node.op_type == "Shuffle":
                 continue
             node_ind += 1
             impl_style = _determine_impl_style(node, self.fpgapart, model)
@@ -320,4 +346,9 @@ class SpecializeLayers(Transformation):
             # remove old nodes
             graph.node.remove(node)
             graph_modified = True
+
+        if graph_modified:
+            # update node names to reflect new op types
+            model = model.transform(GiveUniqueNodeNames())
+
         return (model, graph_modified)

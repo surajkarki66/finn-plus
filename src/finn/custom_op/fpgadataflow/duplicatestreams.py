@@ -30,12 +30,14 @@ import numpy as np
 from qonnx.core.datatype import DataType
 
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
+from finn.util.deprecated import deprecated
 from finn.util.logging import log
 
 
 class DuplicateStreams(HWCustomOp):
     """Abstraction layer for HW implementation of DuplicateStreams"""
 
+    @deprecated
     def __init__(self, onnx_node, **kwargs):
         super().__init__(onnx_node, **kwargs)
 
@@ -127,7 +129,10 @@ class DuplicateStreams(HWCustomOp):
         return out_width
 
     def get_number_output_values(self):
-        return self.get_num_output_streams() * np.prod(self.get_folded_output_shape()[1:-1])
+        out_val = {}
+        for i in range(len(self.onnx_node.output)):
+            out_val["out%s" % i] = np.prod(self.get_folded_output_shape(i)[1:-1])
+        return out_val
 
     def get_exp_cycles(self):
         # Channels/PE * batch size * fmdim * fmdim

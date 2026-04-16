@@ -29,11 +29,11 @@
 
 import pytest
 
-import importlib_resources as importlib
 import numpy as np
 import os
 import torch
 from brevitas.export import export_qonnx
+from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.bipolar_to_xnor import ConvertBipolarMatMulToXnorPopcount
@@ -58,8 +58,7 @@ from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
 from finn.transformation.streamline import Streamline
 from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
-from finn.util.fpgadataflow import is_fpgadataflow_node
-from finn.util.test import get_test_model_trained
+from tests.testing_util.test import get_test_model_trained
 
 export_onnx_path_cnv = "test_convert_to_hw_layers_cnv.onnx"
 
@@ -88,9 +87,10 @@ def test_convert_to_hw_layers_cnv_w1a1(fused_activation):
     model = model.transform(Streamline())
     model = model.transform(InferDataLayouts())
     # load one of the test vectors
-    ref = importlib.files("finn.qnn-data") / "cifar10/cifar10-test-data-class3.npz"
-    with importlib.as_file(ref) as fn:
-        input_tensor = np.load(fn)["arr_0"].astype(np.float32)
+    cifar_path = (
+        Path(__file__).parent.parent / "example_data" / "cifar10" / "cifar10-test-data-class3.npz"
+    )
+    input_tensor = np.load(cifar_path)["arr_0"].astype(np.float32)
     input_tensor = input_tensor / 255
     assert input_tensor.shape == (1, 3, 32, 32)
     # generate expected value from streamlined net
@@ -102,15 +102,12 @@ def test_convert_to_hw_layers_cnv_w1a1(fused_activation):
     # subsequently, the FC inference will generate passthrough MVAUs
     if not fused_activation:
         model = model.transform(to_hw.InferThresholdingLayer())
+        model = model.transform(absorb.AbsorbConsecutiveTransposes())
 
     model = model.transform(to_hw.InferBinaryMatrixVectorActivation())
     model = model.transform(to_hw.InferQuantizedMatrixVectorActivation())
+    model = model.transform(to_hw.InferPool())
     model = model.transform(to_hw.InferConvInpGen())
-    model = model.transform(to_hw.InferStreamingMaxPool())
-    for node in model.graph.node:
-        if is_fpgadataflow_node(node):
-            inst = getCustomOp(node)
-            inst.set_nodeattr("preferred_impl_style", "hls")
     model = model.transform(SpecializeLayers("xc7z020clg400-1"))
     for node in model.graph.node:
         if node.op_type == "MVAU_hls":
@@ -131,20 +128,20 @@ def test_convert_to_hw_layers_cnv_w1a1(fused_activation):
     # check topology status
     finn_nodes = model.get_finn_nodes()
     if fused_activation:
-        assert len(finn_nodes) == 18
+        assert len(finn_nodes) == 20
     else:
-        assert len(finn_nodes) == 26
-        thr_nodes = model.get_nodes_by_op_type("Thresholding_hls")
-        assert len(thr_nodes) == 8
+        assert len(finn_nodes) == 28
+        thr_nodes = model.get_nodes_by_op_type("Thresholding_rtl")
+        assert len(thr_nodes) == 9
     non_finn_nodes = model.get_non_finn_nodes()
     assert len(non_finn_nodes) == 5
     exp_non_finn_nodes = ["Transpose", "Transpose", "Reshape", "Mul", "Add"]
     assert [x.op_type for x in non_finn_nodes] == exp_non_finn_nodes
     fc_nodes = model.get_nodes_by_op_type("MVAU_hls")
     assert len(fc_nodes) == 9
-    swg_nodes = model.get_nodes_by_op_type("ConvolutionInputGenerator_hls")
-    assert len(swg_nodes) == 6
-    mp_nodes = model.get_nodes_by_op_type("StreamingMaxPool_hls")
+    swg_nodes = model.get_nodes_by_op_type("ConvolutionInputGenerator_rtl")
+    assert len(swg_nodes) == 8
+    mp_nodes = model.get_nodes_by_op_type("Pool_hls")
     assert len(mp_nodes) == 2
     model = model.transform(PrepareCppSim())
     model = model.transform(CompileCppSim())

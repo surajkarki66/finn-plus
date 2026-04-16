@@ -26,7 +26,6 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as np
 from onnx import TensorProto, helper
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
@@ -184,11 +183,6 @@ class ConvolutionInputGenerator(HWCustomOp):
             # if parallel variant not in use: same width for output and input stream
             return self.get_instream_width()
 
-    def get_number_output_values(self):
-        folded_oshape = self.get_folded_output_shape()
-        num_output_elems = np.prod(folded_oshape[:-1])
-        return num_output_elems
-
     def get_1d_conv_attrs_normalized(self):
         # support both (1, D) and (D, 1) cases transparently:
         # For the kernel, presenting the input data of size D as
@@ -257,8 +251,7 @@ class ConvolutionInputGenerator(HWCustomOp):
             outputs=[outp],
         )
 
-        opset_version = self.onnx_opset_version
-        opset_imports = [helper.make_opsetid("", opset_version)]
+        opset_imports = [helper.make_opsetid("qonnx.custom_op.general", 1)]
         onnx_kwargs = {"opset_imports": opset_imports}
         model_im2col = ModelWrapper(qonnx_make_model(graph_im2col, **onnx_kwargs))
         model_im2col.set_tensor_datatype(node.input[0], self.get_input_datatype())

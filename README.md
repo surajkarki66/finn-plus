@@ -1,66 +1,128 @@
-<img src=https://cs.uni-paderborn.de/fileadmin-eim/informatik/fg/ce/MiscImages/finn-plus_logo.png width=196/>
+<img src="https://cs.uni-paderborn.de/fileadmin-eim/informatik/fg/ce/MiscImages/finn-plus_logo.png" width=196/>
 
 # Dataflow Compiler for Fast, Scalable Quantized Neural Network Inference on FPGAs
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19100351.svg)](https://doi.org/10.5281/zenodo.19100351)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/finn-plus?period=total&units=ABBREVIATION&left_color=GREY&right_color=GREEN&left_text=Downloads)](https://pepy.tech/projects/finn-plus)
+[![PyPI version](https://img.shields.io/pypi/v/finn-plus?logo=pypi&logoColor=white&color=brightgreen)](https://badge.fury.io/py/finn-plus)
+[![GitHub license](https://img.shields.io/badge/License-BSD-purple.svg?logo=bsd)](https://raw.githubusercontent.com/eki-project/finn-plus/refs/heads/main/LICENSE.txt)
+[![Documentation](https://img.shields.io/badge/Documentation-Wiki-blue?logo=github)](https://github.com/eki-project/finn-plus/wiki)
+![GitHub branch status](https://img.shields.io/github/checks-status/eki-project/finn-plus/main?label=CI&logo=gitlab&logoColor=white)
+[![Go to Python website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Feki-project%2Ffinn-plus%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=tool.poetry.dependencies.python&label=python&logo=python&logoColor=white)](https://python.org)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr/eki-project/finn-plus?label=Pull%20Requests&color=green&logo=githubactions&logoColor=white)
+![GitLab CI](https://img.shields.io/badge/GitLab%20CI-FC6D26?logo=gitlab&logoColor=fff)
+![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)
+[![Go to QONNX website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Feki-project%2Ffinn-plus%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=tool.poetry.dependencies.qonnx&label=QONNX&logo=onnx&logoColor=white&color=orange)](https://github.com/fastmachinelearning/qonnx)
+[![Go to Brevitas website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Feki-project%2Ffinn-plus%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=tool.poetry.dependencies.brevitas&logo=pytorch&logoColor=white&label=Brevitas&color=%23bd0000)](https://github.com/Xilinx/brevitas)
 
 **FINN+** is a fork of **FINN**, an experimental framework from the Integrated Communications and AI Lab of AMD Research & Advanced Development to explore deep neural network inference on FPGAs.
 It specifically targets quantized neural networks, with emphasis on generating dataflow-style architectures customized for each network.
 The resulting FPGA accelerators are highly efficient and can yield high throughput and low latency.
 The framework is fully open-source in order to give a higher degree of flexibility, and is intended to enable neural network research spanning several layers of the software/hardware abstraction stack.
 
-**To get an overview of how FINN+ is used, take a look at the Getting Started section below!**
+## Quick Links
 
-**While our [Wiki](https://github.com/eki-project/finn-plus/wiki) is under construction, we refer to the original [FINN homepage](https://xilinx.github.io/finn/) for further information.**
+- **[Getting Started](#getting-started)** - Start using FINN+ in minutes
+- **[Wiki Documentation](https://github.com/eki-project/finn-plus/wiki)** - Complete documentation and guides
+- **[Feature Tracker](https://github.com/orgs/eki-project/projects/1)** - Current development status
+- **[Contributing](#contributing)** - Learn how to contribute to FINN+
+- **[Citing FINN+](#citing-finn)** - How to cite FINN+ in your research
 
-## FINN+ Extensions
-**FINN+** aims to incorporate all development from the upstream repository (dev branch) while extending **FINN** in all directions, including the following list of features that are either in progress or already completed:
-- Transformer/Attention support
-- Improved streamlining
-- Improved automatic folding and FIFO-sizing
-- Empirical quality-of-result (QoR) estimation
-- Back-end extensions
-    - Instrumentation for accurate performance profiling in simulation and on hardware
-    - Improved Alveo build flow
-    - Multi-FPGA support
-    - Optimized C++ driver
-- Quality-of-live improvements
-    - Better logging and error handling
-    - Type hinting/checking
-    - Alternative YAML-based build configuration
-    - Containerless setup
+## What's New in FINN+
 
-Please refer to our [**Feature Tracker**](https://github.com/orgs/eki-project/projects/1) for the current status of individual features.
-While some items are already on-track to be merged into the upstream repository, we try to merge them into the **FINN+** dev branch as early as possible to increase development pace and drive our research forward.
+FINN+ incorporates all upstream FINN development while adding significant enhancements across multiple areas:
+
+### Core Improvements
+
+- **Transformer/Attention Support** - Native support for modern transformer architectures
+- **Enhanced Streamlining** - Improved optimization pipeline for better performance
+- **Smart FIFO Sizing (WIP)** - Automatic folding and FIFO-sizing with better algorithms
+- **QoR Estimation (WIP)** - Empirical quality-of-result estimation for design space exploration
+
+### Backend Extensions
+
+- **Hardware Profiling** - Instrumentation for accurate performance measurement in simulation and hardware
+- **Alveo Support** - Enhanced build flow for Xilinx Alveo cards
+- **Multi-FPGA** - Support for distributed inference across multiple FPGAs
+- **Optimized Drivers** - High-performance C++ drivers for better host-accelerator communication
+
+### Developer Experience
+
+- **Better Diagnostics** - Improved logging and error handling throughout the framework
+- **Type Safety** - Comprehensive type hinting and checking for better code quality
+- **YAML Configuration** - Alternative YAML-based build configuration system
+- **Simplified Setup** - Containerless installation and setup process
+
+**Track Development**: Check our [Feature Tracker](https://github.com/orgs/eki-project/projects/1) for real-time status updates on all features. We merge improvements early to accelerate development and enable cutting-edge research.
 
 ## Getting Started
+
 This is a quick overview of how to get started, for additional information please refer to our [**Wiki**](https://github.com/eki-project/finn-plus/wiki)!
 
-### Requirements
-The primary dependencies currently are:
-- Python >= 3.10 (< 3.12)
-- Vivado, Vitis, Vitis HLS (2022.2 or 2024.2)
-- Some basic system-level packages, refer to the [**dependency installation script**](https://github.com/eki-project/finn-plus/blob/main/installDependencies.sh)
+### Prerequisites
+
+Before installing FINN+, ensure you have:
+
+- **Python**: Version 3.10 or 3.11 (Python 3.12+ not yet supported)
+- **Xilinx Tools**: Vivado, Vitis, and Vitis HLS (2022.2 or 2024.2)
+- **System Dependencies**: See our [dependency installation script](installDependencies.sh) for required packages
 
 ### Installing via pip
+
 After preparing the dependencies mentioned above, simply run the following to start a build flow:
+
 ```
 # Make sure to create a fresh virtual environment for FINN+
-pip install finn-plus          # Install FINN+ and its Python dependencies via pip
-finn deps update               # Ensure FINN+ pulled all further dependencies (this might update packages in your venv!)
-finn build build_config.yaml   # Run a FINN+ build defined in a YAML file
+pip install finn-plus                     # Install FINN+ and its Python dependencies via pip
+finn deps update                          # Ensure FINN+ pulled all further dependencies (this might update packages in your venv!)
+finn build build_config.yaml model.onnx   # Run a FINN+ build defined in a YAML file
 ```
 
-### Installing from the repository
-To install directly from the repository, you'll need Poetry (>= 2.0) for dependency management. After cloning the repo and setting up the system-level dependencies, run the following to start a build flow:
+For more detailed instructions, like installation for development use, please refer to our [**Wiki**](https://github.com/eki-project/finn-plus/wiki)!
+
+> [!NOTE]
+> Please note, that `finn deps update` (and most other commands) will automatically download and update dependencies required for FINN to work (mostly the same as the original FINN repository).
+> This is done to provide a better user experience and to not require the user to manage a dozen dependencies on their own.
+> If you want to know which dependencies will be installed before continuing, check out `external_dependencies.yaml`.
+
+## Contributing
+
+Contributions are very welcome! Whether you are fixing a bug, adding a new feature, improving documentation, or sharing a model — every contribution helps.
+
+To get started:
+
+1. **Fork** the repository and create a feature branch from `main`.
+2. **Check** the [Feature Tracker](https://github.com/orgs/eki-project/projects/1) to see what is planned or already in progress.
+3. **Open an issue** to discuss larger changes before investing significant effort.
+4. **Submit a pull request** with a clear description of your changes.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on code style, testing, and the review process.
+
+## Citing FINN+
+
+If you find FINN+ useful in your research, please cite the [Zenodo record](https://doi.org/10.5281/zenodo.19100351) using the following BibTeX entry:
+
+```bibtex
+@software{finn-plus,
+  author       = {Jentzsch, Felix and Berganski, Christoph and Jungemann, Linus and Wintermann, Bjarne},
+  title        = {{FINN+}},
+  year         = {2026},
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.19100351},
+  url          = {https://github.com/eki-project/finn-plus}
+}
 ```
-cd finn-plus
-poetry install                 # Install Python packages into a Poetry-managed virtual environment
-source <your-poetry-venv>      # Use "poetry env info" to find the path to your Poetry venv. For further information visit the Poetry documentation
-finn config create             # Create a default configuration in ~/.finn/settings.yaml. Optional but recommended
-finn deps update               # Ensure FINN+ pulled all further dependencies (this might update packages in your venv!)
-finn build build_config.yaml   # Run a FINN+ build defined in a YAML file
-```
+
+If you use a specific feature, please additionally cite the corresponding publication:
+
+**High-performance driver:** Jungemann et al., ["FINN-HPC: Closing the Gap for Energy-Efficient Neural Network Inference on FPGAs in HPC"](https://doi.org/10.1145/3728179.3728189) (HEART '25)
+
+**Multi-FPGA:** Pape, Wintermann et al., ["AuroraFlow, an Easy-to-Use, Low-Latency FPGA Communication Solution Demonstrated on Multi-FPGA Neural Network Inference"](https://doi.org/10.1145/3728179.3728190) (HEART '25)
+
+**Transformer support:** Berganski et al., ["FINN-T: Compiling Custom Dataflow Accelerators for Quantized Transformers"](https://doi.org/10.1109/ICFPT64416.2024.11113391) (FPT '24)
 
 ## About Us
+
 FINN+ is maintained by researchers from the [Computer Engineering Group](https://en.cs.uni-paderborn.de/ceg) (CEG) and [Paderborn Center for Parallel Computing](https://pc2.uni-paderborn.de/) (PC²) at Paderborn University, Germany as part of the [eki research project](https://www.eki-project.tech/).
 
 <p align="left">

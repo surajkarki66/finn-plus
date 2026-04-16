@@ -4,6 +4,9 @@ import nbformat
 import os
 from _pytest.mark.structures import ParameterSet
 from nbconvert.preprocessors import ExecutePreprocessor
+from pathlib import Path
+import finn.util.settings
+from finn.interface.settings import FINNSettings
 
 notebook_timeout_seconds = 3600
 notebook_basic_dir = os.path.join(os.environ["FINN_NOTEBOOKS"], "basics/")
@@ -43,7 +46,6 @@ advanced_notebooks = [
         notebook_advanced_dir + "4_advanced_builder_settings.ipynb",
         marks=[
             pytest.mark.xdist_group(name="notebooks_general"),
-            pytest.mark.xfail(reason="Outstanding data layout issue"),
         ],
     ),
 ]
@@ -68,7 +70,6 @@ bnn_notebooks = [
         notebook_bnn_dir + "cnv_end2end_example.ipynb",
         marks=[
             pytest.mark.xdist_group(name="notebooks_cnv"),
-            pytest.mark.xfail(reason="Outstanding data layout issue"),
         ],
     ),
     pytest.param(
@@ -88,6 +89,11 @@ class Test_notebooks:
         "notebook", basics_notebooks + advanced_notebooks + cyber_notebooks + bnn_notebooks
     )
     def test_notebook_exec(self, notebook: ParameterSet, request):
+        settings = FINNSettings.init(
+            flow_config=Path("/tmp/FINN_TEST_BUILD_DIR/dummy.yaml"), auto_set_environmenmt_vars=True
+        )
+        finn.util.settings._SETTINGS = settings  # noqa
+        os.environ["FINN_SETTINGS"] = str(settings.get_path())
         with open(notebook) as f:
             # Set different NETRON_PORT for each xdist group to avoid conflicts
             xdist_groups = [

@@ -30,14 +30,12 @@ import numpy as np
 import os
 from abc import ABC, abstractmethod
 
+from finn import xsi
 from finn.util.basic import make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
 from finn.util.logging import log
 
-try:
-    import pyxsi_utils
-except ModuleNotFoundError:
-    pyxsi_utils = None
+finnxsi = xsi if xsi.is_available() else None
 
 
 class RTLBackend(ABC):
@@ -56,7 +54,7 @@ class RTLBackend(ABC):
     def generate_hdl(self, model, fpgapart, clk):
         pass
 
-    def prepare_rtlsim(self):
+    def prepare_rtlsim(self, behav=False):
         """Creates a xsi emulation library for the RTL code generated
         for this node, sets the rtlsim_so attribute to its path."""
 
@@ -64,8 +62,8 @@ class RTLBackend(ABC):
         single_src_dir = make_build_dir("rtlsim_" + self.onnx_node.name + "_")
         trace_file = self.get_nodeattr("rtlsim_trace")
         debug = not (trace_file is None or trace_file == "")
-        ret = pyxsi_utils.compile_sim_obj(
-            self.get_verilog_top_module_name(), verilog_files, single_src_dir, debug, logger=log
+        ret = finnxsi.compile_sim_obj(
+            self.get_verilog_top_module_name(), verilog_files, single_src_dir, debug, behav
         )
         # save generated lib filename in attribute
         self.set_nodeattr("rtlsim_so", ret[0] + "/" + ret[1])
@@ -99,7 +97,17 @@ class RTLBackend(ABC):
                 exp_ishape = tuple(self.get_normal_input_shape(i))
                 folded_ishape = self.get_folded_input_shape(i)
                 inp_val = context[inp]
-                assert str(inp_val.dtype) == "float32", "Input datatype is not float32"
+                # Make sure the input has the right container datatype
+                if inp_val.dtype != np.float32:
+                    # Issue a warning to make the user aware of this type-cast
+                    log.warning(
+                        f"{node.name}: Changing input container datatype from "
+                        f"{inp_val.dtype} to {np.float32}"
+                    )
+                    # Convert the input to floating point representation as the
+                    # container datatype
+                    inp_val = inp_val.astype(np.float32)
+
                 assert inp_val.shape == exp_ishape, "Input shape doesn't match expected shape."
                 export_idt = self.get_input_datatype(i)
 

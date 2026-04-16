@@ -31,12 +31,14 @@ import numpy as np
 from qonnx.core.datatype import DataType
 
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
+from finn.util.deprecated import deprecated
 from finn.util.logging import log
 
 
 class StreamingEltwise(HWCustomOp):
     """Abstraction layer for HW implementation of StreamingEltwise"""
 
+    @deprecated
     def __init__(self, onnx_node, **kwargs):
         super().__init__(onnx_node, **kwargs)
 
@@ -169,9 +171,6 @@ class StreamingEltwise(HWCustomOp):
         pe = self.get_nodeattr("PE")
         out_width = pe * obits
         return out_width
-
-    def get_number_output_values(self):
-        return np.prod(self.get_folded_output_shape()[:-1])
 
     def get_exp_cycles(self):
         # Channels/PE * batch size * fmdim * fmdim

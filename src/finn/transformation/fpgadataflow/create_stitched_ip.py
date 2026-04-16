@@ -27,25 +27,32 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Transformation to create stitched IP from dataflow graph components."""
+
 import json
 import multiprocessing as mp
 import os
-import subprocess
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.util.basic import get_num_default_workers
 from shutil import copytree
+from subprocess import CalledProcessError
 
+from finn.templates import get_templates_folder
 from finn.transformation.fpgadataflow.replace_verilog_relpaths import ReplaceVerilogRelPaths
-from finn.util.basic import make_build_dir
+from finn.util.basic import launch_process_helper, make_build_dir
+from finn.util.exception import FINNError, FINNUserError
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 from finn.util.logging import log
 
 
 def is_external_input(model, node, i):
-    # indicate whether input i of node should be made external
-    # True only if input is unconnected and has no initializer
-    # Only esception is second input of FC layers when mem_mode is external
+    """
+    Determine whether input i of node should be made external.
+
+    True only if input is unconnected and has no initializer.
+    Only exception is second input of FC layers when mem_mode is external.
+    """
     node_inst = getCustomOp(node)
     op_type = node.op_type
     producer = model.find_producer(node.input[i])
@@ -60,8 +67,7 @@ def is_external_input(model, node, i):
 
 
 def is_external_output(model, node, i):
-    # indicate whether output i of node should be made external
-    # True only if output is unconnected
+    """Determine whether output i of node should be made external."""
     consumers = model.find_consumers(node.output[i])
     if consumers == []:
         # TODO should ideally check if tensor is in top-level
@@ -85,6 +91,7 @@ class CreateStitchedIP(Transformation):
     """
 
     def __init__(self, fpgapart, clk_ns, ip_name="finn_design", vitis=False, signature=[]):
+        """Initialize CreateStitchedIP transformation with FPGA part and clock settings."""
         super().__init__()
         self.fpgapart = fpgapart
         self.clk_ns = clk_ns
@@ -108,9 +115,11 @@ class CreateStitchedIP(Transformation):
             "m_axis": [],
             "aximm": [],
             "axilite": [],
+            "ap_none": [],
         }
 
     def is_double_pumped(self, node):
+        """Check if node uses double pumped computation."""
         if node.op_type.startswith("MVAU"):
             inst = getCustomOp(node)
             try:
@@ -120,6 +129,7 @@ class CreateStitchedIP(Transformation):
             return pumped_compute or inst.get_nodeattr("pumpedMemory")
 
     def connect_clk_rst(self, node):
+        """Connect clock and reset signals for the node."""
         inst_name = node.name
         node_inst = getCustomOp(node)
         clock_intf_name = node_inst.get_verilog_top_module_intf_names()["clk"][0]
@@ -166,6 +176,7 @@ class CreateStitchedIP(Transformation):
                     )
 
     def connect_axi(self, node):
+        """Connect AXI interfaces for the node."""
         inst_name = node.name
         node_inst = getCustomOp(node)
         axilite_intf_name = node_inst.get_verilog_top_module_intf_names()["axilite"]
@@ -198,6 +209,7 @@ class CreateStitchedIP(Transformation):
             self.has_aximm = True
 
     def connect_m_axis_external(self, node, idx=None):
+        """Connect master AXI stream interfaces as external ports."""
         inst_name = node.name
         node_inst = getCustomOp(node)
         output_intf_names = node_inst.get_verilog_top_module_intf_names()["m_axis"]
@@ -221,6 +233,7 @@ class CreateStitchedIP(Transformation):
             self.m_axis_idx += 1
 
     def connect_s_axis_external(self, node, idx=None):
+        """Connect slave AXI stream interfaces as external ports."""
         inst_name = node.name
         node_inst = getCustomOp(node)
         input_intf_names = node_inst.get_verilog_top_module_intf_names()["s_axis"]
@@ -243,6 +256,7 @@ class CreateStitchedIP(Transformation):
             self.s_axis_idx += 1
 
     def connect_ap_none_external(self, node):
+        """Connect ap_none interfaces as external ports."""
         inst_name = node.name
         node_inst = getCustomOp(node)
         input_intf_names = node_inst.get_verilog_top_module_intf_names()["ap_none"]
@@ -255,8 +269,10 @@ class CreateStitchedIP(Transformation):
             self.connect_cmds.append(
                 "set_property name %s [get_bd_ports %s_0]" % (input_intf_name, input_intf_name)
             )
+            self.intf_names["ap_none"].append(input_intf_name)
 
     def insert_signature(self, checksum_count):
+        """Insert signature block for design identification."""
         signature_vlnv = "AMD:user:axi_info_top:1.0"
         signature_name = "axi_info_top0"
         self.create_cmds.append(
@@ -304,6 +320,7 @@ class CreateStitchedIP(Transformation):
         self.connect_cmds.append("assign_bd_address")
 
     def apply(self, model):
+        """Apply the CreateStitchedIP transformation to the model."""
         # ensure non-relative readmemh .dat files
         model = model.transform(ReplaceVerilogRelPaths())
         ip_dirs = ["list"]
@@ -445,6 +462,14 @@ class CreateStitchedIP(Transformation):
                 "report_utilization -hierarchical -hierarchical_depth 5 "
                 "-file %s_partition_util.rpt" % block_name
             )
+            tcl.append(
+                "report_utilization -hierarchical -hierarchical_depth 5 "
+                "-file %s_partition_util.xml -format xml" % block_name
+            )
+            model.set_metadata_prop(
+                "vivado_synth_rpt",
+                "%s/%s_partition_util.xml" % (vivado_stitch_proj_dir, block_name),
+            )
         # export block design itself as an IP core
         block_vendor = "xilinx_finn"
         block_library = "finn"
@@ -529,8 +554,8 @@ class CreateStitchedIP(Transformation):
                 "[ipx::get_file_groups xilinx_simulationcheckpoint]" % block_name
             )
         # add a rudimentary driver mdd to get correct ranges in xparameters.h later on
-        example_data_dir = os.path.join(os.environ["FINN_QNN_DATA"], "mdd-data")
-        copytree(example_data_dir, vivado_stitch_proj_dir + "/data")
+        min_driver = get_templates_folder() / "ipcore_driver"
+        copytree(min_driver, vivado_stitch_proj_dir + "/data")
 
         #####
         # Core Cleanup Operations
@@ -626,21 +651,23 @@ close $ofile
             f.write(tcl_string)
         # create a shell script and call Vivado
         make_project_sh = vivado_stitch_proj_dir + "/make_project.sh"
-        working_dir = os.environ["PWD"]
+        working_dir = os.getcwd()
         with open(make_project_sh, "w") as f:
             f.write("#!/bin/bash \n")
             f.write("cd {}\n".format(vivado_stitch_proj_dir))
+            f.write("set -e\n")  # Exit with non-zero if vivado fails.
             f.write("vivado -mode batch -source make_project.tcl\n")
             f.write("cd {}\n".format(working_dir))
         bash_command = ["bash", make_project_sh]
-        process_compile = subprocess.Popen(
-            bash_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        (_, stderr_data) = process_compile.communicate()
 
-        stderr_stripped = stderr_data.decode().strip()
-        if stderr_stripped != "" and stderr_stripped is not None:
-            log.critical(stderr_stripped)  # Decode bytes and log as critical
+        try:
+            launch_process_helper(bash_command, print_stdout=False)
+        except CalledProcessError as e:
+            raise FINNUserError(
+                f"CreateStitchedIP: make_project.sh failed with a non-zero "
+                f"exit code. Check previous logs and logs in "
+                f"{vivado_stitch_proj_dir} to find out why it failed."
+            ) from e
 
         # wrapper may be created in different location depending on Vivado version
         if not os.path.isfile(wrapper_filename):
@@ -649,7 +676,7 @@ close $ofile
             if os.path.isfile(wrapper_filename_alt):
                 model.set_metadata_prop("wrapper_filename", wrapper_filename_alt)
             else:
-                raise Exception(
+                raise FINNError(
                     """CreateStitchedIP failed, no wrapper HDL found under %s or %s.
                     Please check logs under the parent directory."""
                     % (wrapper_filename, wrapper_filename_alt)

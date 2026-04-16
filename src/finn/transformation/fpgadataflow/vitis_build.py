@@ -28,6 +28,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 from __future__ import annotations
 
+"""Transformation to build FINN dataflow designs for Alveo using Vitis."""
+
 import json
 import os
 import subprocess
@@ -41,6 +43,7 @@ from qonnx.transformation.general import (
     GiveUniqueNodeNames,
     RemoveUnusedTensors,
 )
+from subprocess import CalledProcessError
 
 from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
@@ -60,19 +63,22 @@ from finn.transformation.fpgadataflow.multifpga_utils import get_device_id
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import make_build_dir
-from finn.util.deps import get_deps_path
 from finn.util.exception import (
+    FINNError,
+    FINNUserError,
     FINNConfigurationError,
     FINNMultiFPGAConfigError,
     FINNMultiFPGAError,
     FINNVitisLinkConfigError,
 )
+from finn.util.basic import launch_process_helper, make_build_dir
 from finn.util.logging import log
 
 from . import templates
 
 
 def _check_vitis_envvars():
+    """Check environment variables for Vitis installation."""
     assert "XILINX_VITIS" in os.environ, "XILINX_VITIS must be set for Vitis"
     assert "PLATFORM_REPO_PATHS" in os.environ, "PLATFORM_REPO_PATHS must be set for Vitis"
     assert (
@@ -89,10 +95,12 @@ class CreateVitisXO(Transformation):
     """
 
     def __init__(self, ip_name="finn_design"):
+        """Initialize CreateVitisXO transformation."""
         super().__init__()
         self.ip_name = ip_name
 
     def apply(self, model):
+        """Apply CreateVitisXO transformation to create Vitis object file."""
         _check_vitis_envvars()
         vivado_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
         stitched_ip_dir = vivado_proj_dir + "/ip"
@@ -152,23 +160,25 @@ class CreateVitisXO(Transformation):
 
         # create a shell script and call Vivado
         package_xo_sh = vivado_proj_dir + "/gen_xo.sh"
-        working_dir = os.environ["PWD"]
+        working_dir = os.getcwd()
         with open(package_xo_sh, "w") as f:
             f.write("#!/bin/bash \n")
+            f.write("set -e\n")
             f.write("cd {}\n".format(vivado_proj_dir))
             f.write("vivado -mode batch -source gen_xo.tcl\n")
             f.write("cd {}\n".format(working_dir))
         bash_command = ["bash", package_xo_sh]
-        process_compile = subprocess.Popen(
-            bash_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        _, stderr_data = process_compile.communicate()
-        stderr_stripped = stderr_data.decode().strip()
-        if stderr_stripped != "" and stderr_stripped is not None:
-            log.critical(stderr_stripped)  # Decode bytes and log as critical
-        assert os.path.isfile(xo_path), (
-            "Vitis .xo file not created, check logs under %s" % vivado_proj_dir
-        )
+        try:
+            launch_process_helper(bash_command, print_stdout=False)
+        except CalledProcessError as e:
+            raise FINNUserError(
+                f"An error ocurred while generating the XO file for "
+                f"{self.ip_name}. Check {vivado_proj_dir} for further "
+                f"details."
+            ) from e
+        if not os.path.isfile(xo_path):
+            raise FINNError("Vitis .xo file not created, check logs under %s" % vivado_proj_dir)
+
         return (model, False)
 
 
@@ -777,6 +787,7 @@ class VitisLink(Transformation):
         enable_debug=False,
         fpga_memory_type="default",
     ):
+        """Initialize VitisLink transformation with platform and build settings."""
         super().__init__()
         self.platform = platform
         self.f_mhz = f_mhz
@@ -785,6 +796,7 @@ class VitisLink(Transformation):
         self.fpga_memory_type = fpga_memory_type
 
     def apply(self, model):
+        """Apply VitisLink transformation to create XCLBIN."""
         _check_vitis_envvars()
         # create a config file and empty list of xo files
         config = ["[connectivity]"]
@@ -916,9 +928,10 @@ class VitisLink(Transformation):
 
         # create a shell script and call Vitis
         script = link_dir + "/run_vitis_link.sh"
-        working_dir = os.environ["PWD"]
+        working_dir = os.getcwd()
         with open(script, "w") as f:
             f.write("#!/bin/bash \n")
+            f.write("set -e\n")
             f.write("cd {}\n".format(link_dir))
             f.write(
                 "v++ -t hw --platform %s --link %s"
@@ -934,36 +947,32 @@ class VitisLink(Transformation):
             )
             f.write("cd {}\n".format(working_dir))
         bash_command = ["bash", script]
-        process_compile = subprocess.Popen(
-            bash_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        _, stderr_data = process_compile.communicate()
-        stderr_stripped = stderr_data.decode().strip()
-        if stderr_stripped != "" and stderr_stripped is not None:
-            log.critical(stderr_stripped)  # Decode bytes and log as critical
-        # TODO rename xclbin appropriately here?
+
+        try:
+            launch_process_helper(bash_command, print_stdout=False)
+        except CalledProcessError as e:
+            raise FINNUserError(f"Linking failed. Check {link_dir} for further details.") from e
         xclbin = link_dir + "/a.xclbin"
-        assert os.path.isfile(xclbin), (
-            "Vitis .xclbin file not created, check logs under %s" % link_dir
-        )
+        if not os.path.isfile(xclbin):
+            raise FINNError("Vitis .xclbin file not created, check logs under %s" % link_dir)
+
+        # TODO rename xclbin appropriately here?
         model.set_metadata_prop("bitfile", xclbin)
 
         # run Vivado to gen xml report
         gen_rep_xml_sh = link_dir + "/gen_report_xml.sh"
-        working_dir = os.environ["PWD"]
+        working_dir = os.getcwd()
         with open(gen_rep_xml_sh, "w") as f:
             f.write("#!/bin/bash \n")
             f.write("cd {}\n".format(link_dir))
+            f.write("set -e\n")
             f.write("vivado -mode batch -source %s\n" % (link_dir + "/gen_report_xml.tcl"))
             f.write("cd {}\n".format(working_dir))
         bash_command = ["bash", gen_rep_xml_sh]
-        process_genxml = subprocess.Popen(
-            bash_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        _, stderr_data = process_genxml.communicate()
-        stderr_stripped = stderr_data.decode().strip()
-        if stderr_stripped != "" and stderr_stripped is not None:
-            log.critical(stderr_stripped)  # Decode bytes and log as critical
+        try:
+            launch_process_helper(bash_command, print_stdout=False)
+        except CalledProcessError:
+            log.error(f"Creation of XML reports failed. Check {link_dir} for details. Continuing..")
         # filename for the synth utilization report
         synth_report_filename = link_dir + "/synth_report.xml"
         model.set_metadata_prop("vivado_synth_rpt", synth_report_filename)
@@ -999,6 +1008,7 @@ class VitisBuild(Transformation):
         partition_model_dir=None,
         fpga_memory_type=FpgaMemoryType.DEFAULT,
     ):
+        """Initialize VitisBuild transformation with FPGA and build settings."""
         super().__init__()
         self.fpga_part = fpga_part
         self.period_ns = period_ns
@@ -1011,6 +1021,7 @@ class VitisBuild(Transformation):
         self.fpga_memory_type = fpga_memory_type
 
     def apply(self, model):
+        """Apply VitisBuild transformation to create complete Vitis accelerator."""
         _check_vitis_envvars()
         # prepare at global level, then break up into kernels
         prep_transforms = [InsertIODMA(512), InsertDWC(), SpecializeLayers(self.fpga_part)]

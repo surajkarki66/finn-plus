@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # namespace package, extend path
+"""Collection of default streamlining transformations."""
 from pkgutil import extend_path
 
 __path__ = extend_path(__path__, __name__)
@@ -38,6 +39,7 @@ from qonnx.transformation.general import (
     GiveReadableTensorNames,
     GiveUniqueNodeNames,
 )
+from qonnx.transformation.infer_data_layouts import InferDataLayouts
 from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.remove import RemoveIdentityOps
 
@@ -61,6 +63,7 @@ from finn.transformation.streamline.reorder import (
     MoveScalarLinearPastInvariants,
     MoveScalarMulPastConv,
     MoveScalarMulPastMatMul,
+    MoveScalesPastIm2Col,
 )
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.transformation.streamline.sign_to_thres import ConvertSignToThres
@@ -70,6 +73,7 @@ class Streamline(Transformation):
     """Apply the streamlining transform, see arXiv:1709.04060."""
 
     def apply(self, model):
+        """Collects and applies the default list of streamlining transformations."""
         streamline_transformations = [
             ConvertSubToAdd(),
             ConvertDivToMul(),
@@ -77,6 +81,7 @@ class Streamline(Transformation):
             ConvertSignToThres(),
             MoveMulPastMaxPool(),
             AbsorbSignBiasIntoMultiThreshold(),
+            MoveScalesPastIm2Col(),
             MoveScalarLinearPastInvariants(),
             MoveAddPastMul(),
             MoveScalarAddPastMatMul(),
@@ -100,4 +105,6 @@ class Streamline(Transformation):
             model = model.transform(GiveUniqueNodeNames())
             model = model.transform(GiveReadableTensorNames())
             model = model.transform(InferDataTypes())
+            model = model.transform(InferDataLayouts())
+
         return (model, False)
