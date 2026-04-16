@@ -10,7 +10,7 @@ from qonnx.transformation.general import GiveUniqueNodeNames
 from typing import TYPE_CHECKING
 
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
-from finn.transformation.fpgadataflow.multifpga_utils import (
+from finn.transformation.fpgadataflow.multifpga.utils import (
     get_device_id,
     get_submodel,
     set_device_id,

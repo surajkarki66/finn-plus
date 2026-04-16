@@ -27,6 +27,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 from __future__ import annotations
+from finn.util.settings import get_settings
 
 """Transformation to build FINN dataflow designs for Alveo using Vitis."""
 
@@ -58,20 +59,19 @@ from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
 from finn.transformation.fpgadataflow.insert_iodma import InsertIODMA
-from finn.transformation.fpgadataflow.multifpga_network import AuroraNetworkMetadata, DataDirection
-from finn.transformation.fpgadataflow.multifpga_utils import get_device_id
+from finn.transformation.fpgadataflow.multifpga.metadata import AuroraNetworkMetadata, DataDirection
+from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
-from finn.util.basic import make_build_dir
+from finn.util.basic import launch_process_helper, make_build_dir
 from finn.util.exception import (
-    FINNError,
-    FINNUserError,
     FINNConfigurationError,
+    FINNError,
     FINNMultiFPGAConfigError,
     FINNMultiFPGAError,
+    FINNUserError,
     FINNVitisLinkConfigError,
 )
-from finn.util.basic import launch_process_helper, make_build_dir
 from finn.util.logging import log
 
 from . import templates
@@ -552,7 +552,7 @@ class MultiVitisLink(Transformation):
         """Prepare dummy kernels that might be needed when a kernel is in duplex mode
         but only needs one connected port. Returns a tuple containing the path to
         the RX kernel .xo and the TX kernel .xo"""
-        dummy_kernel_dir = get_deps_path() / "vitis_dummy_kernel"
+        dummy_kernel_dir = get_settings().finn_deps / "vitis_dummy_kernel"
         rx_dummy = dummy_kernel_dir / "rx_dummy_kernel.xo"
         tx_dummy = dummy_kernel_dir / "tx_dummy_kernel.xo"
         if not rx_dummy.exists() or not tx_dummy.exists():
@@ -657,7 +657,11 @@ class MultiVitisLink(Transformation):
                             round(1000 / self.cfg.synth_clk_period_ns),
                         )
                     this_config = configs[this_device]
-                    this_config.add_xo(ModelWrapper(getCustomOp(sdp).get_nodeattr("model")).get_metadata_prop("vitis_xo"))
+                    this_config.add_xo(
+                        ModelWrapper(getCustomOp(sdp).get_nodeattr("model")).get_metadata_prop(
+                            "vitis_xo"
+                        )
+                    )
 
                     # Initialize SDP kernel
                     this_config.add_cu(sdp.name, sdp.name)

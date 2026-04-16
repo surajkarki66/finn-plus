@@ -10,7 +10,7 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
 from typing import TYPE_CHECKING, Any, cast
 
-from finn.transformation.fpgadataflow.multifpga_utils import get_device_id
+from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
 from finn.util.logging import log

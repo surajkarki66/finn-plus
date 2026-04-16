@@ -8,7 +8,7 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
 
 from finn.builder.build_dataflow_config import DataflowBuildConfig
-from finn.transformation.fpgadataflow.multifpga_network import AuroraNetworkMetadata
+from finn.transformation.fpgadataflow.multifpga.metadata import AuroraNetworkMetadata
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
 from finn.util.logging import log

@@ -20,7 +20,7 @@ from finn.builder.build_dataflow_config import (
     MFTopology,
     PartitioningStrategy,
 )
-from finn.transformation.fpgadataflow.multifpga_utils import (
+from finn.transformation.fpgadataflow.multifpga.utils import (
     available_resources,
     get_estimated_model_resources,
     get_inseparable_nodes,
@@ -34,8 +34,7 @@ from finn.util.platforms import platforms
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
-
-    from finn.transformation.fpgadataflow.multifpga_network import Device
+    from finn.transformation.fpgadataflow.multifpga.metadata import Device
 
 
 class Partitioner(ABC):

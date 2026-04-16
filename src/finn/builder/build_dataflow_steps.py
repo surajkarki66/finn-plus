@@ -98,17 +98,17 @@ from finn.transformation.fpgadataflow.make_driver import (
 from finn.transformation.fpgadataflow.make_zynq_proj import ZynqBuild
 from finn.transformation.fpgadataflow.minimize_accumulator_width import MinimizeAccumulatorWidth
 from finn.transformation.fpgadataflow.minimize_weight_bit_width import MinimizeWeightBitWidth
-from finn.transformation.fpgadataflow.multifpga_create_sdp import (
+from finn.transformation.fpgadataflow.multifpga.communication_kernels import PrepareAuroraFlow
+from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
-from finn.transformation.fpgadataflow.multifpga_kernel_preparation import PrepareAuroraFlow
-from finn.transformation.fpgadataflow.multifpga_network import (
+from finn.transformation.fpgadataflow.multifpga.metadata import (
     AssignNetworkMetadata,
     AuroraNetworkMetadata,
     CreateChainNetworkMetadata,
     CreateReturnChainNetworkMetadata,
 )
-from finn.transformation.fpgadataflow.multifpga_partitioner import PartitionForMultiFPGA
+from finn.transformation.fpgadataflow.multifpga.partitioner import PartitionForMultiFPGA
 from finn.transformation.fpgadataflow.prepare_cppsim import PrepareCppSim
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
