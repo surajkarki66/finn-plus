@@ -981,7 +981,7 @@ def step_prepare_network_infrastructure(
 
     # Package kernels
     if metadata_type == AuroraNetworkMetadata:
-        model = model.transform(PrepareAuroraFlow())
+        model = model.transform(PrepareAuroraFlow(cfg))
     else:
         msg = f"No kernel packaging transformation found for {metadata_type.__name__}!"
         log.error(msg)
@@ -1000,8 +1000,11 @@ def step_make_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelW
         raise FINNMultiFPGAConfigError(
             "Multi-FPGA configuration missing or num_fpgas=0. Fix the config and retry."
         )
+    log.info("Partitioning the design for multiple FPGAs.")
     model = step_partition_for_multifpga(model, cfg)
+    log.info("Creating multiple SDPs.")
     model = step_create_multifpga_sdp(model, cfg)
+    log.info("Preparing network data infrastructure.")
     model = step_prepare_network_infrastructure(model, cfg)
     return model
 

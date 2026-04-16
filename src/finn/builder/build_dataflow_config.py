@@ -208,6 +208,12 @@ class PartitioningConfiguration:
     # What kind of kernel is used to communicate in the network
     communication_kernel: MFCommunicationKernel = MFCommunicationKernel.AURORA
 
+    # Arguments to pass along to the communication kernel. This can for example
+    # be used to configure specific details, such as a receiver FIFO depth or
+    # data encoding, etc.
+    # It is up to the kernel preparation transformation to interprete this data.
+    communication_kernel_arguments: dict[str, str] = field(default_factory=dict)
+
     # How much a FPGA can be utilized at max. The solver will fail if it
     # cannot comply with this limitation
     max_utilization: float = 0.85

@@ -1,16 +1,17 @@
 """Prepare communication kernels for usage (e.g. packaging IP cores)."""
-
 import shlex
 import shutil
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
 
+from finn.builder.build_dataflow_config import DataflowBuildConfig
 from finn.transformation.fpgadataflow.multifpga_network import AuroraNetworkMetadata
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
+from finn.util.logging import log
 from finn.util.settings import get_settings
 
 
@@ -20,9 +21,20 @@ class PrepareAuroraFlow(Transformation):
     nothing else.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cfg: DataflowBuildConfig) -> None:
         """Prepare AuroraFlow."""
         super().__init__()
+        # TODO: non-vitis platforms?
+        self.platform = cfg._resolve_vitis_platform()  # noqa
+        self.part = cfg._resolve_fpga_part()  # noqa
+        if cfg.partitioning_configuration is None:
+            raise FINNMultiFPGAConfigError(
+                "Cannot run AuroraFlow preparation on " "a run without partitioning configuration!"
+            )
+        self.make_args = " ".join(
+            f"{k}={v}"
+            for k, v in cfg.partitioning_configuration.communication_kernel_arguments.items()
+        )
         self.aurora_storage = Path(make_build_dir("aurora_storage_")).absolute()
         self.aurora_path = get_settings().finn_deps / "AuroraFlow"
         if not self.aurora_path.exists():
@@ -46,8 +58,21 @@ class PrepareAuroraFlow(Transformation):
         shutil.copytree(self.aurora_path, temp_dir, dirs_exist_ok=True)
 
         # Create the aurora kernel xo file
-        subprocess.run(shlex.split(f"make aurora {args}"), cwd=temp_dir, stdout=subprocess.DEVNULL)
-        p_origin = temp_dir / kernel_xo
+        if self.make_args != "":
+            log.info(
+                f"Packaging AuroraFlow kernel with additional " f"make arguments: {self.make_args}"
+            )
+        result = subprocess.run(
+            shlex.split(f"make aurora_hw {args} {self.make_args}"),
+            cwd=temp_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise FINNMultiFPGAError(
+                f"Error during creation of the " f"AuroraFlow kernels: {result.stderr}"
+            )
+        p_origin = temp_dir / "build" / kernel_xo
         if not p_origin.exists():
             raise FINNMultiFPGAError(
                 f"Packaging AuroraFlow failed. Expected "
@@ -76,15 +101,21 @@ class PrepareAuroraFlow(Transformation):
         # Package a single aurora
         def _package_aurora(d: tuple[int, str]) -> None:
             i, aurora_name = d
-            origin = f"aurora_flow_{i}.xo"
+            origin = f"aurora_flow_hw_{i}.xo"
             target = f"{aurora_name}.xo"
             # TODO: args?
-            self.package_single("", origin, target)
+            self.package_single(f"PART={self.part} PLATFORM={self.platform}", origin, target)
 
         # Package all Aurora kernels concurrently
+        futures: list[Future] = []
         with ThreadPoolExecutor(max_workers=get_settings().num_default_workers) as tpe:
-            tpe.map(_package_aurora, auroras)
+            for aurora in auroras:
+                futures.append(tpe.submit(_package_aurora, aurora))
             tpe.shutdown()
+
+        # Check results to propagate exceptions from threads
+        for future in futures:
+            future.result()
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         """Package all aurora kernels required by the model in parallel.

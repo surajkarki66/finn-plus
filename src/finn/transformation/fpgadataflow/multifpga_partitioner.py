@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import mip
 from abc import ABC, abstractmethod
+from math import ceil
 from mip import Model, xsum
 from pathlib import Path
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveUniqueNodeNames
+from rich import box
+from rich.layout import Layout
+from rich.table import Table
 from typing import TYPE_CHECKING, Any
 
 from finn.builder.build_dataflow_config import (
@@ -25,7 +29,7 @@ from finn.transformation.fpgadataflow.multifpga_utils import (
 )
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
-from finn.util.logging import log
+from finn.util.logging import LogDisabledConsole, log
 from finn.util.platforms import platforms
 
 if TYPE_CHECKING:
@@ -635,6 +639,30 @@ class PartitionForMultiFPGA(Transformation):
         partition the given model."""
         raise NotImplementedError()
 
+    def show_mapping(self, model: ModelWrapper, mapping: dict[int, int]) -> None:
+        """Display mapping either as table or prints, depending on console size."""
+        # TODO: Make dependent on verbose info flag in partitioning config
+        with LogDisabledConsole() as cons:
+            required_tables = ceil(len(model.graph.node) / (cons.height - 5))
+            allowed_tables = cons.width / 20
+            if required_tables < allowed_tables:
+                entries_per_table = (len(model.graph.node) // required_tables) + 1
+                tables = [Table(box=box.SIMPLE) for _ in range(required_tables)]
+                layout = Layout()
+                layout.split_row(*tables)
+                for table in tables:
+                    table.add_column("Index", justify="center", header_style="bold")
+                    table.add_column("Node Name", justify="left", header_style="bold")
+                    table.add_column("Dev", justify="left", header_style="bold", style="bold green")
+                for i, node in enumerate(model.graph.node):
+                    log.info(str(i) + ": " + str(i // entries_per_table))
+                    tables[i // entries_per_table].add_row(str(i), node.name, str(int(mapping[i])))
+                cons.print(layout)
+                return
+        for i, node in enumerate(model.graph.node):
+            log.info(f"Mapping {node.name} -> {int(mapping[i])}")
+        return
+
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         if self.cfg.partitioning_configuration is None:
             return model, False
@@ -740,6 +768,11 @@ class PartitionForMultiFPGA(Transformation):
             # We have to cast to int here, because the solver returns a float
             # And if qonnx set_nodeattr sees a float in an int field, it sets it
             # to 0, regardless of the floats value
-            log.info(f"Mapping node {node.name} to device {int(mapping[i])}")
             set_device_id(node, int(mapping[i]))
+
+        # Report results
+        # TODO: This currently does not store the mapping in the log. This is
+        # TODO: currently done via solution.txt, which should be put into the output_dir
+        self.show_mapping(model, mapping)
+
         return model, False
