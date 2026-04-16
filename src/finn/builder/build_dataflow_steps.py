@@ -123,12 +123,11 @@ from finn.transformation.fpgadataflow.set_fifo_depths import (
 from finn.transformation.fpgadataflow.set_folding import SetFolding
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.transformation.fpgadataflow.synth_ooc import SynthOutOfContext
-from finn.transformation.fpgadataflow.vitis_build import BuildAllXOs, MultiVitisBuild, VitisBuild
 from finn.transformation.fpgadataflow.transpose_decomposition import (
     InferInnerOuterShuffles,
     ShuffleDecomposition,
 )
-from finn.transformation.fpgadataflow.vitis_build import VitisBuild
+from finn.transformation.fpgadataflow.vitis_build import BuildAllXOs, MultiVitisBuild, VitisBuild
 from finn.transformation.fpgadataflow.vivado_power_estimation import VivadoPowerEstimation
 from finn.transformation.general import ApplyConfig
 from finn.transformation.move_reshape import RemoveCNVtoFCFlatten
@@ -138,9 +137,8 @@ from finn.transformation.streamline import Streamline
 from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.basic import get_liveness_threshold_cycles, get_rtlsim_trace_depth
-from finn.util.exception import FINNConfigurationError, FINNMultiFPGAConfigError
 from finn.util.config import extract_model_config_consolidate_shuffles, extract_model_config_to_json
-from finn.util.exception import FINNUserError
+from finn.util.exception import FINNConfigurationError, FINNMultiFPGAConfigError, FINNUserError
 from finn.util.execution import execute_parent
 from finn.util.logging import log
 
@@ -1239,10 +1237,12 @@ def step_build_xos(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrappe
     the vitis_xo metadata prop of the submodel."""
     for node in model.graph.node:
         if node.op_type != "StreamingDataflowPartition":
-            raise FINNConfigurationError(f"Cannot build XO file: {node.name} is "
-                                         f"not a StreamingDataflowPartition!")
+            raise FINNConfigurationError(
+                f"Cannot build XO file: {node.name} is " f"not a StreamingDataflowPartition!"
+            )
     model = model.transform(BuildAllXOs(cfg))
     return model
+
 
 def step_vivado_power_estimation(model: ModelWrapper, cfg: DataflowBuildConfig):
     """Run Vivado power estimation on the stitched IP after OOC synthesis."""
@@ -1394,6 +1394,7 @@ build_dataflow_step_lookup = {
     "step_out_of_context_synthesis": step_out_of_context_synthesis,
     "step_vivado_power_estimation": step_vivado_power_estimation,
     "step_synthesize_bitfile": step_synthesize_bitfile,
+    "step_build_xos": step_build_xos,
     "step_multifpga_synthesis": step_multifpga_synthesis,
     "step_deployment_package": step_deployment_package,
 }

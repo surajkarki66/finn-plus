@@ -9,19 +9,27 @@ from qonnx.transformation.base import Transformation
 
 from finn.transformation.fpgadataflow.multifpga_network import AuroraNetworkMetadata
 from finn.util.basic import make_build_dir
-from finn.util.deps import get_deps_path
+from finn.util.exception import FINNMultiFPGAConfigError
+from finn.util.settings import get_settings
 
 
 class PrepareAuroraFlow(Transformation):
     """Use the AuroraNetworkMetadata to package all necessary kernels. Sets the aurora_storage
     metadata prop of the model to point to the directory containing the object files. This does
-    nothing else."""
+    nothing else.
+    """
 
     def __init__(self) -> None:
+        """Prepare AuroraFlow."""
         super().__init__()
         self.aurora_storage = Path(make_build_dir("aurora_storage_")).absolute()
-        self.aurora_path = get_deps_path() / "AuroraFlow"
-        assert self.aurora_path.exists(), f"Could not find AuroraFlow at {self.aurora_path}"
+        self.aurora_path = get_settings().finn_deps / "AuroraFlow"
+        if not self.aurora_path.exists():
+            raise FINNMultiFPGAConfigError(
+                "Could not find AuroraFlow in FINN+'s dependency "
+                "directory. Are all dependencies downloaded "
+                "and installed?"
+            )
 
     def package_single(self, args: str, kernel_xo: str, save_as_xo: str) -> Path:
         """Package a single aurora core and put it into the given location with the given name.
