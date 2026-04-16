@@ -11,7 +11,7 @@ from finn.transformation.fpgadataflow.multifpga_utils import (
     _get_split_nodes,
     _get_start_nodes,
     _split_nodes_from,
-    get_inseperable_nodes,
+    get_inseparable_nodes,
 )
 
 
@@ -160,7 +160,7 @@ def test_inseperable_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
     indices = {}
     for i, node in enumerate(model.graph.node):
         indices[node.name] = i
-    found_splits = get_inseperable_nodes(model)
+    found_splits = get_inseparable_nodes(model)
     assert len(found_splits) == len(expected_splits)
     for expected_split_list in expected_splits:
         found_and_correct = False

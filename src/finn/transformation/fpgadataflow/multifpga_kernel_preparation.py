@@ -1,4 +1,5 @@
-import os
+"""Prepare communication kernels for usage (e.g. packaging IP cores)."""
+
 import shlex
 import shutil
 import subprocess
@@ -9,7 +10,7 @@ from qonnx.transformation.base import Transformation
 
 from finn.transformation.fpgadataflow.multifpga_network import AuroraNetworkMetadata
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNMultiFPGAConfigError
+from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
 from finn.util.settings import get_settings
 
 
@@ -40,19 +41,31 @@ class PrepareAuroraFlow(Transformation):
         >>> output.exists()
         True
         """
+        # Copy the AuroraFlow project into a build directory
         temp_dir = Path(make_build_dir("aurora_temp_builddir_"))
         shutil.copytree(self.aurora_path, temp_dir, dirs_exist_ok=True)
+
+        # Create the aurora kernel xo file
         subprocess.run(shlex.split(f"make aurora {args}"), cwd=temp_dir, stdout=subprocess.DEVNULL)
         p_origin = temp_dir / kernel_xo
-        assert p_origin.exists(), f"Packaging AuroraFlow failed. Check logs in  {temp_dir}"
+        if not p_origin.exists():
+            raise FINNMultiFPGAError(
+                f"Packaging AuroraFlow failed. Expected "
+                f"kernel at path {p_origin}. Check logs in {temp_dir}"
+            )
+
+        # Rename / Move the created xo to the given target
         p_target = self.aurora_storage / save_as_xo
         shutil.move(p_origin, p_target)
-        assert p_target.exists(), f"Move failed. Target was: {p_target}"
+        if not p_target.exists():
+            raise FINNMultiFPGAError(f"Failed to move aurora xo from {p_origin} to {p_target}!")
+
         # We can now safely delete the temp build dir
         shutil.rmtree(temp_dir)
         return p_target.absolute()
 
     def package_all_from_metadata(self, metadata: AuroraNetworkMetadata) -> None:
+        """Use the passed metadata to package all required Aurora kernels at once."""
         # List all auroras that need to be packaged
         auroras = []
         for device in metadata.table.keys():
@@ -69,11 +82,15 @@ class PrepareAuroraFlow(Transformation):
             self.package_single("", origin, target)
 
         # Package all Aurora kernels concurrently
-        with ThreadPoolExecutor(max_workers=int(os.environ["NUM_DEFAULT_WORKERS"])) as tpe:
+        with ThreadPoolExecutor(max_workers=get_settings().num_default_workers) as tpe:
             tpe.map(_package_aurora, auroras)
             tpe.shutdown()
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+        """Package all aurora kernels required by the model in parallel.
+        Sets the "aurora_storage" metadata prop to the path where the xo files
+        are stored.
+        """
         metadata = AuroraNetworkMetadata(model)
         model.set_metadata_prop("aurora_storage", str(self.aurora_storage.absolute()))
         self.package_all_from_metadata(metadata)

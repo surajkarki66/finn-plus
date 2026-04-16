@@ -1,3 +1,5 @@
+"""Partitioners for Multi-FPGA usage."""
+
 from __future__ import annotations
 
 import mip
@@ -17,7 +19,7 @@ from finn.builder.build_dataflow_config import (
 from finn.transformation.fpgadataflow.multifpga_utils import (
     available_resources,
     get_estimated_model_resources,
-    get_inseperable_nodes,
+    get_inseparable_nodes,
     is_single_in_out_model,
     set_device_id,
 )
@@ -42,20 +44,21 @@ class Partitioner(ABC):
     however the partitioner from finn-experimental should be relativly easy to swap in
     if needed.
 
-    Parameters:
+    Parameters
+    ----------
+        inseperable_nodes: Nodes that need to stay together because they are in a split
 
-    inseperable_nodes: Nodes that need to stay together because they are in a split
-
-    considered_resources: What types of resources are used in the objective
-        function to determine load.
+        considered_resources: What types of resources are used in the objective
+            function to determine load.
 
     To implement a custom partitioner, currently one needs to implement the following methods:
     __init__
     _solve
     _write_solution_data
-    _get_resource_use_by_device"""
+    _get_resource_use_by_device
+    """  # noqa
 
-    def __init__(
+    def __init__(  # noqa
         self,
         strategy: PartitioningStrategy,
         topology: MFTopology | None,
@@ -116,7 +119,7 @@ class Partitioner(ABC):
 
     @abstractmethod
     def _solve(self, solver_timeout: int) -> dict[int, Device] | None:
-        """The real solving function. Should be called indirectly via solve()"""
+        """The real solving function. Should be called indirectly via solve()."""  # noqa
 
     @abstractmethod
     def _write_solution_data(self, p: Path, node_index_name_map: dict[int, str] | None) -> None:
@@ -132,7 +135,8 @@ class Partitioner(ABC):
         """Try to optimize the objective function. If no feasible solution is found
         return None, otherwise return a mapping of nodes to their device. After trying
         to solve, creates a snapshot description of the model in a temp build dir, as well
-        as a solution in the same dir, if one was found"""
+        as a solution in the same dir, if one was found.
+        """
         result = self._solve(solver_timeout)
         self._create_model_snapshot(snapshot_path)
         if result is not None:
@@ -142,7 +146,8 @@ class Partitioner(ABC):
     def _create_model_snapshot(self, p: Path) -> None:
         """Create a snapshot of all model variables and conditions in a temporary
         build dir. This is useful for debugging and checking on why a model is
-        infeasible for example."""
+        infeasible for example.
+        """
         constraints = ""
         for constr in self.model.constrs:
             constraints += f"\t{constr}\n"
@@ -176,14 +181,15 @@ class Partitioner(ABC):
     def get_resource_use_by_device(self) -> dict[int, dict[str, Any]] | None:
         """Return the resources used by a device. This only works if the optimization goal was
         resource usage. If no optimization was done, the dict will contain None's
-        Actual implementation is left to the subclasses."""
+        Actual implementation is left to the subclasses.
+        """
         if self.strategy == PartitioningStrategy.RESOURCE_UTILIZATION:
             return self._get_resource_use_by_device()
         return None
 
 
-class AuroraPartitioner(Partitioner):
-    def __init__(
+class AuroraPartitioner(Partitioner):  # noqa
+    def __init__(  # noqa
         self,
         network_ports_per_device: int,
         strategy: PartitioningStrategy,
@@ -640,7 +646,7 @@ class PartitionForMultiFPGA(Transformation):
                 "The model has either more than 1 input or more than 1 output nodes. "
                 "This might cause issue during partitioning. Please check your ONNX file."
             )
-        inseperable_nodes = get_inseperable_nodes(model)
+        inseperable_nodes = get_inseparable_nodes(model)
 
         # Number of devices to partition to
         if self.cfg.partitioning_configuration.num_fpgas < 0:

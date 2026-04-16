@@ -1,11 +1,13 @@
+"""Create SDPs for Multi-FPGA usage."""
+
 from __future__ import annotations
 
 import yaml
 from pathlib import Path
-from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveUniqueNodeNames
+from typing import TYPE_CHECKING
 
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
 from finn.transformation.fpgadataflow.multifpga_utils import (
@@ -15,18 +17,22 @@ from finn.transformation.fpgadataflow.multifpga_utils import (
 )
 from finn.util.basic import make_build_dir
 
+if TYPE_CHECKING:
+    from qonnx.core.modelwrapper import ModelWrapper
+
 
 class CreateMultiFPGAStreamingDataflowPartition(Transformation):
     """Operates like CreateDataflowPartition but using the nodes device id as a key. Additionally,
     two non consecutive instances on the same device create
-    different SDPs (think for example about a there-and-back topology)
+    different SDPs (think for example about a there-and-back topology).
 
-    IMPORTANT: Currently this assumes that every branch is split and joined on the same device"""
+    IMPORTANT: Currently this assumes that every branch is split and joined on the same device.
+    """
 
-    def __init__(self) -> None:
+    def __init__(self) -> None:  # noqa
         super().__init__()
 
-    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         current_device = get_device_id(model.graph.node[0])
         current_max = 0
         mapping = {}
