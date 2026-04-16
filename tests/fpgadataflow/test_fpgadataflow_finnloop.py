@@ -683,9 +683,10 @@ def prepare_loop_ops_for_ipgen_step2(node, fpga_part, clk_ns):
 @pytest.mark.parametrize("eltw_param_dtype", ["INT8", "FLOAT32"])
 # tail node
 @pytest.mark.parametrize("tail_node", [False, True])
+@pytest.mark.fpgadataflow
 @pytest.mark.vivado
 @pytest.mark.slow
-# Note: fpgadataflow marker removed to prevent CI auto-discovery
+@pytest.mark.skip(reason="Intended only for manual debugging")
 def test_fpgadataflow_finnloop_manual(
     dim, iteration, elemwise_optype, rhs_shape, eltw_param_dtype, tail_node
 ):
