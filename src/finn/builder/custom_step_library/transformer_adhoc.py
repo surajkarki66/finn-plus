@@ -46,10 +46,10 @@ from finn.transformation.fpgadataflow.set_folding import (
 )
 from finn.transformation.general import ApplyConfig
 from finn.transformation.move_reshape import RemoveCNVtoFCFlatten
+from finn.transformation.streamline.absorb import AbsorbConsecutiveTransposes
 
 # FINN Streamlining transformations still required during hardware conversion
-from finn.transformation.streamline import RoundAndClipThresholds
-from finn.transformation.streamline.absorb import AbsorbConsecutiveTransposes
+from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.exception import FINNUserError
 
 if TYPE_CHECKING:
