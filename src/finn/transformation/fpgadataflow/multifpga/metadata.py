@@ -66,22 +66,25 @@ class NetworkMetadata(ABC):
                 )
 
     @abstractmethod
-    def __getitem__(self, key: Any) -> Any:  # noqa
-        pass
+    def __getitem__(self, key: Any) -> Any:
+        """Getter base method for internal data."""
+        pass  # noqa
 
     @abstractmethod
-    def __setitem__(self, key: Any, value: Any) -> Any:  # noqa
-        pass
+    def __setitem__(self, key: Any, value: Any) -> Any:
+        """Setter base method for internal data."""
+        pass  # noqa
 
     @abstractmethod
-    def add_connection(  # noqa
+    def add_connection(
         self,
         sender_device: Device,
         sender_node: NodeName,
         receiver_device: Device,
         receiver_node: NodeName,
     ) -> None:
-        pass
+        """Add a connection to the metadata."""
+        pass  # noqa
 
     def save(self, p: Path) -> None:
         """Save the internal data as human readable YAML to the given path."""
@@ -127,7 +130,8 @@ class AuroraNetworkMetadata(NetworkMetadata):
         super().__init__(load_from)
         self.ports_per_device = ports_per_device
 
-    def __getitem__(self, key: tuple) -> Any | None:  # noqa
+    def __getitem__(self, key: tuple) -> Any | None:
+        """Get the specified data from the internal table."""
         if type(key) is int:
             return self.table[key]
         elif type(key) is tuple:  # noqa
@@ -137,7 +141,8 @@ class AuroraNetworkMetadata(NetworkMetadata):
             return data
         return None
 
-    def __setitem__(self, key: Any, value: Any) -> None:  # noqa
+    def __setitem__(self, key: Any, value: Any) -> None:
+        """Set the specified data in the internal table."""
         if type(key) is int:
             self.table[key] = value
         elif type(key) is tuple:
@@ -154,6 +159,7 @@ class AuroraNetworkMetadata(NetworkMetadata):
         other_node: NodeName,
         direction: DataDirection,
     ) -> None:
+        """Add a single connection to the table (unidirectional)."""
         found_free_spot = False
         for aurora_table in self.table[on_device].values():
             if aurora_table["partner"] == other_device and aurora_table[direction] is None:
@@ -355,8 +361,10 @@ class CreateChainNetworkMetadata(CreateNetworkMetadata):
                     )
 
 
-class CreateReturnChainNetworkMetadata(CreateNetworkMetadata):  # noqa
-    pass
+class CreateReturnChainNetworkMetadata(CreateNetworkMetadata):
+    """Create a network with a chain that returns across the devices."""
+
+    pass  # noqa
 
 
 class AssignNetworkMetadata(Transformation):

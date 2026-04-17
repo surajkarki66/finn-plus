@@ -7,7 +7,7 @@ from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
 
-from finn.builder.build_dataflow_config import DataflowBuildConfig
+from finn.builder.build_dataflow_config import DataflowBuildConfig, MFVerbosity
 from finn.transformation.fpgadataflow.multifpga.metadata import AuroraNetworkMetadata
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
@@ -31,6 +31,7 @@ class PrepareAuroraFlow(Transformation):
             raise FINNMultiFPGAConfigError(
                 "Cannot run AuroraFlow preparation on " "a run without partitioning configuration!"
             )
+        self.verbosity = cfg.partitioning_configuration.verbosity
         self.make_args = " ".join(
             f"{k}={v}"
             for k, v in cfg.partitioning_configuration.communication_kernel_arguments.items()
@@ -53,14 +54,17 @@ class PrepareAuroraFlow(Transformation):
         >>> output.exists()
         True
         """
+        if self.verbosity == MFVerbosity.HIGH:
+            log.info(f"Packaging AuroraFlow core ({kernel_xo} -> {save_as_xo})")
+
         # Copy the AuroraFlow project into a build directory
         temp_dir = Path(make_build_dir("aurora_temp_builddir_"))
         shutil.copytree(self.aurora_path, temp_dir, dirs_exist_ok=True)
 
         # Create the aurora kernel xo file
-        if self.make_args != "":
+        if self.make_args != "" and self.verbosity.value > MFVerbosity.LOW.value:
             log.info(
-                f"Packaging AuroraFlow kernel with additional " f"make arguments: {self.make_args}"
+                f"Packaging AuroraFlow kernel with additional make arguments: {self.make_args}"
             )
         result = subprocess.run(
             shlex.split(f"make aurora_hw {args} {self.make_args}"),
@@ -98,13 +102,16 @@ class PrepareAuroraFlow(Transformation):
             # returns the kernel names in the right order
             auroras += enumerate(metadata.get_aurora_kernels(device))
 
-        # Package a single aurora
         def _package_aurora(d: tuple[int, str]) -> None:
+            """Package a single aurora core with the given index and name."""
             i, aurora_name = d
             origin = f"aurora_flow_hw_{i}.xo"
             target = f"{aurora_name}.xo"
             # TODO: args?
             self.package_single(f"PART={self.part} PLATFORM={self.platform}", origin, target)
+
+        if self.verbosity == MFVerbosity.HIGH:
+            log.info(f"Packaging kernels with PART={self.part} and PLATFORM={self.platform}")
 
         # Package all Aurora kernels concurrently
         futures: list[Future] = []

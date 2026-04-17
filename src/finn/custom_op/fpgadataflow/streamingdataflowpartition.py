@@ -1,3 +1,5 @@
+"""Meta containers for smaller dataflow graphs."""
+
 # Copyright (c) 2020 Xilinx, Inc.
 # All rights reserved.
 #
@@ -38,7 +40,8 @@ class StreamingDataflowPartition(CustomOp):
     """Class that corresponds to the meta/container node StreamingDataflowPartition
     which is a placeholder for a group of fpgadataflow nodes that have been separated
     out into a FINN-ONNX model of its own. Note that is does not produce any HLS or
-    bitfile by itself."""
+    bitfile by itself.
+    """
 
     def get_nodeattr_types(self):
         return {

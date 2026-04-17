@@ -18,6 +18,7 @@ from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     MFCommunicationKernel,
     MFTopology,
+    MFVerbosity,
     PartitioningStrategy,
 )
 from finn.transformation.fpgadataflow.multifpga.utils import (
@@ -34,6 +35,7 @@ from finn.util.platforms import platforms
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
+
     from finn.transformation.fpgadataflow.multifpga.metadata import Device
 
 
@@ -69,6 +71,7 @@ class Partitioner(ABC):
         nodes: int,
         inseperable_nodes: list[list[int]],
         resources_per_device: dict,
+        verbosity: MFVerbosity,
         resource_estimates: dict | None = None,
         considered_resources: list[str] | None = None,
         network_ports_per_device: int = 2,
@@ -87,6 +90,7 @@ class Partitioner(ABC):
             if considered_resources is None
             else considered_resources
         )
+        self.verbosity = verbosity
         self.device_count = devices
         self.node_count = nodes
         self.network_ports_per_device = network_ports_per_device
@@ -100,16 +104,17 @@ class Partitioner(ABC):
             )  # See finn-plus issue #67
             self.model = Model(solver_name=mip.CBC)
         self.latest_snapshot_path: Path | None = None
-        log.info("Partitioner initialized.")
-        log.info(f"Strategy: {self.strategy.name}")
-        if self.topology is not None:
-            log.info(f"Topology: {self.topology.name}")
-        log.info(f"Devices: {self.device_count}")
-        log.info(f"Nodes/Layers: {self.node_count}")
-        log.info(f"Considered resources: {self.considered_resources}")
-        log.info(f"Ideal / Max utilization: {self.ideal_util} / {self.max_utilization}")
-        log.info(f"Groups of inseperable nodes: {len(self.inseperable_nodes)}")
-        log.info(f"Network ports per device: {self.network_ports_per_device}")
+        if self.verbosity.value > MFVerbosity.NONE.value:
+            log.info(f"Paritioner starting. Selected strategy: {self.strategy.name}")
+        if self.verbosity.value > MFVerbosity.LOW.value:
+            if self.topology is not None:
+                log.info(f"Topology: {self.topology.name}")
+            log.info(f"Devices: {self.device_count}")
+            log.info(f"Nodes/Layers: {self.node_count}")
+            log.info(f"Considered resources: {self.considered_resources}")
+            log.info(f"Ideal / Max utilization: {self.ideal_util} / {self.max_utilization}")
+            log.info(f"Groups of inseperable nodes: {len(self.inseperable_nodes)}")
+            log.info(f"Network ports per device: {self.network_ports_per_device}")
 
         if (self.strategy == PartitioningStrategy.RESOURCE_UTILIZATION) and (
             None in [self.max_utilization, self.ideal_util, self.resource_estimates]
@@ -178,8 +183,9 @@ class Partitioner(ABC):
             f.write(content)
 
     @abstractmethod
-    def _get_resource_use_by_device(self) -> dict[int, dict[str, Any]] | None:
-        pass
+    def _get_resource_use_by_device(self) -> dict[int, dict[str, Any]]:
+        """Get resources used by the device."""
+        pass  # noqa
 
     def get_resource_use_by_device(self) -> dict[int, dict[str, Any]] | None:
         """Return the resources used by a device. This only works if the optimization goal was
@@ -746,13 +752,13 @@ class PartitionForMultiFPGA(Transformation):
             solution_path=logdir / "solution.txt",
             node_index_name_map=index_name_map,
         )
-        if mapping is None and partitioner.latest_snapshot_path is not None:
-            print(
-                f"Model solver failed. Snapshot can be "
-                f"found in {partitioner.latest_snapshot_path.absolute()}"
-            )
 
         if mapping is None:
+            if partitioner.latest_snapshot_path is not None:
+                log.error(
+                    f"Model solver failed. Snapshot can be "
+                    f"found in {partitioner.latest_snapshot_path.absolute()}"
+                )
             raise FINNMultiFPGAConfigError(
                 f"No feasible partitioning solution could be found for "
                 f"the given model and configuration. If you are sure "
@@ -772,6 +778,7 @@ class PartitionForMultiFPGA(Transformation):
         # Report results
         # TODO: This currently does not store the mapping in the log. This is
         # TODO: currently done via solution.txt, which should be put into the output_dir
-        self.show_mapping(model, mapping)
+        if self.cfg.partitioning_configuration.verbosity.value > MFVerbosity.NONE.value:
+            self.show_mapping(model, mapping)
 
         return model, False

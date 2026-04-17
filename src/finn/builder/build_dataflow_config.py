@@ -167,7 +167,18 @@ class VerificationStepType(str, Enum):
     PASSES_FRONTEND = "passes_frontend"
 
 
+class MFVerbosity(Enum):
+    """Verbosity levels for Multi-FPGA."""
+
+    NONE = 0
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+
+
 class PartitioningStrategy(str, Enum):
+    """Multi-FPGA Partitioning strategy for the solver to use."""
+
     # Strategy to partition based on the estimated resource
     # utilization of the layers
     RESOURCE_UTILIZATION = "resource_utilization"
@@ -179,10 +190,14 @@ class PartitioningStrategy(str, Enum):
 
 
 class MFCommunicationKernel(str, Enum):
+    """Communication kernels for Multi-FPGA usage."""
+
     AURORA = "aurora"
 
 
 class MFTopology(str, Enum):
+    """Topology for Multi-FPGA use."""
+
     CHAIN = "chain"
     RETURNCHAIN = "returnchain"
     CIRCLE = "circle"
@@ -190,6 +205,10 @@ class MFTopology(str, Enum):
 
 @dataclass
 class PartitioningConfiguration:
+    """Configuration dataclass for Multi-FPGA. As soon as such a configuration is
+    set in the BuildDataflowConfig, FINN+ automatically switches to Multi-FPGA.
+    """
+
     # The number of FPGAs to use for Multi-FPGA
     # TODO: Allow -1, etc.
     num_fpgas: int = 0
@@ -239,6 +258,10 @@ class PartitioningConfiguration:
     # 512 GB node, you can run roughly 4 Synthesis in parallel.
     # Defaults to 1, in order not to crash local computers with OOM errors
     parallel_synthesis_workers: int = 1
+
+    # Since the Multi-FPGA flow contains a large number of extra steps (+ information), it benefits
+    # from a verbosity setting that is independent of the general FINN one.
+    verbosity: MFVerbosity = MFVerbosity.MEDIUM
 
 
 #: List of steps that will be run as part of the standard dataflow build, in the

@@ -1,3 +1,5 @@
+"""Build a Vitis accelerator from a completed FINN design."""
+
 # Copyright (c) 2020, Xilinx, Inc.
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 # All rights reserved.
@@ -27,9 +29,6 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 from __future__ import annotations
-from finn.util.settings import get_settings
-
-"""Transformation to build FINN dataflow designs for Alveo using Vitis."""
 
 import json
 import os
@@ -73,6 +72,7 @@ from finn.util.exception import (
     FINNVitisLinkConfigError,
 )
 from finn.util.logging import log
+from finn.util.settings import get_settings
 
 from . import templates
 
@@ -373,6 +373,7 @@ class VitisLinkConfiguration:
         self.sc[cu_sender].append(cu_receiver)
 
     def add_sp(self, cu_port_name: str, mem_type: str) -> None:
+        """Add an SP assignment."""
         self.sp[cu_port_name] = mem_type
 
     def add_connect(self, a: str, b: str) -> None:
@@ -380,6 +381,7 @@ class VitisLinkConfiguration:
         self.connects.append((a, b))
 
     def add_vivado_line(self, line: str) -> None:
+        """Add a custom line to the vivado section."""
         self.vivado_section += line
 
     def add_xo(self, xo_files: Path | list[Path]) -> None:
@@ -531,6 +533,8 @@ class VitisLinkConfiguration:
 
 
 class MultiVitisLink(Transformation):
+    """Vitis linking transformation explicitly for Multi-FPGA."""
+
     # TODO: Pass args explicitly, not the whole config
     def __init__(self, cfg: DataflowBuildConfig) -> None:
         super().__init__()
