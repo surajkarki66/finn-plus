@@ -7,8 +7,9 @@ from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from random import randint
+from typing import cast
 
-from finn.transformation.fpgadataflow.multifpga_create_sdp import (
+from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
     get_device_id,
 )
@@ -18,6 +19,10 @@ from tests.fpgadataflow.test_set_folding import make_multi_fclayer_model
 
 # TODO: Tests for this util function
 def equal_device_assignment(devices: int, nodes: int) -> list[int]:
+    """Return the number of nodes per device (device==index). If the number of nodes
+    cannot be divided by the number of devices, the leftover nodes are assigned to a random
+    device.
+    """
     leftover = nodes % devices
     nodes_used = nodes - leftover
     temp = []
@@ -28,7 +33,9 @@ def equal_device_assignment(devices: int, nodes: int) -> list[int]:
 
 
 def random_device_assignment(devices: int, nodes: int) -> list[int]:
-    """Randomly assign number of nodes to devices"""
+    """Randomly assign nodes to devices until no nodes are left. After being assigned
+    a number of nodes, the device is removed from the pool of candidates.
+    """
     assert nodes >= devices
     nodes_left = nodes
     temp = [0] * devices
@@ -46,13 +53,16 @@ def random_device_assignment(devices: int, nodes: int) -> list[int]:
     return temp
 
 
-def create_sdp_ready_model(
+def create_sdp_ready_model_no_branches(
     node_count: int,
     device_count: int,
     assignment_type: str,
     device_assignment: str,
     shuffle_devices: bool = False,
 ) -> ModelWrapper:
+    """Create a simple SDP ready model without branches. The device_id is
+    set according to the passed assignment arguments.
+    """
     # Create a simple chained model without branches
     model = make_multi_fclayer_model(
         3, DataType["BINARY"], DataType["BINARY"], DataType["BINARY"], node_count
@@ -95,6 +105,9 @@ def create_sdp_ready_model(
 @pytest.mark.parametrize("devices", [5, 10, 1, 10, 2])
 @pytest.mark.parametrize("nodes", [20, 50, 10, 10, 2])
 def test_random_device_assign_util(devices: int, nodes: int) -> None:
+    """Test that the random device assignment function does not accept more devices than
+    nodes, and that the assignment itself works.
+    """
     if devices > nodes:
         with pytest.raises(AssertionError):
             random_device_assignment(devices, nodes)
@@ -118,8 +131,9 @@ def test_sdp_creation(
     device_assignment: str,
     shuffle_devices: bool,
 ) -> None:
+    """Test that creating SDPs based on their device id works as expected."""
     device_count, node_count = device_node_combinations
-    model = create_sdp_ready_model(
+    model = create_sdp_ready_model_no_branches(
         node_count, device_count, assignment_type, device_assignment, shuffle_devices
     )
     devices_counted = len({get_device_id(node) for node in model.graph.node})
@@ -145,7 +159,9 @@ def test_sdp_creation(
     partitioned_order = []
     order = [n.name for n in original_model.graph.node]
     for node in model.graph.node:
-        submodel = ModelWrapper(getCustomOp(node).get_nodeattr("model"))
+        submodel_path = getCustomOp(node).get_nodeattr("model")
+        assert submodel_path is not None
+        submodel = ModelWrapper(cast("str", submodel_path))
         for snode in submodel.graph.node:
             partitioned_order.append(snode.name)
     assert partitioned_order == order
@@ -157,7 +173,9 @@ def test_sdp_creation(
 
     # Check that all submodels' nodes have the same device ID
     for node in model.graph.node:
-        submodel = ModelWrapper(getCustomOp(node).get_nodeattr("model"))
+        submodel_path = getCustomOp(node).get_nodeattr("model")
+        assert submodel_path is not None
+        submodel = ModelWrapper(cast("str", submodel_path))
         devices_found = [get_device_id(n) for n in submodel.graph.node]
         assert len(set(devices_found)) == 1
 

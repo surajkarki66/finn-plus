@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.util.cleanup import cleanup as qonnx_cleanup
+from testing_util.test import get_test_model
 from typing import TYPE_CHECKING
 
 from finn.builder import build_dataflow_steps
@@ -22,11 +23,10 @@ from finn.builder.build_dataflow_config import (
     PartitioningStrategy,
     default_build_dataflow_steps,
 )
-from finn.transformation.fpgadataflow.multifpga_partitioner import AuroraPartitioner
-from finn.transformation.fpgadataflow.multifpga_utils import available_resources
+from finn.transformation.fpgadataflow.multifpga.partitioner import AuroraPartitioner
+from finn.transformation.fpgadataflow.multifpga.utils import available_resources
 from finn.util import platforms
 from finn.util.exception import FINNError
-from finn.util.test import get_test_model
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -37,7 +37,9 @@ def custom_build(name: str, random_prefix: bool) -> Generator[tuple[Path, Path, 
     """Create a directory in FINN_BUILD_DIR for custom builds.
     Temporarily also set the FINN_BUILD_DIR environment variable to this new dir.
     Can be used to contain a complete build. Returns the new directory, the
-    temp directory and the output directory"""
+    temp directory and the output directory.
+    """
+    raise NotImplementedError("This should be implemented by the frontend PR. TODO: Check.")
     origin_path = Path(os.environ["FINN_BUILD_DIR"])
     if not origin_path.exists():
         origin_path.mkdir(parents=True)
@@ -96,8 +98,8 @@ def test_aurora_partition_solution_found(
     ideal_util: float,
 ) -> None:
     """Test some known model - fpga combinations that should
-    be solveable"""
-
+    be solveable.
+    """
     # TODO: Fix: Certain model types fail during streamlining
 
     typename, wbits, abits, pretrained = model_type
@@ -107,7 +109,7 @@ def test_aurora_partition_solution_found(
     )
 
     with custom_build(test_dir_identifier, True) as dirs:
-        root, temps, out = dirs
+        root, _, out = dirs
         model_onnx_path = Path(root) / "fc.onnx"
         fc = get_test_model(typename, wbits, abits, pretrained)
         ishape = (1, 1, 28, 28)
@@ -169,13 +171,13 @@ def test_aurora_partitioning_pure_resource_optimize(
     inseperable_nodes: list[int],
     network_ports: int,
 ) -> None:
-    """Test partitioning with the Aurora model based on constructed data instead of real models"""
+    """Test partitioning with the Aurora model based on constructed data instead of real models."""
     dist_type = distribution.split("-")[0]
     dist_res = distribution.split("-")[1]
     resource_estimates = {}
     for node in range(nodes):
         resource_estimates[node] = dict(
-            zip(considered_resources, [0 for _ in range(len(considered_resources))])
+            zip(considered_resources, [0 for _ in range(len(considered_resources))], strict=True)
         )
         if dist_type == "equal":
             resource_estimates[node][dist_res] = distribution_args["level"]
@@ -186,7 +188,7 @@ def test_aurora_partitioning_pure_resource_optimize(
         f"_{max_util}_{ideal_util}_ins{len(inseperable_nodes)}"
     )
     with custom_build(test_dir_identifier, True) as dirs:
-        root, temps, out = dirs
+        root, _, _ = dirs
         res_per_device = available_resources(platforms.platforms[board](), considered_resources)
         part = AuroraPartitioner(
             network_ports_per_device=network_ports,
@@ -266,10 +268,10 @@ def test_enforce_utilization_limit(
     network_ports: int,
     ideal_max_util: tuple[float, float],
 ) -> None:
-    """Test that the partitioner upholds the resource utilization limit"""
-    test_dir_identifier = f"test_util_limit_{platform.__class__.__name__}" f"_{topology.name}"
+    """Test that the partitioner upholds the resource utilization limit."""
+    test_dir_identifier = f"test_util_limit_{platform.__class__.__name__}_{topology.name}"
     with custom_build(test_dir_identifier, True) as dirs:
-        root, temps, out = dirs
+        root, _, _ = dirs
         diff = 0.05
         max_util = ideal_max_util[1]
         ideal_util = ideal_max_util[0]
@@ -315,14 +317,13 @@ def test_enforce_utilization_limit(
 def test_impossible_inseperable_nodes(
     devices: int, nodes: int, network_ports: int, topology: MFTopology, platform: platforms.Platform
 ) -> None:
-    """Check that impossible device node combinations are caught"""
-
+    """Check that impossible device node combinations are caught."""
     # TODO: Check all conditions that can fail in the partitioner with regards to
     # inseperable groups
 
     test_dir_identifier = f"test_all_inseperable_{devices}"
     with custom_build(test_dir_identifier, True) as dirs:
-        root, temps, out = dirs
+        root, _, _ = dirs
         max_util = 0.9
         ideal_util = 0.8
         considered_resources = ["LUT", "FF", "DSP", "BRAM_18K"]

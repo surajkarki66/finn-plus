@@ -1,13 +1,12 @@
 import pytest
 
-import yaml
 from pathlib import Path
-from test_multifpga_sdp_creation import create_sdp_ready_model
+from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
 
-from finn.transformation.fpgadataflow.multifpga_create_sdp import (
+from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
-from finn.transformation.fpgadataflow.multifpga_network import (
+from finn.transformation.fpgadataflow.multifpga.metadata import (
     AssignNetworkMetadata,
     AuroraNetworkMetadata,
     CreateChainNetworkMetadata,
@@ -35,9 +34,10 @@ def test_aurora_chain_metadata(
     communication_type: type[CreateNetworkMetadata],
     shuffle_devices: bool,
 ) -> None:
+    """Test that creating the metadata for a model in the Aurora + Chain combination works."""
     device_count, node_count = device_node_combinations
     # TODO: Not ideal, better pass an own, self constructed model
-    model = create_sdp_ready_model(
+    model = create_sdp_ready_model_no_branches(
         node_count, device_count, assignment_type, assignment_order, shuffle_devices
     )
     model = model.transform(CreateMultiFPGAStreamingDataflowPartition())
@@ -49,6 +49,7 @@ def test_aurora_chain_metadata(
     metadata_path = Path(metadata_path)
     m1 = AuroraNetworkMetadata(load_from=model)
     m2 = AuroraNetworkMetadata(load_from=metadata_path)
+    raise NotImplementedError("Test using 'find_direct_predecessors/successors' instead of index")
     for m in [m1, m2]:
         for i, n1 in enumerate(model.graph.node):
             if i == len(model.graph.node) - 1:

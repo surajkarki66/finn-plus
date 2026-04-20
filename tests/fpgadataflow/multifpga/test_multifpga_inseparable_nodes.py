@@ -6,11 +6,11 @@ import onnx.helper as oh
 from networkx import DiGraph, articulation_points
 from qonnx.core.modelwrapper import ModelWrapper
 
-from finn.transformation.fpgadataflow.multifpga_utils import (
-    _get_end_nodes,
-    _get_split_nodes,
-    _get_start_nodes,
-    _split_nodes_from,
+from finn.transformation.fpgadataflow.multifpga.utils import (
+    _get_end_nodes_nx,
+    _get_split_nodes_nx,
+    _get_start_nodes_nx,
+    _split_nodes_from_nx,
     get_inseparable_nodes,
 )
 
@@ -109,8 +109,10 @@ graphs = {
 def test_find_split_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
     """Test that all splits are found. Check on a networkx graph directly"""
     g, expected_splits = graph_data
-    art_points = list(articulation_points(g.to_undirected())) + _get_end_nodes(g)
-    all_splits = [_split_nodes_from(g, splitter, art_points) for splitter in _get_split_nodes(g)]
+    art_points = list(articulation_points(g.to_undirected())) + _get_end_nodes_nx(g)
+    all_splits = [
+        _split_nodes_from_nx(g, splitter, art_points) for splitter in _get_split_nodes_nx(g)
+    ]
     assert len(expected_splits) == len(all_splits)
     for expected_split_list in expected_splits:
         found_and_correct = False
@@ -122,19 +124,19 @@ def test_find_split_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
         assert found_and_correct, (
             f"Did not find inseperable node list: {expected_split_list}. "
             f"Available lists were: {all_splits}."
-            f" Splitters were: {_get_split_nodes(g)} "
+            f" Splitters were: {_get_split_nodes_nx(g)} "
             f"Cut vertices: {list(articulation_points(g.to_undirected()))}"
         )
 
 
 def test_correct_input_count() -> None:
-    assert len(_get_start_nodes(graphs["two_input_graph"][0])) == 2
-    assert len(_get_end_nodes(graphs["two_input_graph"][0])) == 1
+    assert len(_get_start_nodes_nx(graphs["two_input_graph"][0])) == 2
+    assert len(_get_end_nodes_nx(graphs["two_input_graph"][0])) == 1
 
 
 def test_correct_output_count() -> None:
-    assert len(_get_start_nodes(graphs["two_output_graph"][0])) == 1
-    assert len(_get_end_nodes(graphs["two_output_graph"][0])) == 2
+    assert len(_get_start_nodes_nx(graphs["two_output_graph"][0])) == 1
+    assert len(_get_end_nodes_nx(graphs["two_output_graph"][0])) == 2
 
 
 def test_onnx_to_networkx() -> None:
@@ -173,7 +175,7 @@ def test_inseperable_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
         assert found_and_correct, (
             f"Did not find inseperable node list: {expected_split_list}. "
             f"Available lists were: {found_splits}."
-            f" Splitters were: {_get_split_nodes(g)} "
+            f" Splitters were: {_get_split_nodes_nx(g)} "
             f"Cut vertices: {list(articulation_points(g.to_undirected()))}"
         )
 

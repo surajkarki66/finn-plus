@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-import os
 from pathlib import Path
 from qonnx.core.datatype import DataType
 
@@ -14,7 +13,7 @@ from finn.builder.build_dataflow_config import (
     ShellFlowType,
 )
 from finn.builder.build_dataflow_steps import step_partition_for_multifpga
-from finn.transformation.fpgadataflow.multifpga_partitioner import PartitionForMultiFPGA
+from finn.transformation.fpgadataflow.multifpga.utils import get_estimated_model_resources
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNError
 from tests.fpgadataflow.test_set_folding import make_multi_fclayer_model
@@ -27,10 +26,13 @@ from tests.fpgadataflow.test_set_folding import make_multi_fclayer_model
 def test_multifpga_metadata_info_set_after_partitioning(
     partition_config: PartitioningConfiguration | None,
 ) -> None:
+    """Test whether running partitioning on a config with a PartitioningConfiguration sets the
+    model's 'is_multifpga' flag to True.
+    """
     dt = DataType["BINARY"]
     model = make_multi_fclayer_model(3, dt, dt, dt, 10)
     output_dir = str(make_build_dir("test_multifpga_metadata_info_output_dir"))
-    cfg = DataflowBuildConfig(output_dir, 5.0, [])
+    cfg = DataflowBuildConfig(output_dir=Path(output_dir), synth_clk_period_ns=5.0)
     cfg.partitioning_configuration = partition_config
 
     # TODO: As soon as partitioning move this whole test into the proper partitioning test
@@ -52,7 +54,7 @@ def test_multifpga_metadata_info_set_after_partitioning(
 def test_resource_est_for_all_layers(
     platform: tuple[str, ShellFlowType], num_layers: int, dt: DataType
 ) -> None:
-    """Test that resource estimtates for all layers can be found"""
+    """Test that resource estimtates for all layers can be found."""
     board, shell = platform
     model = make_multi_fclayer_model(3, dt, dt, dt, num_layers)
     output_dir = make_build_dir("test_res_estimation_")
@@ -86,8 +88,7 @@ def test_resource_est_for_all_layers(
         model = build_dataflow_steps.build_dataflow_step_lookup[step](model, cfg)
 
     # Run the resource estimation
-    part = PartitionForMultiFPGA(cfg)
-    estimates = part.gather_resource_utilization(model)
+    estimates = get_estimated_model_resources(model, fpga_part=cfg._resolve_fpga_part())  # noqa
     for node in model.graph.node:
         assert node.name in estimates.keys(), f"No estimate found for layer {node.name}"
         for est in estimates[node.name].values():
@@ -100,13 +101,17 @@ def test_resource_est_for_all_layers(
 
 def test_partition_solution_found() -> None:
     """Test some known model - fpga combinations that should
-    be solveable"""
+    be solveable.
+    """
+    raise NotImplementedError()
 
 
 def test_aurora_partition_valid() -> None:
     """Test known model - fpga combination solutions and check
     that they are valid for constraints that the Aurora
-    Partitioner requires"""
+    Partitioner requires.
+    """
+    raise NotImplementedError()
 
 
 def test_platform_resources() -> None:

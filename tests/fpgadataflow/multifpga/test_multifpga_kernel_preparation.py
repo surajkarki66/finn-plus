@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 
 from pathlib import Path
-from test_multifpga_sdp_creation import create_sdp_ready_model
+from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
 from typing import Any
 
-from finn.transformation.fpgadataflow.multifpga_create_sdp import (
+from finn.transformation.fpgadataflow.multifpga.communication_kernels import PrepareAuroraFlow
+from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
-from finn.transformation.fpgadataflow.multifpga_kernel_preparation import PrepareAuroraFlow
-from finn.transformation.fpgadataflow.multifpga_network import (
+from finn.transformation.fpgadataflow.multifpga.metadata import (
     AssignNetworkMetadata,
     AuroraNetworkMetadata,
     CreateChainNetworkMetadata,
@@ -34,7 +34,7 @@ def test_aurora_packaging_integrated(
     if metadata_creator is CreateChainNetworkMetadata:
         assignment_order = "linear"
 
-    model = create_sdp_ready_model(
+    model = create_sdp_ready_model_no_branches(
         nodes, devices, assignment_type, assignment_order, shuffle_devices
     )
     prepare_aurora = PrepareAuroraFlow()
