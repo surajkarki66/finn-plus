@@ -148,8 +148,8 @@ def verify_step(
         rtlsim_pre_hook: Optional pre-hook function for RTL simulation
     """
     log.info(f"Running verification for {step_name}")
-    verify_out_dir = cfg.output_dir + "/verification_output"
-    intermediate_models_dir = cfg.output_dir + "/intermediate_models"
+    verify_out_dir = cfg.output_dir / "verification_output"
+    intermediate_models_dir = cfg.output_dir / "intermediate_models"
     # Ensure tensor names are sorted and readable for easier debugging
     model = model.transform(SortGraph())
     model = model.transform(GiveUniqueNodeNames())
