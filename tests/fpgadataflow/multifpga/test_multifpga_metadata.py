@@ -1,6 +1,7 @@
 import pytest
 
 from pathlib import Path
+from qonnx.core.modelwrapper import ModelWrapper
 from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
 
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
@@ -15,6 +16,7 @@ from finn.transformation.fpgadataflow.multifpga.metadata import (
     NetworkMetadata,
     get_device_id,
 )
+from finn.util.basic import make_build_dir
 
 
 @pytest.mark.multifpga
