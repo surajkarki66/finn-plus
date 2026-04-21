@@ -28,11 +28,13 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 """End-to-end tests for BNN models on PYNQ platforms."""
-
 import pytest
 
 import itertools
 import numpy as np
+
+from finn.util.exception import FINNSynthesisError
+from finn.util.logging import log
 
 # as of Feb'20 there is a bug that segfaults ONNX shape inference if we
 # import pytorch before onnx, so we make sure to import onnx first
@@ -273,13 +275,13 @@ def measure_top1_accuracy(model_chkpt, dataset, parent_chkpt=None):
     # move from dataset_loader layout to ONNX layout: NHWC -> NCHW
     testx = testx.transpose(0, 3, 1, 2)
     model = load_test_checkpoint_or_skip(model_chkpt)
-    iname = model.graph.input[0].name
-    oname = model.graph.output[0].name
+    iname = model.get_first_global_in()
+    oname = model.get_first_global_out()
     if parent_chkpt is None:
         ishape = model.get_tensor_shape(iname)
     else:
         parent_model = ModelWrapper(parent_chkpt)
-        parent_iname = parent_model.graph.input[0].name
+        parent_iname = parent_model.get_first_global_in()
         ishape = parent_model.get_tensor_shape(parent_iname)
     ok = 0
     nok = 0
@@ -516,7 +518,7 @@ class TestEnd2End:
         """Add preprocessing and postprocessing layers."""
         prev_chkpt_name = get_checkpoint_name(board, topology, wbits, abits, "import_and_tidy")
         model = load_test_checkpoint_or_skip(prev_chkpt_name)
-        global_inp_name = model.graph.input[0].name
+        global_inp_name = model.get_first_global_in()
         ishape = model.get_tensor_shape(global_inp_name)
         # preprocessing: torchvision's ToTensor divides uint8 inputs by 255
         totensor_pyt = ToTensor()
@@ -533,7 +535,7 @@ class TestEnd2End:
         pre_model = pre_model.transform(FoldConstants())
         model = model.transform(MergeONNXModels(pre_model))
         # add input quantization annotation: UINT8 for all BNN-PYNQ models
-        global_inp_name = model.graph.input[0].name
+        global_inp_name = model.get_first_global_in()
         model.set_tensor_datatype(global_inp_name, DataType["UINT8"])
         # postprocessing: insert Top-1 node at the end
         model = model.transform(InsertTopK(k=1))
@@ -699,9 +701,10 @@ class TestEnd2End:
         """Minimize accumulator and weight bit widths."""
         prev_chkpt_name = get_checkpoint_name(board, topology, wbits, abits, "fold")
         model = load_test_checkpoint_or_skip(prev_chkpt_name)
-        model = model.transform(MinimizeAccumulatorWidth())
         model = model.transform(MinimizeWeightBitWidth())
+        model = model.transform(MinimizeAccumulatorWidth())
         model = model.transform(RoundAndClipThresholds())
+        model = model.transform(MinimizeWeightBitWidth())
         curr_chkpt_name = get_checkpoint_name(board, topology, wbits, abits, "minimize_bit_width")
         model.save(curr_chkpt_name)
 
@@ -837,8 +840,23 @@ class TestEnd2End:
             pytest.skip("XILINX_VITIS not set")
         prev_chkpt_name = get_checkpoint_name(board, topology, wbits, abits, "fifodepth")
         model = load_test_checkpoint_or_skip(prev_chkpt_name)
-        model = model.transform(build_data["build_fxn"])
-        model = model.transform(AnnotateResources("synth", build_data["part"]))
+        try:
+            model = model.transform(build_data["build_fxn"])
+            model = model.transform(AnnotateResources("synth", build_data["part"]))
+        except FINNSynthesisError as e:
+            if e.vivado_logfile.exists():
+                lines = e.vivado_logfile.read_text().split("\n")
+                e.msg += "\nSynthesis failed. Listing errors from Vivado's logfile:"
+                for line in lines:
+                    if "ERROR" in line:
+                        e.msg += "\n" + line
+            else:
+                e.msg += "\n" + f"Synthesis failed and no logfile was found at {e.vivado_logfile}"
+            e.msg += "\n"
+            raise FINNSynthesisError(e.msg, e.vivado_logfile) from e
+        except Exception as e:
+            raise e
+
         model.save(get_checkpoint_name(board, topology, wbits, abits, "build"))
 
     @pytest.mark.slow

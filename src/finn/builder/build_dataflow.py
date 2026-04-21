@@ -52,13 +52,6 @@ from rich.traceback import Traceback
 from typing import Any, TextIO
 
 import finn.util.logging
-from finn.util.exception import (
-    FINNConfigurationError,
-    FINNDataflowError,
-    FINNError,
-    FINNUserError,
-)
-from finn.util.exception_snapshot import snapshot_on_exception
 from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     LogLevel,
@@ -67,6 +60,14 @@ from finn.builder.build_dataflow_config import (
 )
 from finn.builder.build_dataflow_steps import build_dataflow_step_lookup
 from finn.util.basic import get_vivado_root
+from finn.util.exception import (
+    FINNConfigurationError,
+    FINNDataflowError,
+    FINNError,
+    FINNSynthesisError,
+    FINNUserError,
+)
+from finn.util.exception_snapshot import snapshot_on_exception
 from finn.util.logging import log
 from finn.util.settings import get_settings
 
@@ -217,7 +218,7 @@ def resolve_step_filename(step_name: str, cfg: DataflowBuildConfig, step_delta: 
         raise FINNUserError(
             f"Step filename could not be resolved. Step "
             f"{step_name} was not found in your flow configuration"
-        )
+        ) from None
     if step_no < 0 and step_delta != 0 and step_names.index(step_name) == 0:
         # We simply assume that --start was given, since this method is only called in that case
         # TODO: Move the error (check) to the creation of the modelwrapper
@@ -401,6 +402,19 @@ def build_dataflow_cfg(model_filename: str, cfg: DataflowBuildConfig) -> int:
 
     except KeyboardInterrupt:
         print("KeyboardInterrupt detected. Aborting...")
+        return exit_buildflow(cfg, time_per_step, -1)
+
+    except FINNSynthesisError as e:
+        if e.vivado_logfile.exists():
+            lines = e.vivado_logfile.read_text().split("\n")
+            log.error("Synthesis failed. Listing errors from Vivado's logfile:")
+            for line in lines:
+                if "ERROR" in line:
+                    log.error(line)
+            log.error(e.msg)
+        else:
+            log.error(f"Synthesis failed and no logfile was found at {e.vivado_logfile}")
+            log.error(e.msg)
         return exit_buildflow(cfg, time_per_step, -1)
 
     except (Exception, FINNError) as e:

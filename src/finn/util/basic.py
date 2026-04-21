@@ -48,6 +48,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.util.basic import gen_finn_dt_tensor
@@ -144,28 +145,26 @@ def get_finn_root():
     raise Exception("get_finn_root() should not be used anymore.")
 
 
-def get_vivado_root():
-    "Return the root directory that Vivado is installed into."
-
+def get_vivado_root() -> str:
+    """Return the root directory that Vivado is installed into."""
     try:
         return os.environ["XILINX_VIVADO"]
     except KeyError:
         raise Exception(
             """Environment variable XILINX_VIVADO must be set
-        correctly. Please ensure you have launched the Docker contaier correctly.
+        correctly.
         """
-        )
+        ) from None
 
 
-def get_liveness_threshold_cycles():
+def get_liveness_threshold_cycles() -> int:
     """Return the number of no-output cycles rtlsim will wait before assuming
     the simulation is not finishing and throwing an exception."""
-
     return int(os.getenv("LIVENESS_THRESHOLD", 1000000))
 
 
-def make_build_dir(prefix: str = "", return_as_path: bool = False) -> str:
-    """Creates a folder with given prefix to be used as a build dir.
+def make_build_dir(prefix: str = "", return_as_path: bool = False) -> str | Path:
+    """Create a folder with given prefix to be used as a build dir.
     Use this function instead of tempfile.mkdtemp to ensure any generated files
     will survive on the host after the FINN Docker container exits."""
     try:
@@ -175,8 +174,7 @@ def make_build_dir(prefix: str = "", return_as_path: bool = False) -> str:
 
     if not build_dir.exists():
         raise Exception(
-            f"FINN_BUILD_DIR at {build_dir} does not exist! "
-            "Make sure the FINN setup ran properly!"
+            f"FINN_BUILD_DIR at {build_dir} does not exist! Make sure the FINN setup ran properly!"
         )
 
     tmpdir = Path(tempfile.mkdtemp(prefix=prefix, dir=build_dir))
@@ -185,8 +183,29 @@ def make_build_dir(prefix: str = "", return_as_path: bool = False) -> str:
     return str(tmpdir)
 
 
-def launch_process_helper(args, proc_env=None, cwd=None, print_stdout=True, print_stderr=True):
-    """Helper function to launch a process in a way that facilitates logging
+class VerboseCalledProcessError(subprocess.CalledProcessError):
+    """CalledProcessError that includes captured stdout/stderr in its string representation."""
+
+    def __str__(self) -> str:
+        """Return a string representation of the error,
+        including captured stdout and stderr if available."""
+        base = super().__str__()
+        parts = [base]
+        if self.output:
+            parts.append(f"stdout:\n{self.output.strip()}")
+        if self.stderr:
+            parts.append(f"stderr:\n{self.stderr.strip()}")
+        return "\n".join(parts)
+
+
+def launch_process_helper(
+    args,
+    proc_env=None,
+    cwd: str | Path | None = None,
+    print_stdout: bool = True,
+    print_stderr: bool = True,
+) -> tuple[str, str]:
+    """Launch a helper process in a way that facilitates logging
     stdout/stderr with Python loggers.
     Returns (cmd_out, cmd_err) if successful, raises CalledProcessError otherwise."""
     process = subprocess.run(args, capture_output=True, env=proc_env, cwd=cwd, text=True)
@@ -212,14 +231,14 @@ def launch_process_helper(args, proc_env=None, cwd=None, print_stdout=True, prin
             log.error(cmd_err)
 
         # Log additional ERROR message
-        if isinstance(args, list):
-            cmd = " ".join(args)
-        else:
-            cmd = args
+        cmd = " ".join(args) if isinstance(args, list) else args
         log.error(f"Launched process returned non-zero exit code ({process.returncode}): {cmd}")
 
-    # Raise CalledProcessError for non-zero return code
-    process.check_returncode()
+    # Raise CalledProcessError for non-zero return code, including captured output
+    if process.returncode != 0:
+        raise VerboseCalledProcessError(
+            process.returncode, args, output=process.stdout, stderr=process.stderr
+        )
     return (cmd_out, cmd_err)
 
 
