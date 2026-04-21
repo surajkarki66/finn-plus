@@ -44,6 +44,9 @@ from qonnx.util.onnx import nchw_to_nhwc
 # Module containing specializations of elementwise binary operations
 import finn.custom_op.fpgadataflow.elementwise_binary as elementwise_binary
 
+from finn.transformation.fpgadataflow.replicate_stream import InferReplicateStream
+from finn.transformation.fpgadataflow.attention import InferScaledDotProductAttention
+
 # Base class for all FINN custom ops, here just used for type-hinting
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.util.exception import FINNUserError
