@@ -1,7 +1,7 @@
 git_deps:
     onnx-passes:
         url: "https://github.com/iksnagreb/onnx-passes.git"
-        commit: "21d9e6384a317ad8d7a0b4e545b16ff7bfb537fe"
+        commit: "0ca7d1e36fe4ba2f0734cba996f447a73eb02a99"
         pip_install: True
         install_editable: True
     cnpy:
