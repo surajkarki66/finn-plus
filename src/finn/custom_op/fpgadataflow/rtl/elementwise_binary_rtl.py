@@ -308,17 +308,6 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
             "create_bd_cell -type hier -reference %s /%s/%s" % (top_module, node_name, node_name)
         )
 
-    def derive_characteristic_fxns(self, period, override_rtlsim_dict=None, pre_hook=None):
-        n_inps = np.prod(self.get_folded_input_shape(0)[:-1])
-        io_dict = {
-            "inputs": {
-                "in0": [i for i in range(n_inps)],
-                "in1": [i for i in range(n_inps)],
-            },
-            "outputs": {"out0": []},
-        }
-        super().derive_characteristic_fxns(period, override_rtlsim_dict=io_dict, pre_hook=pre_hook)
-
     def execute_node(self, context, graph):
         mode = self.get_nodeattr("exec_mode")
         if mode == "rtlsim":

@@ -27,6 +27,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# ruff: noqa: SLF001
 """Collection of default build steps for building and verifying a dataflow
 accelerator from an ONNX model.
 """
@@ -52,7 +53,6 @@ from qonnx.transformation.infer_data_layouts import InferDataLayouts
 from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.infer_shapes import InferShapes
 from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
-from qonnx.util.basic import get_by_name
 from qonnx.util.cleanup import cleanup_model
 from shutil import copy, move
 
@@ -79,10 +79,6 @@ from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
-from finn.transformation.fpgadataflow.derive_characteristic import (
-    DeriveCharacteristic,
-    DeriveFIFOSizes,
-)
 from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
@@ -138,7 +134,7 @@ def verify_step(
     step_name: str,
     need_parent: bool,
     rtlsim_pre_hook=None,
-):
+) -> None:
     """Verify a build step by running simulation and comparing results.
 
     Args:
@@ -420,8 +416,7 @@ def prepare_loop_ops_ipgen(node, cfg):
 
 
 def step_qonnx_to_finn(model: ModelWrapper, cfg: DataflowBuildConfig):
-    """
-    This step will only execute if QONNX nodes are found.
+    """This step will only execute if QONNX nodes are found.
     These include the following op_types: "Quant" , "Trunc" and "BinaryQuant".
     If such nodes are found the step will run the tidy-up step from QONNX
     and then convert the QONNX model to the FINN-ONNX dialect.
@@ -450,11 +445,10 @@ def step_qonnx_to_finn(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_tidy_up(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_tidy_up(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Run the tidy-up step on given model. This includes shape and datatype
     inference, constant folding, and giving nodes and tensors better names.
     """
-
     model = model.transform(InferShapes())
     model = model.transform(FoldConstants())
     model = model.transform(GiveUniqueNodeNames())
@@ -468,14 +462,13 @@ def step_tidy_up(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_streamline(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_streamline(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Run streamlining on given model. Streamlining involves moving floating point
     scale/shift parameters around, collapsing adjacent ones into a single parameter,
     then absorbing the scale/shift into the following `MultiThreshold` node.
     Streamlining requires careful topology design and cannot be applied to all
     topologies.
     """
-
     model = model.transform(absorb.AbsorbSignBiasIntoMultiThreshold())
     model = model.transform(Streamline())
     need_lowering = len(model.get_nodes_by_op_type("Conv")) > 0
@@ -498,7 +491,7 @@ def step_streamline(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Convert eligible nodes to `HWCustomOp` subclasses that represent HW
     layers. Which nodes and particular configurations can be converted to HW
     is limited, see the source code of the `convert_to_hw` module for more.
@@ -660,11 +653,10 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_create_dataflow_partition(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_create_dataflow_partition(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Separate consecutive groups of HWCustomOp nodes into StreamingDataflowPartition
     nodes, which point to a separate ONNX file. Dataflow accelerator synthesis
     can only be performed on those HWCustomOp sub-graphs."""
-
     unmapped_layers = [
         node.name
         for node in model.graph.node
@@ -713,13 +705,12 @@ def step_create_dataflow_partition(model: ModelWrapper, cfg: DataflowBuildConfig
     return model
 
 
-def step_specialize_layers(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_specialize_layers(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Convert HW nodes to either an HLS or RTL variant of the node. HW nodes
     get converted either based on pre-determined rules (details can be found
     in `specialize_layers` source code) or the user provides a configuration file
     which contains the desired setting. If the user preference cannot be fulfilled,
     a warning will be printed and the implementation style will be set to a default."""
-
     if cfg.specialize_layers_config_file is not None:
         model = model.transform(GiveUniqueNodeNames())
         model = model.transform(ApplyConfig(cfg.specialize_layers_config_file))
@@ -730,13 +721,13 @@ def step_specialize_layers(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Decomposes a Shuffle into a chain of InnerShuffle and OuterShuffles that
     can be specialised into hardware operators.
     This should be executed after the folding has been configured.
     """
     # check if model contains a Shuffle node
-    has_shuffle = True if model.get_nodes_by_op_type("Shuffle") else False
+    has_shuffle = bool(model.get_nodes_by_op_type("Shuffle"))
     loop_nodes = model.get_nodes_by_op_type("FINNLoop")
     for node in loop_nodes:
         node_inst = getCustomOp(node)
@@ -761,12 +752,11 @@ def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """If target_fps was specified, use the SetFolding transformation to determine
     parallelization attributes. The auto-generated config will be saved under
     auto_folding_config.json under the outputs, which can serve as a basis for
     customizing the folding factors further."""
-
     target_cycles_per_frame = cfg._resolve_cycles_per_frame()
     if target_cycles_per_frame is not None:
         model = model.transform(
@@ -813,10 +803,9 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
     return model
 
 
-def step_apply_folding_config(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_apply_folding_config(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Apply the folding configuration file onto the model to set folding (parallelization)
     and other attributes, if config file is specified."""
-
     model = model.transform(GiveUniqueNodeNames())
     loop_nodes = model.get_nodes_by_op_type("FINNLoop")
     for node in loop_nodes:
@@ -832,9 +821,8 @@ def step_apply_folding_config(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig):
-    "Generate per-layer resource and cycle estimates using analytical models."
-
+def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
+    """Generate per-layer resource and cycle estimates using analytical models."""
     if DataflowOutputType.ESTIMATE_REPORTS in cfg.generate_outputs:
         report_dir = cfg.output_dir + "/report"
         os.makedirs(report_dir, exist_ok=True)
@@ -907,7 +895,7 @@ def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig
     return model
 
 
-def step_minimize_bit_width(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_minimize_bit_width(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Tighten the weight and accumulator bit widths for each layer."""
     if cfg.minimize_bit_width:
         model = model.transform(MinimizeWeightBitWidth(), apply_to_subgraphs=True)
@@ -949,10 +937,9 @@ def step_minimize_bit_width(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_hw_codegen(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_hw_codegen(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Generate Vitis HLS code to prepare HLSBackend nodes for IP generation.
     And fills RTL templates for RTLBackend nodes."""
-
     model = model.transform(GiveUniqueNodeNames())
     loop_nodes = model.get_nodes_by_op_type("FINNLoop")
     for node in loop_nodes:
@@ -965,7 +952,7 @@ def step_hw_codegen(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_hw_ipgen(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_hw_ipgen(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Run Vitis HLS synthesis on generated code for HLSBackend nodes,
     in order to generate IP blocks. For RTL nodes this step does not do anything."""
 
@@ -1013,8 +1000,8 @@ def step_build_simulation(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mode
 
     model = model.transform(
         BuildSimulation(
-            cfg._resolve_fpga_part(),  # noqa
-            cfg._resolve_hls_clk_period(),  # noqa
+            cfg._resolve_fpga_part(),
+            cfg._resolve_hls_clk_period(),
             cfg.functional_simulation,
         )
     )
@@ -1029,8 +1016,8 @@ def step_size_fifo_isolated(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
 
     model = model.transform(
         RunLayerIsolatedSimulation(
-            cfg._resolve_fpga_part(),  # noqa
-            cfg._resolve_hls_clk_period(),  # noqa
+            cfg._resolve_fpga_part(),
+            cfg._resolve_hls_clk_period(),
             cfg.functional_simulation,
             Path(cfg.output_dir),
         )
@@ -1043,9 +1030,7 @@ def step_size_fifo_connected(model: ModelWrapper, cfg: DataflowBuildConfig) -> M
     from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
     model = model.transform(
-        RunLayerParallelSimulation(
-            cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period(), cfg  # noqa  # noqa
-        )
+        RunLayerParallelSimulation(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period(), cfg)
     )
     return model
 
@@ -1059,15 +1044,14 @@ def step_apply_fifosizes(model: ModelWrapper, cfg: DataflowBuildConfig) -> Model
     return model
 
 
-def step_insert_dwc(model: ModelWrapper, cfg: DataflowBuildConfig):
-    """Inserts data width converters between layers where necessary."""
+def step_insert_dwc(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
+    """Insert data width converters between layers where necessary."""
     model = model.transform(InsertDWC())
     return model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
 
 
-def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
-    """
-    Depending on the auto_fifo_depths setting, do one of the following:
+def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
+    """Depending on the auto_fifo_depths setting, do one of the following:
     * if auto_fifo_depths=True:  Run the appropriate auto-sizing transformation
     to attempt to determine the FIFO sizes that provide full throughput.
     May take a long time.
@@ -1077,7 +1061,6 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
     Coherency with config file node naming is ensured by calling
     `GiveUniqueNodeNames`.
     """
-
     hw_attrs = [
         "PE",
         "SIMD",
@@ -1163,36 +1146,7 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
 
     if cfg.auto_fifo_depths:
         strategy = cfg.auto_fifo_strategy
-        if strategy == "characterize" or is_mlo(model):
-            model = model.transform(InsertDWC())
-            model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-            model = model.transform(GiveUniqueNodeNames())
-            model = model.transform(
-                PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period())
-            )
-            model = model.transform(HLSSynthIP(cfg._resolve_fpga_part()))
-            model = model.transform(PrepareRTLSim(behav=True))
-            model = model.transform(AnnotateCycles())
-            period = model.analysis(dataflow_performance)["max_cycles"] + 10
-            model = model.transform(DeriveCharacteristic(period))
-            model = model.transform(DeriveFIFOSizes())
-            model = model.transform(
-                InsertFIFO(
-                    vivado_ram_style=cfg.large_fifo_mem_style,
-                    max_qsrl_depth=256,
-                    create_shallow_fifos=True,
-                )
-            )
-            # Clean up characterization attributes after FIFO sizing
-            for node in model.graph.node:
-                for attr_name in ["io_chrc_period", "io_chrc_in", "io_chrc_out"]:
-                    attr = get_by_name(node.attribute, attr_name)
-                    if attr is not None:
-                        node.attribute.remove(attr)
-            model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-            model = model.transform(GiveUniqueNodeNames())
-            model = model.transform(GiveReadableTensorNames())
-        elif strategy == "largefifo_rtlsim":
+        if strategy == "largefifo_rtlsim":
             if cfg.fifosim_save_waveform:
                 report_dir = cfg.output_dir + "/report"
                 os.makedirs(report_dir, exist_ok=True)

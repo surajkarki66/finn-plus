@@ -294,10 +294,6 @@ class FINNLoop(HWCustomOp, RTLBackend):
         sim_base, sim_rel = rtlsim_so
         self.set_nodeattr("rtlsim_so", sim_base + "/" + sim_rel)
 
-    def derive_characteristic_fxns(self, period):
-        mlo_prehook = mlo_prehook_func_factory(self.onnx_node)
-        super().derive_characteristic_fxns(period, pre_hook=mlo_prehook)
-
     def execute_node(self, context, graph):
         node = self.onnx_node
         inp_values = context[node.input[0]]
