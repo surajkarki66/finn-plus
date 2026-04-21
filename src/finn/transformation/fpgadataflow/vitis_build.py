@@ -244,8 +244,8 @@ class BuildAllXOs(Transformation):
             log.info("Inserting IODMAs into the first and last SDPs...")
             iodma_transforms = [
                 GiveUniqueNodeNames(),
-                SpecializeLayers(self.cfg.fpga_part),
-                PrepareIP(self.cfg.fpga_part, self.cfg.synth_clk_period_ns),
+                SpecializeLayers(self.cfg._resolve_fpga_part()),
+                PrepareIP(self.cfg._resolve_fpga_part(), self.cfg.synth_clk_period_ns),  # noqa
                 HLSSynthIP(),
             ]
 
@@ -280,17 +280,20 @@ class BuildAllXOs(Transformation):
                     InsertDWC(),
                     GiveUniqueNodeNames(),
                     GiveReadableTensorNames(),
-                    SpecializeLayers(self.cfg.fpga_part),
+                    SpecializeLayers(self.cfg._resolve_fpga_part()),
                     GiveUniqueNodeNames(),
                     GiveReadableTensorNames(),
                     InsertFIFO(),
-                    SpecializeLayers(self.cfg.fpga_part),
+                    SpecializeLayers(self.cfg._resolve_fpga_part()),
                     RemoveUnusedTensors(),
                     GiveUniqueNodeNames(prefix=sdp_node.name + "_"),
-                    PrepareIP(self.cfg.fpga_part, self.cfg.synth_clk_period_ns),
+                    PrepareIP(self.cfg._resolve_fpga_part(), self.cfg.synth_clk_period_ns),
                     HLSSynthIP(),
                     CreateStitchedIP(
-                        self.cfg.fpga_part, self.cfg.synth_clk_period_ns, sdp_node.name, vitis=True
+                        self.cfg._resolve_fpga_part(),
+                        self.cfg.synth_clk_period_ns,
+                        sdp_node.name,
+                        vitis=True,
                     ),
                     CreateVitisXO(sdp_node.name),
                 ]

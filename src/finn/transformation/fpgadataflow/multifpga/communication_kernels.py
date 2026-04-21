@@ -10,7 +10,7 @@ from qonnx.transformation.base import Transformation
 from finn.builder.build_dataflow_config import DataflowBuildConfig, MFVerbosity
 from finn.transformation.fpgadataflow.multifpga.metadata import AuroraNetworkMetadata
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
+from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError, FINNMultiFPGAUserError
 from finn.util.logging import log
 from finn.util.settings import get_settings
 
@@ -73,8 +73,8 @@ class PrepareAuroraFlow(Transformation):
             text=True,
         )
         if result.returncode != 0:
-            raise FINNMultiFPGAError(
-                f"Error during creation of the " f"AuroraFlow kernels: {result.stderr}"
+            raise FINNMultiFPGAUserError(
+                f"Error during creation of the AuroraFlow kernels:\n{result.stderr}"
             )
         p_origin = temp_dir / "build" / kernel_xo
         if not p_origin.exists():

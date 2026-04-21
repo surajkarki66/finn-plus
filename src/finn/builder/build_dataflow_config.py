@@ -174,6 +174,7 @@ class MFVerbosity(Enum):
     LOW = 1
     MEDIUM = 2
     HIGH = 3
+    EXTRA_HIGH = 4
 
 
 class PartitioningStrategy(str, Enum):

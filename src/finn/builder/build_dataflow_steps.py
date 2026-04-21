@@ -72,6 +72,7 @@ from finn.builder.build_dataflow_config import (
     DataflowOutputType,
     MFCommunicationKernel,
     MFTopology,
+    MFVerbosity,
     ShellFlowType,
     VerificationStepType,
 )
@@ -977,7 +978,11 @@ def step_prepare_network_infrastructure(
         f"Creating NetworkMetadata using {metadata_type.__name__} "
         f"and {topo_creation_type.__name__}"
     )
-    model = model.transform(AssignNetworkMetadata(metadata_type, topo_creation_type))
+    model = model.transform(
+        AssignNetworkMetadata(
+            metadata_type, topo_creation_type, cfg.partitioning_configuration.verbosity
+        )
+    )
 
     # Package kernels
     if metadata_type == AuroraNetworkMetadata:
@@ -992,20 +997,40 @@ def step_prepare_network_infrastructure(
 
 def step_make_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Convenience step that performs all Multi-FPGA requiring steps at once.
-    Requires: Resource estimates, all nodes are HW ops
+    Requires: Resource estimates, all nodes are HW ops.
 
     Output if successful: A graph of StreamingDataflowPartition nodes, each with a device_id,
-    a partition_id and stored paths to network config and packaged communication kernels"""
+    a partition_id and stored paths to network config and packaged communication kernels.
+    Only requires building of XOs and linking afterwards."""
     if cfg.partitioning_configuration is None or cfg.partitioning_configuration.num_fpgas == 0:
         raise FINNMultiFPGAConfigError(
             "Multi-FPGA configuration missing or num_fpgas=0. Fix the config and retry."
         )
-    log.info("Partitioning the design for multiple FPGAs.")
+
+    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
+        log.info(
+            "[bold orange1]Multi-FPGA[/bold orange1]: Partitioning the neural "
+            "network ONNX graph to onto multiple devices...",
+            extra={"markup": True},
+        )
     model = step_partition_for_multifpga(model, cfg)
-    log.info("Creating multiple SDPs.")
+
+    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
+        log.info(
+            "[bold orange1]Multi-FPGA[/bold orange1]: Separating partitioned network sections into "
+            "device-specific StreamingDataflowPartitions...",
+            extra={"markup": True},
+        )
     model = step_create_multifpga_sdp(model, cfg)
-    log.info("Preparing network data infrastructure.")
+
+    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
+        log.info(
+            "[bold orange1]Multi-FPGA[/bold orange1]: Creating network metadata and "
+            "packaging communication kernels for linking...",
+            extra={"markup": True},
+        )
     model = step_prepare_network_infrastructure(model, cfg)
+
     return model
 
 

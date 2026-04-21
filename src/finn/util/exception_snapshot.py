@@ -121,7 +121,7 @@ def snapshot_on_exception(
                                 submodel = Path(getCustomOp(node).get_nodeattr("model"))
                                 if submodel.exists():
                                     submodel_dir = Path(path / "submodels")
-                                    submodel_dir.mkdir()
+                                    submodel_dir.mkdir(exist_ok=True)
                                     shutil.copy(submodel, submodel_dir)
                 if snapshot_config:
                     (path / "cfg.yaml").write_text(str(cfg.to_yaml()))

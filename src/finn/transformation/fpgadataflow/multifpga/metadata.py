@@ -10,6 +10,7 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
 from typing import TYPE_CHECKING, Any, cast
 
+from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError
@@ -310,9 +311,12 @@ class CreateNetworkMetadata(ABC):
     """
 
     def __init__(  # noqa
-        self, save_as_format: type[NetworkMetadata] | Callable[[], NetworkMetadata]
+        self,
+        save_as_format: type[NetworkMetadata] | Callable[[], NetworkMetadata],
+        verbosity: MFVerbosity,
     ) -> None:
         super().__init__()
+        self.verbosity = verbosity
         self.metadata_type = save_as_format
         self.metadata = self.metadata_type()
 
@@ -337,8 +341,10 @@ class CreateNetworkMetadata(ABC):
 class CreateChainNetworkMetadata(CreateNetworkMetadata):
     """Create a simple network with FPGAs connected in a simple line."""
 
-    def __init__(self, save_as_format: type[NetworkMetadata]) -> None:  # noqa
-        super().__init__(save_as_format)
+    def __init__(
+        self, save_as_format: type[NetworkMetadata], verbosity: MFVerbosity
+    ) -> None:  # noqa
+        super().__init__(save_as_format, verbosity)
 
     def create_metadata(self, model: ModelWrapper) -> None:
         """Create network metadata from the given model."""
@@ -354,11 +360,9 @@ class CreateChainNetworkMetadata(CreateNetworkMetadata):
                 if d2 is None:
                     raise FINNMultiFPGAError(f"Node {n2.name} does not have a device id!")
                 if d1 != d2:
+                    if self.verbosity.value > MFVerbosity.MEDIUM.value:
+                        log.info(f"Adding connection:  {n1.name} [{d1}] ----> {n2.name} [{d2}]")
                     self.metadata.add_connection(int(d1), n1.name, int(d2), n2.name)
-                    log.debug(
-                        f"Created connection in metadata between {n1.name} "
-                        f"(device {d1}) and {n2.name} (device {d2})"
-                    )
 
 
 class CreateReturnChainNetworkMetadata(CreateNetworkMetadata):
@@ -377,10 +381,12 @@ class AssignNetworkMetadata(Transformation):
         self,
         metadata_type: type[NetworkMetadata] | Callable[[], NetworkMetadata],
         creator_type: type[CreateNetworkMetadata],
+        verbosity: MFVerbosity,
     ) -> None:
         """Create an object with `metadata_type` using a transformation `creator_type`."""
         super().__init__()
-        self.creator = creator_type(save_as_format=metadata_type)
+        self.verbosity = verbosity
+        self.creator = creator_type(save_as_format=metadata_type, verbosity=verbosity)
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         self.creator.create_metadata(model)

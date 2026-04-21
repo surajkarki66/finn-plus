@@ -76,6 +76,16 @@ class FINNMultiFPGAError(FINNInternalError):
         super().__init__(*args)
 
 
+class FINNMultiFPGAUserError(FINNUserError):
+    """(User) Multi-FPGA error during one of the transformations."""
+
+    # TODO: Reorganize error-types
+
+    def __init__(self, *args: object) -> None:
+        """Create a new FINNMultiFPGAUserError."""
+        super().__init__(*args)
+
+
 class FINNMultiFPGAConfigError(FINNUserError):
     """(User) Multi-FPGA Error in the configuration or the model."""
 

@@ -162,7 +162,13 @@ class HLSBackend(ABC):
 
         for key in self.code_gen_dict:
             # transform list into long string separated by '\n'
-            code_gen_line = "\n".join(self.code_gen_dict[key])
+            try:
+                code_gen_line = "\n".join(self.code_gen_dict[key])
+            except TypeError as e:
+                raise FINNError(
+                    f"Could not get code_gen_dict value for key {key}. "
+                    f"code_gen_dict is: {self.code_gen_dict}"
+                ) from e
             template = template.replace(key, code_gen_line)
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         f = open(os.path.join(code_gen_dir, "hls_syn_{}.tcl".format(node.name)), "w")
