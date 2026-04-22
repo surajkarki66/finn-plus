@@ -103,26 +103,22 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
 
         # Validate type constraints mirroring RTL parameter validation
         if lhs_float:
-            assert lhs_dtype == DataType["FLOAT32"], (
-                f"Float LHS must be FLOAT32, got {lhs_dtype}"
-            )
+            assert lhs_dtype == DataType["FLOAT32"], f"Float LHS must be FLOAT32, got {lhs_dtype}"
         if rhs_float:
-            assert rhs_dtype == DataType["FLOAT32"], (
-                f"Float RHS must be FLOAT32, got {rhs_dtype}"
-            )
+            assert rhs_dtype == DataType["FLOAT32"], f"Float RHS must be FLOAT32, got {rhs_dtype}"
         if both_int:
             assert lhs_dtype.bitwidth() == rhs_dtype.bitwidth(), (
                 f"Int/int path requires matching widths: "
                 f"A_WIDTH={lhs_dtype.bitwidth()}, B_WIDTH={rhs_dtype.bitwidth()}"
             )
-            assert lhs_dtype.signed() == rhs_dtype.signed(), (
-                "Int/int path requires matching signedness"
-            )
+            assert (
+                lhs_dtype.signed() == rhs_dtype.signed()
+            ), "Int/int path requires matching signedness"
             if op_name == '"MUL"':
                 max_w = 24 if lhs_dtype.signed() else 23
-                assert lhs_dtype.bitwidth() <= max_w, (
-                    f"Int MUL width {lhs_dtype.bitwidth()} exceeds DSP58 capacity ({max_w})"
-                )
+                assert (
+                    lhs_dtype.bitwidth() <= max_w
+                ), f"Int MUL width {lhs_dtype.bitwidth()} exceeds DSP58 capacity ({max_w})"
 
         # Validate output width matches RTL O_WIDTH derivation
         if both_int:
@@ -135,9 +131,9 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
                 f"got {out_dtype.bitwidth()}"
             )
         else:
-            assert out_dtype.bitwidth() == 32, (
-                f"Float path requires 32-bit output, got {out_dtype.bitwidth()}"
-            )
+            assert (
+                out_dtype.bitwidth() == 32
+            ), f"Float path requires 32-bit output, got {out_dtype.bitwidth()}"
 
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
 
@@ -254,7 +250,6 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
         mlo = self.get_nodeattr("mlo_max_iter")
         lhs_style = self.get_nodeattr("lhs_style")
         rhs_style = self.get_nodeattr("rhs_style")
-        has_const = lhs_style == "const" or rhs_style == "const"
         both_input = lhs_style == "input" and rhs_style == "input" and not mlo
 
         cmd.append("create_bd_cell -type hier %s" % node_name)

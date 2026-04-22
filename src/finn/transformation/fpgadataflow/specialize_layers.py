@@ -348,7 +348,7 @@ def _elementwise_rtl_possible(n, fpgapart):
     if rhs_style == "const":
         rhs_shape = node_inst.get_nodeattr("rhs_shape")
         if len(rhs_shape) != len(out_shape) and len(rhs_shape) != len(out_shape) - 1:
-            for dim_c, dim_o in zip(rhs_shape, out_shape[-len(rhs_shape):]):
+            for dim_c, dim_o in zip(rhs_shape, out_shape[-len(rhs_shape) :]):
                 if dim_c != 1 and dim_c != dim_o:
                     return False
 
