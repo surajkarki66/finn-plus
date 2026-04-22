@@ -15,7 +15,12 @@
 
 import json
 import onnx
+from pathlib import Path
+from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp, is_custom_op
+from typing import Sequence
+
+from finn.util.exception import FINNInternalError
 
 
 # update this code to handle export configs from subgraphs
@@ -66,12 +71,22 @@ def extract_model_config(model, subgraph_hier, attr_names_to_extract):
     return cfg
 
 
-def extract_model_config_to_json(model, json_filename, attr_names_to_extract):
+def extract_model_config_to_json(
+    model: ModelWrapper, json_filename: str | Path, attr_names_to_extract: Sequence[str]
+) -> None:
     """Create a json file with layer name -> attribute mappings extracted from the
     model. The created json file can be later applied on a model with
-    finn.transform.general.ApplyConfig."""
+    finn.transform.general.ApplyConfig.
+    """
+    target_json = Path(json_filename)
+    if not target_json.suffix == ".json":
+        raise FINNInternalError(f"Cannot extract model config to non-json path: {target_json}")
 
-    with open(json_filename, "w") as f:
+    parent_dir = Path(json_filename).parent
+    if not parent_dir.exists():
+        parent_dir.mkdir(parents=True)
+
+    with target_json.open("w") as f:
         json.dump(
             extract_model_config(
                 model, subgraph_hier=None, attr_names_to_extract=attr_names_to_extract

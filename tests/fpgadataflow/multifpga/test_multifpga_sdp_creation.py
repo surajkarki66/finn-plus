@@ -1,3 +1,5 @@
+"""Test that Multi-FPGA SDPs are created correctly based on a given partitioning."""
+
 import pytest
 
 import os
@@ -180,9 +182,12 @@ def test_sdp_creation(
         assert len(set(devices_found)) == 1
 
     # Check that no two SDPs are on the same device after another
-    for i in range(len(model.graph.node) - 1):
-        node_a_device = get_device_id(model.graph.node[i])
-        node_b_device = get_device_id(model.graph.node[i + 1])
+    for node in model.graph.node:
+        node_a_device = get_device_id(node)
+        sucs = model.find_direct_successors(node)
+        assert sucs is not None
+        assert len(sucs) == 1, "Currently (!) SDPs can only have one successor."
+        node_b_device = get_device_id(sucs[0])
         assert (
             node_a_device != node_b_device
         ), f"Consecutive SDPs with the same device: {[get_device_id(x) for x in model.graph.node]}"

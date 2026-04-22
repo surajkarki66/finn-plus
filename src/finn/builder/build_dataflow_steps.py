@@ -33,13 +33,13 @@
 """Collection of default build steps for building and verifying a dataflow
 accelerator from an ONNX model.
 """
-
 import json
 import numpy as np
 import os
 import shutil
 from copy import deepcopy
 from functools import partial
+from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.bipolar_to_xnor import ConvertBipolarMatMulToXnorPopcount
@@ -599,7 +599,7 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
             "depth_trigger_bram",
         ]
         extract_model_config_to_json(
-            model, cfg.output_dir + "/report/auto_folding_config.json", hw_attrs
+            model, str(Path(cfg.output_dir) / "report/auto_folding_config.json"), hw_attrs
         )
 
     return model

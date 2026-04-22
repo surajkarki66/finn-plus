@@ -146,7 +146,9 @@ def get_inseparable_nodes(model: ModelWrapper) -> list[list[int]]:
     return _convert_to_index_groups(model, all_splits)
 
 
-def get_estimated_model_resources(model: ModelWrapper, fpga_part: str) -> dict[int, dict[str, int]]:
+def get_estimated_model_resources(
+    model: ModelWrapper, fpga_part: str
+) -> dict[int, dict[str, int | float]]:
     """Gather the resources of all layers based on the estimation values from
     the previous build steps. Return them by the enumerated number of the node.
 
