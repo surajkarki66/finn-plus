@@ -173,6 +173,11 @@ if [ -d "$FINN_XRT_PATH" ];then
   export LOCAL_XRT=1
 fi
 
+# If v80++ deb package given, copy it to repo root for docker build
+if [ -n "$V80PP_DEB_PACKAGE" ] && [ -f "$V80PP_DEB_PACKAGE" ]; then
+  cp "$V80PP_DEB_PACKAGE" ./v80pp.deb
+fi
+
 if [ "$FINN_DOCKER_NO_CACHE" = "1" ]; then
   FINN_DOCKER_BUILD_EXTRA+="--no-cache "
 fi
@@ -210,6 +215,8 @@ if [ "$FINN_DOCKER_PREBUILT" = "0" ] && [ -z "$FINN_SINGULARITY" ]; then
   # Need to ensure this is done within the finn/ root folder:
   OLD_PWD=$(pwd)
   cd $SCRIPTPATH
+  # Export DOCKER_BUILDKIT to enable BuildKit features
+  export DOCKER_BUILDKIT
   docker build \
     -f docker/Dockerfile.finn \
     --build-arg XRT_DEB_VERSION=$XRT_DEB_VERSION \
@@ -228,6 +235,11 @@ fi
 # Remove local xrt.deb file from repo
 if [ ! -z "$LOCAL_XRT" ];then
   rm $XRT_DEB_VERSION.deb
+fi
+
+# Remove local v80pp.deb file from repo
+if [ -f "./v80pp.deb" ]; then
+  rm ./v80pp.deb
 fi
 
 # Launch container with current directory mounted
