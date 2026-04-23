@@ -9,6 +9,7 @@
 import numpy as np
 import os
 import shutil
+from qonnx.core.datatype import DataType
 
 from finn.custom_op.fpgadataflow import elementwise_binary
 from finn.custom_op.fpgadataflow.elementwise_binary import ElementwiseBinaryOperation
@@ -70,8 +71,6 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
                 self.set_nodeattr("lhs_style", "input")
 
     def generate_hdl(self, model, fpgapart, clk):
-        from qonnx.core.datatype import DataType
-
         lhs_style = self.get_nodeattr("lhs_style")
         rhs_style = self.get_nodeattr("rhs_style")
         mlo = self.get_nodeattr("mlo_max_iter")
@@ -175,7 +174,7 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
         self.set_nodeattr("gen_top_module", self.get_verilog_top_module_name())
 
         # Only generate memstream wrapper when there is a const input
-        if has_const:
+        if has_const or mlo:
             self.generate_hdl_memstream(fpgapart)
 
         sv_files = ["eltwise.sv", "binopf.sv", "binopi.sv", "int_to_fp32.sv", "queue.sv"]
