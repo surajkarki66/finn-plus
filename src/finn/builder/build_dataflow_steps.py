@@ -72,7 +72,6 @@ from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     DataflowOutputType,
     MFCommunicationKernel,
-    MFTopology,
     MFVerbosity,
     ShellFlowType,
     VerificationStepType,
@@ -101,15 +100,10 @@ from finn.transformation.fpgadataflow.make_driver import (
 from finn.transformation.fpgadataflow.make_zynq_proj import ZynqBuild
 from finn.transformation.fpgadataflow.minimize_accumulator_width import MinimizeAccumulatorWidth
 from finn.transformation.fpgadataflow.minimize_weight_bit_width import MinimizeWeightBitWidth
+from finn.transformation.fpgadataflow.multifpga.assign_metadata import AssignNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.communication_kernels import PrepareAuroraFlow
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
-)
-from finn.transformation.fpgadataflow.multifpga.metadata import (
-    AssignNetworkMetadata,
-    AuroraNetworkMetadata,
-    CreateChainNetworkMetadata,
-    CreateReturnChainNetworkMetadata,
 )
 from finn.transformation.fpgadataflow.multifpga.partitioner import PartitionForMultiFPGA
 from finn.transformation.fpgadataflow.prepare_cppsim import PrepareCppSim
@@ -142,7 +136,12 @@ from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.basic import get_liveness_threshold_cycles, get_rtlsim_trace_depth
 from finn.util.config import extract_model_config_consolidate_shuffles, extract_model_config_to_json
-from finn.util.exception import FINNConfigurationError, FINNMultiFPGAConfigError, FINNUserError
+from finn.util.exception import (
+    FINNConfigurationError,
+    FINNMultiFPGAConfigError,
+    FINNMultiFPGAUserError,
+    FINNUserError,
+)
 from finn.util.execution import execute_parent
 from finn.util.logging import log
 from finn.util.mlo_sim import is_mlo, mlo_prehook_func_factory
@@ -1244,90 +1243,86 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
 
 def step_partition_for_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Assign the device_id parameter to all nodes in the graph. If we are not in a Multi-FPGA case
-    (model attribute is_multifpga) this step does nothing"""
+    (model attribute is_multifpga) this step does nothing.
+
+    First step to be run for Multi-FPGA. Followed by:
+        step_create_multifpga_sdp
+        step_generate_network_metadata
+        step_prepare_communication_kernels
+    """
     if cfg.partitioning_configuration is None or cfg.partitioning_configuration.num_fpgas == 1:
-        model.set_metadata_prop("is_multifpga", "False")
-        log.warning(
+        raise FINNConfigurationError(
             "Tried partitioning a single FPGA model. Setting is_multipga=False. "
             "If this was on purpose, make sure a partitioning config is given, "
             "and that it has more target devices than 1!"
         )
-        return model
     model.set_metadata_prop("is_multifpga", "True")
     model = model.transform(PartitionForMultiFPGA(cfg))
-    return model  # noqa
+    return model
 
 
 def step_create_multifpga_sdp(model: ModelWrapper, _: DataflowBuildConfig) -> ModelWrapper:
     """Create StreamingDataflowPartitions from the graph based on the device ids that were
-    assigned by step_partition_for_multifpga"""
+    assigned by step_partition_for_multifpga.
+
+    Should be run after: step_partition_for_multifpga.
+    Should be run before: step_generate_network_metadata and step_prepare_communication_kernels.
+    """
     if model.get_metadata_prop("is_multifpga") in [None, "False"]:
         return model
     model = model.transform(CreateMultiFPGAStreamingDataflowPartition())
-    return model  # noqa
+    return model
 
 
-def step_prepare_network_infrastructure(
-    model: ModelWrapper, cfg: DataflowBuildConfig
-) -> ModelWrapper:
-    """Create network metadata for this flow and package the correct kernels with it."""
-    if model.get_metadata_prop("is_multifpga") in [None, "False"]:
-        log.warning(
-            'Tried executing "step_prepare_network_infrastructure" although '
-            "no MultiFPGA setting was detected. Skipping.."
-        )
-        return model
+def step_generate_network_metadata(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
+    """Create network metadata for this flow.
 
+    Should be run after: step_partition_for_multifpga and step_create_multifpga_sdp.
+    Should be run before: step_prepare_communication_kernels."""
     if cfg.partitioning_configuration is None:
-        msg = "MultiFPGA enabled, but no partitioning configuration given!"
-        log.critical(msg)
-        raise Exception(msg)  # TODO: Custom error
-
-    metadata_types = {MFCommunicationKernel.AURORA: AuroraNetworkMetadata}
-
-    topology_creation_types = {
-        MFTopology.CHAIN: CreateChainNetworkMetadata,
-        MFTopology.RETURNCHAIN: CreateReturnChainNetworkMetadata,
-    }
-
-    # Get the metadata type
-    try:
-        metadata_type = metadata_types[cfg.partitioning_configuration.communication_kernel]
-    except KeyError as ke:
-        msg = (
-            f"No NetworkMetadata type found for communication kernel"
-            f" {cfg.partitioning_configuration.communication_kernel}"
-        )
-        log.critical(msg)
-        raise Exception(msg) from ke  # TODO: Custom error
-
-    # Get the metadata creation type
-    try:
-        topo_creation_type = topology_creation_types[cfg.partitioning_configuration.topology]
-    except KeyError as ke:
-        msg = f"No NetworkMetadata creator for topology: {cfg.partitioning_configuration.topology}"
-        log.critical(msg)
-        raise Exception(msg) from ke  # TODO: Custom error
+        raise FINNUserError("MultiFPGA enabled, but no partitioning configuration given!")
 
     # Create the metadata
-    log.debug(
-        f"Creating NetworkMetadata using {metadata_type.__name__} "
-        f"and {topo_creation_type.__name__}"
-    )
+    log.debug("Creating metadata.")
     model = model.transform(
         AssignNetworkMetadata(
-            metadata_type, topo_creation_type, cfg.partitioning_configuration.verbosity
+            cfg.partitioning_configuration.communication_kernel,
+            cfg.partitioning_configuration.topology,
+            cfg.partitioning_configuration.verbosity,
         )
     )
+    return model
 
+
+def step_prepare_communication_kernels(
+    model: ModelWrapper, cfg: DataflowBuildConfig
+) -> ModelWrapper:
+    """Package and prepare the communication kernels for Multi-FPGA.
+
+    Should be run after: step_partition_for_multifpga, step_create_multifpga_sdp
+        and step_generate_network_metadata.
+    Should be run before: step_build_xos.
+    """
+    if cfg.partitioning_configuration is None:
+        raise FINNUserError("MultiFPGA enabled, but no partitioning configuration given!")
     # Package kernels
-    if metadata_type == AuroraNetworkMetadata:
-        model = model.transform(PrepareAuroraFlow(cfg))
-    else:
-        msg = f"No kernel packaging transformation found for {metadata_type.__name__}!"
-        log.error(msg)
-        raise Exception(msg)
-
+    match cfg.partitioning_configuration.communication_kernel:
+        case MFCommunicationKernel.AURORA:
+            model = model.transform(
+                PrepareAuroraFlow(
+                    cfg._resolve_vitis_platform(),
+                    cfg._resolve_fpga_part(),
+                    cfg.partitioning_configuration,
+                )
+            )
+        case _:
+            kernelname = cfg.partitioning_configuration.communication_kernel.name
+            raise FINNMultiFPGAUserError(
+                f"Could not prepare kernels of "
+                f"type: {kernelname}, since no "
+                f"preparation transformation for this "
+                f"kind of kernel exists yet."
+            )
     return model
 
 
@@ -1340,7 +1335,8 @@ def step_make_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelW
     Only requires building of XOs and linking afterwards."""
     if cfg.partitioning_configuration is None or cfg.partitioning_configuration.num_fpgas == 0:
         raise FINNMultiFPGAConfigError(
-            "Multi-FPGA configuration missing or num_fpgas=0. Fix the config and retry."
+            "Multi-FPGA configuration missing or num_fpgas=0. "
+            "Cannot execute the Multi-FPGA flow."
         )
 
     if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
@@ -1361,12 +1357,18 @@ def step_make_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelW
 
     if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
         log.info(
-            "[bold orange1]Multi-FPGA[/bold orange1]: Creating network metadata and "
-            "packaging communication kernels for linking...",
+            "[bold orange1]Multi-FPGA[/bold orange1]: Generating network metadata "
+            "based on the given communication kernel types and topology...",
             extra={"markup": True},
         )
-    model = step_prepare_network_infrastructure(model, cfg)
+    model = step_generate_network_metadata(model, cfg)
 
+    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
+        log.info(
+            "[bold orange1]Multi-FPGA[/bold orange1]: Preparing network kernels...",
+            extra={"markup": True},
+        )
+    model = step_prepare_communication_kernels(model, cfg)
     return model
 
 
@@ -1818,7 +1820,8 @@ build_dataflow_step_lookup = {
     "step_set_fifo_depths": step_set_fifo_depths,
     "step_partition_for_multifpga": step_partition_for_multifpga,
     "step_create_multifpga_sdp": step_create_multifpga_sdp,
-    "step_prepare_network_infrastructure": step_prepare_network_infrastructure,
+    "step_generate_network_metadata": step_generate_network_metadata,
+    "step_prepare_communication_kernels": step_prepare_communication_kernels,
     "step_make_multifpga": step_make_multifpga,
     "step_create_stitched_ip": step_create_stitched_ip,
     "step_measure_rtlsim_performance": step_measure_rtlsim_performance,
