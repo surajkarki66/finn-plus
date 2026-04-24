@@ -207,8 +207,7 @@ class BuildAllXOs(Transformation):
         for i, node in enumerate(model.graph.node):
             pre = model.find_direct_predecessors(node)
             if pre is None:
-                continue
-            res.append((node, i))
+                res.append((node, i))
         return res
 
     def get_output_nodes(self, model: ModelWrapper) -> list[tuple[NodeProto, int]]:
@@ -217,8 +216,7 @@ class BuildAllXOs(Transformation):
         for i, node in enumerate(model.graph.node):
             suc = model.find_direct_successors(node)
             if suc is None:
-                continue
-            res.append((node, i))
+                res.append((node, i))
         return res
 
     def check_all_sdp_nodes(self, model: ModelWrapper) -> None:
