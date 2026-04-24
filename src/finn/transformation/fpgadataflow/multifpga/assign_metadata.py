@@ -11,12 +11,12 @@ from finn.transformation.fpgadataflow.multifpga.metadata import (
     CreateChainNetworkMetadata,
     CreateNetworkMetadata,
     CreateReturnChainNetworkMetadata,
-    NetworkMetadata,
 )
 from finn.util.exception import FINNUserError
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
+    from finn.transformation.fpgadataflow.multifpga.metadata import NetworkMetadata
 
 
 class AssignNetworkMetadata(Transformation):
@@ -64,7 +64,7 @@ class AssignNetworkMetadata(Transformation):
                 f" and communication kernel {communication_kernel.name}, "
                 f"since no creator/metadata type was written/connected for it yet. "
             )
-        self.creator: CreateNetworkMetadata = creator_type.__init__(
+        self.creator: CreateNetworkMetadata = creator_type(
             save_as_format=metadata_type, verbosity=verbosity
         )
 

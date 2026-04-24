@@ -6,18 +6,18 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path, PosixPath, PurePath, WindowsPath
-from qonnx.core.modelwrapper import ModelWrapper
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNInternalError, FINNMultiFPGAConfigError, FINNMultiFPGAError
+from finn.util.exception import FINNMultiFPGAError
 from finn.util.logging import log
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from qonnx.core.modelwrapper import ModelWrapper
 
 
 class DataDirection(str, Enum):
@@ -34,49 +34,11 @@ class NetworkMetadata(ABC):
     devices, as well as which nodes on the devices are responsible for communication.
     """
 
-    def __init__(self, load_from: Path | ModelWrapper | None = None) -> None:
-        """Create a metadata object. If nothing is passed, an empty one is created.
-        If load_from is set, we try to read the "network_metadata" metadata prop of the passed
-        model and read the data from there.
-        """
-        self.loaded_from_path: Path | None = None
-        if load_from is not None:
-            if type(load_from) is ModelWrapper:
-                p = load_from.get_metadata_prop("network_metadata")
-                if p is None:
-                    raise FINNInternalError(
-                        "Error while trying to load NetworkMetadata "
-                        "from a ModelWrapper object: Cannot load network "
-                        "metadata from ModelWrapper, "
-                        "since no path for a metadata storage exists. "
-                        "(No metadata exists yet?)"
-                    )
-                p = Path(p)
-                if not p.exists():
-                    raise FINNInternalError(
-                        "Error while trying to load NetworkMetadata "
-                        "from a ModelWrapper object: The path stored "
-                        "in the metadata props of the model seems "
-                        f"to point to an unknown location: {p}"
-                    )
-                self.load(p)
-                self.loaded_from_path = p
-            elif issubclass(type(load_from), PurePath):
-                # Additional assert required because PyLance cannot detect the issubclass entry
-                # condition and wants an extra assert that load_from is NOT a modelwrapper
-                assert isinstance(load_from, (PurePath, PosixPath, WindowsPath))
-                load_from = cast("Path", load_from)
-                if not load_from.exists():
-                    raise FINNMultiFPGAConfigError(
-                        f"Could not load NetworkMetadata from {load_from}, "
-                        f"since no such file exists!"
-                    )
-                self.load(load_from)
-                self.loaded_from_path = load_from
-            else:
-                raise FINNMultiFPGAError(
-                    f"Could not load NetworkMetadata from unknown type: {type(load_from)}"
-                )
+    @staticmethod
+    @abstractmethod
+    def from_model(model: ModelWrapper) -> NetworkMetadata:
+        """Load the metadata from a modelwrapper."""
+        raise NotImplementedError()
 
     @abstractmethod
     def __getitem__(self, key: Any) -> Any:
@@ -105,8 +67,9 @@ class NetworkMetadata(ABC):
         the metadata is stored at the location it was loaded from before.
         """
 
+    @staticmethod
     @abstractmethod
-    def load(self, p: Path) -> None:
+    def load(p: Path) -> NetworkMetadata:
         """Load the metadata from the given path."""
 
 
@@ -127,7 +90,7 @@ class CreateNetworkMetadata(ABC):
 
     def save_metadata(self, model: ModelWrapper, suffix: str = "yaml") -> Path:
         """Save the metadata and store the path as a metadata prop in the modelwrapper instance."""
-        metadata_dir = Path(make_build_dir("network_metadata")).absolute()
+        metadata_dir = Path(make_build_dir("network_metadata_")).absolute()
         metadata_path = metadata_dir / ("metadata." + suffix)
         self.metadata.save(metadata_path)
         model.set_metadata_prop("network_metadata", str(metadata_path))

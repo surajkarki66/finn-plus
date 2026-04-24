@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from mashumaro.mixins.yaml import DataClassYAMLMixin
+
+# Needs to be outside the type-checking block, so that DataClassYAMLMixin can pick it up
+# for automatic serialization.
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from finn.transformation.fpgadataflow.multifpga.metadata import DataDirection, NetworkMetadata
 from finn.util.exception import FINNInternalError, FINNMultiFPGAConfigError
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from qonnx.core.modelwrapper import ModelWrapper
 
 
@@ -43,26 +46,38 @@ class AuroraNetworkKernelMetadata:
     """
 
 
+@dataclass
 class AuroraNetworkMetadata(NetworkMetadata, DataClassYAMLMixin):
     """Defines an AuroraFlow based network. On each device is a list of
     AuroraNetworkKernelMetadata objects which describe the configuration of
     a single AuroraFlow kernel.
     """
 
-    data: dict[int, list[AuroraNetworkKernelMetadata]]
+    data: dict[int, list[AuroraNetworkKernelMetadata]] = field(default_factory=dict)
+    ports_per_device: int = 2
+    loaded_from_path: Path | None = None
 
-    def __init__(
-        self, load_from: Path | ModelWrapper | None = None, ports_per_device: int = 2
-    ) -> None:
-        """Create an empty metadata object or load an existing one from an ONNX model."""
-        super().__init__(load_from)
-        self.ports_per_device = ports_per_device
+    @staticmethod
+    def from_model(model: ModelWrapper) -> AuroraNetworkMetadata:
+        """Load metadata from the model."""
+        p = model.get_metadata_prop("network_metadata")
+        if p is None:
+            raise FINNInternalError(
+                "Cannot load metadata from model, " "since no 'network_metadata' prop was set."
+            )
+        p = Path(p)
+        if not p.exists():
+            raise FINNInternalError(f"Cannot load metadata. File not found: {p}.")
+        meta = AuroraNetworkMetadata.load(p)
+        meta.loaded_from_path = p
+        return meta
 
-    def load(self, p: Path) -> None:
+    @staticmethod
+    def load(p: Path) -> AuroraNetworkMetadata:
         """Load from a YAML file."""
         if not p.exists():
             raise FINNInternalError(f"Tried loading Aurora metadata from invalid path: {p}")
-        self = AuroraNetworkMetadata.from_yaml(p.read_text())  # noqa
+        return AuroraNetworkMetadata.from_yaml(p.read_text())
 
     def save(self, p: Path | None = None) -> None:
         """Store data at the given path. If none is given, store to the location
@@ -111,7 +126,7 @@ class AuroraNetworkMetadata(NetworkMetadata, DataClassYAMLMixin):
     ) -> None:
         """Add a single connection to the table (unidirectional)."""
         # First check that the devices exist or create them if necessary
-        if on_device not in self.data:
+        if on_device not in self.data.keys():
             if create_devices_implicitly:
                 self.data[on_device] = []
             else:

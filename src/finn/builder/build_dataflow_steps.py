@@ -1765,7 +1765,7 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
 
 
 def step_multifpga_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Requires step_build_xos previously run. Minimal synthesis step for Multi-FPGA.
+    """Requires step_prepare_synthesis previously run. Minimal synthesis step for Multi-FPGA.
     To be merged with step_synthesize_bitfile."""
     model = model.transform(MultiVitisBuild(cfg))
     return model
