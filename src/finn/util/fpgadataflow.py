@@ -26,8 +26,13 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from qonnx.custom_op.registry import is_custom_op
+from onnx import NodeProto
+from pathlib import Path
+from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.custom_op.registry import getCustomOp, is_custom_op
 from qonnx.util.basic import get_by_name
+
+from finn.util.exception import FINNInternalError
 
 
 def is_fpgadataflow_node(node):
@@ -70,3 +75,23 @@ def is_rtl_node(node):
                     is_node = True
 
     return is_node
+
+
+def get_submodel(node: NodeProto) -> tuple[ModelWrapper, Path]:
+    """Try to retrieve the submodel (and its path) of a StreamingDataflowPartition
+    node. If the node is not an SDP or the `model` metadata prop does not exist,
+    or the path does not point to a file, an error is raised.
+    """
+    if node.op_type != "StreamingDataflowPartition":
+        raise FINNInternalError(f"Cannot get model of non-SDP node: {node.name}")
+    p = getCustomOp(node).get_nodeattr("model")
+    if p is None:
+        raise FINNInternalError(
+            f"SDP node {node.name} has no 'model' metadata prop. " f"Cannot get model."
+        )
+    p = Path(str(p))
+    if not p.exists():
+        raise FINNInternalError(
+            f"Cannot open model of SDP node {node.name}: " f"No file found at path: {p}"
+        )
+    return ModelWrapper(str(p)), p

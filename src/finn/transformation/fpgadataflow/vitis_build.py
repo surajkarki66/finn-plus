@@ -30,7 +30,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -51,6 +50,7 @@ from finn.builder.build_dataflow_config import (
     MFCommunicationKernel,
     VitisOptStrategy,
 )
+from finn.transformation.fpgadataflow.build_xo import CreateVitisXO
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
 from finn.transformation.fpgadataflow.floorplan import Floorplan
@@ -58,256 +58,24 @@ from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
 from finn.transformation.fpgadataflow.insert_iodma import InsertIODMA
-from finn.transformation.fpgadataflow.multifpga.metadata import AuroraNetworkMetadata, DataDirection
+from finn.transformation.fpgadataflow.multifpga.aurora_metadata import AuroraNetworkMetadata
+from finn.transformation.fpgadataflow.multifpga.metadata import DataDirection
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import launch_process_helper, make_build_dir
 from finn.util.exception import (
     FINNConfigurationError,
-    FINNError,
     FINNMultiFPGAConfigError,
     FINNMultiFPGAError,
     FINNSynthesisError,
-    FINNUserError,
     FINNVitisLinkConfigError,
 )
 from finn.util.logging import log
 from finn.util.settings import get_settings
+from finn.util.vivado import check_vitis_envvars
 
 from . import templates
-
-
-def _check_vitis_envvars():
-    """Check environment variables for Vitis installation."""
-    assert "XILINX_VITIS" in os.environ, "XILINX_VITIS must be set for Vitis"
-    assert "PLATFORM_REPO_PATHS" in os.environ, "PLATFORM_REPO_PATHS must be set for Vitis"
-    assert (
-        "XILINX_XRT" in os.environ
-    ), "XILINX_XRT must be set for Vitis, ensure the XRT env is sourced"
-
-
-class CreateVitisXO(Transformation):
-    """Create a Vitis object file from a stitched FINN ip.
-
-    Outcome if successful: sets the vitis_xo attribute in the ONNX
-    ModelProto's metadata_props field with the name of the object file as value.
-    The object file can be found under the ip subdirectory.
-    """
-
-    def __init__(self, ip_name="finn_design"):
-        """Initialize CreateVitisXO transformation."""
-        super().__init__()
-        self.ip_name = ip_name
-
-    def apply(self, model):
-        """Apply CreateVitisXO transformation to create Vitis object file."""
-        _check_vitis_envvars()
-        vivado_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
-        stitched_ip_dir = vivado_proj_dir + "/ip"
-        interfaces = json.loads(model.get_metadata_prop("vivado_stitch_ifnames"))
-        args_string = []
-        arg_id = 0
-        # NOTE: this assumes the graph is Vitis-compatible: max one axi lite interface
-        # developed from instructions in UG1393 (v2019.2) and package_xo documentation
-        # package_xo is responsible for generating the kernel xml
-        assert len(interfaces["axilite"]) <= 1, "CreateVitisXO supports max 1 AXI lite interface"
-        axilite_intf_name = None
-        if len(interfaces["axilite"]) == 1:
-            axilite_intf_name = interfaces["axilite"][0]
-            if len(interfaces["aximm"]) > 0:
-                args_string.append(
-                    "{addr:1:%s:%s:0x8:0x10:ap_uint&lt;%s>*:0}"
-                    % (
-                        str(arg_id),
-                        interfaces["aximm"][0][0],
-                        str(interfaces["aximm"][0][1]),
-                    )
-                )
-                arg_id += 1
-                args_string.append(
-                    "{numReps:0:%s:%s:0x4:0x1C:uint:0}" % (str(arg_id), axilite_intf_name)
-                )
-                arg_id += 1
-            else:
-                args_string.append(
-                    "{numReps:0:%s:%s:0x4:0x10:uint:0}" % (str(arg_id), axilite_intf_name)
-                )
-                arg_id += 1
-        for intf in interfaces["s_axis"] + interfaces["m_axis"]:
-            stream_width = intf[1]
-            stream_name = intf[0]
-            args_string.append(
-                "{%s:4:%s:%s:0x0:0x0:ap_uint&lt;%s>:0}"
-                % (stream_name, str(arg_id), stream_name, str(stream_width))
-            )
-            arg_id += 1
-
-        # save kernel xml then run package_xo
-        xo_name = self.ip_name + ".xo"
-        xo_path = vivado_proj_dir + "/" + xo_name
-        model.set_metadata_prop("vitis_xo", xo_path)
-
-        # generate the package_xo command in a tcl script
-        package_xo_string = "package_xo -force -xo_path %s -kernel_name %s -ip_directory %s" % (
-            xo_path,
-            self.ip_name,
-            stitched_ip_dir,
-        )
-        for arg in args_string:
-            package_xo_string += " -kernel_xml_args " + arg
-        with open(vivado_proj_dir + "/gen_xo.tcl", "w") as f:
-            f.write(package_xo_string)
-
-        # create a shell script and call Vivado
-        package_xo_sh = vivado_proj_dir + "/gen_xo.sh"
-        working_dir = os.getcwd()
-        with open(package_xo_sh, "w") as f:
-            f.write("#!/bin/bash \n")
-            f.write("set -e\n")
-            f.write("cd {}\n".format(vivado_proj_dir))
-            f.write("vivado -mode batch -source gen_xo.tcl\n")
-            f.write("cd {}\n".format(working_dir))
-        bash_command = ["bash", package_xo_sh]
-        try:
-            launch_process_helper(bash_command, print_stdout=False)
-        except CalledProcessError as e:
-            raise FINNUserError(
-                f"An error ocurred while generating the XO file for "
-                f"{self.ip_name}. Check {vivado_proj_dir} for further "
-                f"details."
-            ) from e
-        if not os.path.isfile(xo_path):
-            raise FINNError("Vitis .xo file not created, check logs under %s" % vivado_proj_dir)
-
-        return (model, False)
-
-
-class BuildAllXOs(Transformation):
-    """Built from the former VitisBuild transformation. Seperated out for more modular use.
-    Packages all StreamingDataflowPartitions into XO files, saves their path as a node attribute.
-    These can then be used for linking. Also works with Multi-FPGA (_currently_ (!) assigns IODMA
-    to the first and last SDP)"""
-
-    # TODO: Rather pass the arguments as needed, not the entire config.
-    def __init__(self, cfg: DataflowBuildConfig) -> None:
-        super().__init__()
-        self.cfg = cfg
-
-    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
-        is_mulitfpga = False
-        if self.cfg.partitioning_configuration is not None:
-            if model.get_metadata_prop("is_multifpga") != "True":
-                log.critical(
-                    "A Multi-FPGA partitioning configuration was given, but the "
-                    'model metadata prop "is_multifpga" is not set to true. '
-                    "Proceeding with the single FPGA case."
-                )
-            else:
-                is_mulitfpga = True
-        _check_vitis_envvars()
-        if is_mulitfpga:
-            # Confirm the shape of the SDP graph (one line, one input, one output)
-            bad_shape_found = False
-            for i, node in enumerate(model.graph.node):
-                if node.op_type != "StreamingDataflowPartition":
-                    bad_shape_found = True
-                    log.error(
-                        f"Node {node.name} is not a StreamingDataflowPartition. "
-                        f"Did you run all necessary steps first?"
-                    )
-                pre, suc = model.find_direct_predecessors(node), model.find_direct_successors(node)
-                if i == 0 and pre is not None:
-                    bad_shape_found = True
-                    log.critical("Node 0 in the graph has unexpected predecessors!")
-                elif i == len(model.graph.node) - 1 and suc is not None:
-                    bad_shape_found = True
-                    log.critical("The last node has unexpected successors!")
-                if i not in [0, len(model.graph.node) - 1]:
-                    if pre is None or len(pre) != 1:
-                        bad_shape_found = True
-                        log.critical(
-                            f"Node {i} ({node.name}) has more or "
-                            f"less than 1 predecessor. Expected exactly 1!"
-                        )
-                    if suc is None or len(suc) != 1:
-                        bad_shape_found = True
-                        log.critical(
-                            f"Node {i} ({node.name}) has more or "
-                            f"less than 1 successor. Expected exactly 1!"
-                        )
-            if bad_shape_found:
-                raise Exception(
-                    "Bad graph found. Cannot produce XOs. " "Please check the logs for errors!"
-                )
-
-            # Insert IODMAs
-            log.info("Inserting IODMAs into the first and last SDPs...")
-            iodma_transforms = [
-                GiveUniqueNodeNames(),
-                SpecializeLayers(self.cfg._resolve_fpga_part()),
-                PrepareIP(self.cfg._resolve_fpga_part(), self.cfg.synth_clk_period_ns),  # noqa
-                HLSSynthIP(),
-            ]
-
-            # Prepare
-            first_node_path = getCustomOp(model.graph.node[0]).get_nodeattr("model")
-            last_node_path = getCustomOp(model.graph.node[-1]).get_nodeattr("model")
-            first_node_model = ModelWrapper(first_node_path)
-            last_node_model = ModelWrapper(last_node_path)
-
-            # Input
-            first_node_model = first_node_model.transform(
-                InsertIODMA(512, insert_input=True, insert_output=False)
-            )
-            for transform in iodma_transforms:
-                first_node_model = first_node_model.transform(transform)
-
-            # Output
-            last_node_model = last_node_model.transform(
-                InsertIODMA(512, insert_input=False, insert_output=True)
-            )
-            for transform in iodma_transforms:
-                last_node_model = last_node_model.transform(transform)
-
-            # Save changes
-            first_node_model.save(first_node_path)
-            last_node_model.save(last_node_path)
-
-            # Do all other necessary steps on all SDPs
-            for sdp_node in model.graph.node:
-                log.debug(f"Creating XO for SDP: {sdp_node.name}")
-                submodel_transforms = [
-                    InsertDWC(),
-                    GiveUniqueNodeNames(),
-                    GiveReadableTensorNames(),
-                    SpecializeLayers(self.cfg._resolve_fpga_part()),
-                    GiveUniqueNodeNames(),
-                    GiveReadableTensorNames(),
-                    InsertFIFO(),
-                    SpecializeLayers(self.cfg._resolve_fpga_part()),
-                    RemoveUnusedTensors(),
-                    GiveUniqueNodeNames(prefix=sdp_node.name + "_"),
-                    PrepareIP(self.cfg._resolve_fpga_part(), self.cfg.synth_clk_period_ns),
-                    HLSSynthIP(),
-                    CreateStitchedIP(
-                        self.cfg._resolve_fpga_part(),
-                        self.cfg.synth_clk_period_ns,
-                        sdp_node.name,
-                        vitis=True,
-                    ),
-                    CreateVitisXO(sdp_node.name),
-                ]
-                submodel_path = getCustomOp(sdp_node).get_nodeattr("model")
-                submodel = ModelWrapper(submodel_path)
-                for transform in submodel_transforms:
-                    submodel = submodel.transform(transform)
-                submodel.set_metadata_prop("platform", "alveo")
-                submodel.save(submodel_path)
-        else:
-            # TODO: Move over here from VitisBuild
-            raise NotImplementedError()
-        return model, False
 
 
 class VitisLinkConfiguration:
@@ -809,7 +577,7 @@ class VitisLink(Transformation):
 
     def apply(self, model):
         """Apply VitisLink transformation to create XCLBIN."""
-        _check_vitis_envvars()
+        check_vitis_envvars()
         # create a config file and empty list of xo files
         config = ["[connectivity]"]
         object_files = []
@@ -1040,7 +808,7 @@ class VitisBuild(Transformation):
 
     def apply(self, model):
         """Apply VitisBuild transformation to create complete Vitis accelerator."""
-        _check_vitis_envvars()
+        check_vitis_envvars()
         # prepare at global level, then break up into kernels
         prep_transforms = [InsertIODMA(512), InsertDWC(), SpecializeLayers(self.fpga_part)]
         for trn in prep_transforms:

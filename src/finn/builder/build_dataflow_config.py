@@ -614,6 +614,9 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     #: Can be used to use host memory for input/output data instead of DDR or HBM memory
     fpga_memory: FpgaMemoryType = FpgaMemoryType.DEFAULT
 
+    #: Max interface width of the IODMAs for vitis builds.
+    vitis_iodma_intf_max_width: int = 512
+
     #: Whether intermediate ONNX files will be saved during the build process.
     #: These can be useful for debugging if the build fails.
     save_intermediate_models: bool = True

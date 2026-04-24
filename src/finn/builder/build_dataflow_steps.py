@@ -80,6 +80,7 @@ from finn.builder.passes import step_passes_frontend
 from finn.core.onnx_exec import execute_onnx
 from finn.core.rtlsim_exec import rtlsim_exec
 from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
+from finn.transformation.fpgadataflow.build_xo import BuildAllXOs
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
@@ -125,7 +126,7 @@ from finn.transformation.fpgadataflow.transpose_decomposition import (
     InferInnerOuterShuffles,
     ShuffleDecomposition,
 )
-from finn.transformation.fpgadataflow.vitis_build import BuildAllXOs, MultiVitisBuild, VitisBuild
+from finn.transformation.fpgadataflow.vitis_build import MultiVitisBuild, VitisBuild
 from finn.transformation.fpgadataflow.vivado_power_estimation import VivadoPowerEstimation
 from finn.transformation.general import ApplyConfig
 from finn.transformation.move_reshape import RemoveCNVtoFCFlatten
@@ -1301,7 +1302,7 @@ def step_prepare_communication_kernels(
 
     Should be run after: step_partition_for_multifpga, step_create_multifpga_sdp
         and step_generate_network_metadata.
-    Should be run before: step_build_xos.
+    Should be run before: step_prepare_synthesis.
     """
     if cfg.partitioning_configuration is None:
         raise FINNUserError("MultiFPGA enabled, but no partitioning configuration given!")
@@ -1328,17 +1329,27 @@ def step_prepare_communication_kernels(
 
 def step_make_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Convenience step that performs all Multi-FPGA requiring steps at once.
-    Requires: Resource estimates, all nodes are HW ops.
+    Requires: Resource estimates, all nodes are HW ops. If no partitioning configuration
+    was found, nothing is done (and a warning is emitted).
 
     Output if successful: A graph of StreamingDataflowPartition nodes, each with a device_id,
     a partition_id and stored paths to network config and packaged communication kernels.
-    Only requires building of XOs and linking afterwards."""
-    if cfg.partitioning_configuration is None or cfg.partitioning_configuration.num_fpgas == 0:
+    Only requires building of XOs and linking afterwards.
+    """
+    # Check if multi-fpga can be done
+    if cfg.partitioning_configuration is None:
+        log.warning(
+            "No partitioning configuration was given in the DataflowBuildConfig. "
+            "Multi-FPGA steps will be skipped."
+        )
+        return model
+
+    if cfg.partitioning_configuration.num_fpgas == 0:
         raise FINNMultiFPGAConfigError(
-            "Multi-FPGA configuration missing or num_fpgas=0. "
-            "Cannot execute the Multi-FPGA flow."
+            "Multi-FPGA configuration has set num_fpgas = 0. " "Cannot execute the Multi-FPGA flow."
         )
 
+    # Run all Multi-FPGA steps in order
     if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
         log.info(
             "[bold orange1]Multi-FPGA[/bold orange1]: Partitioning the neural "
@@ -1627,15 +1638,30 @@ def step_out_of_context_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig)
     return model
 
 
-def step_build_xos(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Take a graph of SDPs and create the resulting .xo files. These are written into
-    the vitis_xo metadata prop of the submodel."""
-    for node in model.graph.node:
-        if node.op_type != "StreamingDataflowPartition":
-            raise FINNConfigurationError(
-                f"Cannot build XO file: {node.name} is " f"not a StreamingDataflowPartition!"
+def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
+    """Prepare synthesis. For Vitis this means packaging the IP cores as XO files."""
+    match cfg.shell_flow_type:
+        case ShellFlowType.VITIS_ALVEO:
+            for node in model.graph.node:
+                if node.op_type != "StreamingDataflowPartition":
+                    raise FINNConfigurationError(
+                        f"Cannot build XO file: {node.name} is not a StreamingDataflowPartition!"
+                    )
+            model = model.transform(
+                BuildAllXOs(
+                    cfg._resolve_fpga_part(),
+                    cfg.synth_clk_period_ns,
+                    cfg.vitis_iodma_intf_max_width,
+                )
             )
-    model = model.transform(BuildAllXOs(cfg))
+
+        case ShellFlowType.VIVADO_ZYNQ:
+            log.warning(
+                "Currently there is nothing to be done to prepare " "Zynq flow synthesis runs."
+            )
+
+        case _:
+            raise NotImplementedError()
     return model
 
 
@@ -1829,7 +1855,7 @@ build_dataflow_step_lookup = {
     "step_out_of_context_synthesis": step_out_of_context_synthesis,
     "step_vivado_power_estimation": step_vivado_power_estimation,
     "step_synthesize_bitfile": step_synthesize_bitfile,
-    "step_build_xos": step_build_xos,
+    "step_prepare_synthesis": step_prepare_synthesis,
     "step_multifpga_synthesis": step_multifpga_synthesis,
     "step_deployment_package": step_deployment_package,
     "step_loop_rolling": step_loop_rolling,
