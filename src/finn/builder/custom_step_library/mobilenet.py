@@ -107,7 +107,7 @@ def step_mobilenet_convert_to_hw_layers_separate_th(model: ModelWrapper, cfg: Da
     model = model.transform(to_hw.InferThresholdingLayer())
     model = model.transform(to_hw.InferVectorVectorActivation())
     model = model.transform(to_hw.InferQuantizedMatrixVectorActivation())
-    model = model.transform(to_hw.InferChannelwiseLinearLayer())
+    model = model.transform(to_hw.InferElementwiseBinaryOperation())
     model = model.transform(to_hw.InferLabelSelectLayer())
     model = model.transform(InferShapes())
     model = model.transform(GiveUniqueNodeNames())

@@ -90,13 +90,22 @@ class CreateStitchedIP(Transformation):
     The packaged block design IP can be found under the ip subdirectory.
     """
 
-    def __init__(self, fpgapart, clk_ns, ip_name="finn_design", vitis=False, signature=[]):
+    def __init__(
+        self,
+        fpgapart,
+        clk_ns,
+        ip_name="finn_design",
+        vitis=False,
+        signature=[],
+        nodecontainer=False,
+    ):
         """Initialize CreateStitchedIP transformation with FPGA part and clock settings."""
         super().__init__()
         self.fpgapart = fpgapart
         self.clk_ns = clk_ns
         self.ip_name = ip_name
         self.is_mlo = False
+        self.nodecontainer = nodecontainer
         self.vitis = vitis
         self.signature = signature
         self.has_aximm = False
@@ -292,21 +301,29 @@ class CreateStitchedIP(Transformation):
         # make output axis external
         for i in range(len(output_intf_names)):
             if idx is not None and idx != i:
-                if node.op_type != "FINNLoop":
+                if node.op_type != "FINNLoop" and not self.nodecontainer:
                     continue
             output_intf_name = output_intf_names[i][0]
             self.connect_cmds.append(
                 "make_bd_intf_pins_external [get_bd_intf_pins %s/%s]"
                 % (inst_name, output_intf_name)
             )
-            self.connect_cmds.append(
-                "set_property name m_axis_%d [get_bd_intf_ports %s_0]"
-                % (self.m_axis_idx, output_intf_name)
-            )
             self.has_m_axis = True
-            self.intf_names["m_axis"].append(
-                ("m_axis_%d" % self.m_axis_idx, output_intf_names[i][1])
-            )
+            if self.nodecontainer:
+                self.connect_cmds.append(
+                    "set_property name %s [get_bd_intf_ports %s_0]"
+                    % (output_intf_name, output_intf_name)
+                )
+                self.intf_names["m_axis"].append(output_intf_names[i])
+            else:
+                self.connect_cmds.append(
+                    "set_property name m_axis_%d [get_bd_intf_ports %s_0]"
+                    % (self.m_axis_idx, output_intf_name)
+                )
+                self.intf_names["m_axis"].append(
+                    ("m_axis_%d" % self.m_axis_idx, output_intf_names[i][1])
+                )
+
             self.m_axis_idx += 1
 
     def connect_s_axis_external(self, node, idx=None):
@@ -318,20 +335,27 @@ class CreateStitchedIP(Transformation):
         # make input axis external
         for i in range(len(input_intf_names)):
             if idx is not None and idx != i:
-                if node.op_type != "FINNLoop":
+                if node.op_type != "FINNLoop" and not self.nodecontainer:
                     continue
             input_intf_name = input_intf_names[i][0]
             self.connect_cmds.append(
                 "make_bd_intf_pins_external [get_bd_intf_pins %s/%s]" % (inst_name, input_intf_name)
             )
-            self.connect_cmds.append(
-                "set_property name s_axis_%d [get_bd_intf_ports %s_0]"
-                % (self.s_axis_idx, input_intf_name)
-            )
             self.has_s_axis = True
-            self.intf_names["s_axis"].append(
-                ("s_axis_%d" % self.s_axis_idx, input_intf_names[i][1])
-            )
+            if self.nodecontainer:
+                self.connect_cmds.append(
+                    "set_property name %s [get_bd_intf_ports %s_0]"
+                    % (input_intf_name, input_intf_name)
+                )
+                self.intf_names["s_axis"].append(input_intf_names[i])
+            else:
+                self.connect_cmds.append(
+                    "set_property name s_axis_%d [get_bd_intf_ports %s_0]"
+                    % (self.s_axis_idx, input_intf_name)
+                )
+                self.intf_names["s_axis"].append(
+                    ("s_axis_%d" % self.s_axis_idx, input_intf_names[i][1])
+                )
             self.s_axis_idx += 1
 
     def connect_ap_none_external(self, node):
@@ -470,6 +494,27 @@ class CreateStitchedIP(Transformation):
             for i in range(len(node.output)):
                 if node.output[i] == out_name:
                     self.connect_m_axis_external(node, idx=i)
+
+        # when nodecontainer=True, make every s_axis_tap interface external
+        if not self.nodecontainer:
+            stap_id = 0
+            for node in model.graph.node:
+                node_inst = getCustomOp(node)
+                inst_name = node.name
+                s_axis_intf_names = node_inst.get_verilog_top_module_intf_names()["s_axis"]
+                for i, (intf_name, width) in enumerate(s_axis_intf_names):
+                    if intf_name == "s_axis_tap":
+                        self.connect_cmds.append(
+                            "make_bd_intf_pins_external [get_bd_intf_pins %s/%s]"
+                            % (inst_name, intf_name)
+                        )
+                        self.has_s_axis = True
+                        self.connect_cmds.append(
+                            "set_property name %s_id_%d [get_bd_intf_ports %s_0]"
+                            % (intf_name, stap_id, intf_name)
+                        )
+                        self.intf_names["s_axis"].append(("s_axis_tap_id_%d" % stap_id, width))
+                        stap_id += 1
 
         if self.signature:
             # extract number of checksum layer from graph

@@ -67,16 +67,33 @@ def collect_ip_dirs(model, ipstitch_path):
     need_memstreamer = False
     for node in model.graph.node:
         node_inst = getCustomOp(node)
-        ip_dir_value = node_inst.get_nodeattr("ip_path")
-        assert os.path.isdir(
-            ip_dir_value
-        ), """The directory that should
-        contain the generated ip blocks doesn't exist."""
-        ip_dirs += [ip_dir_value]
+        if node.op_type == "NodeContainer":
+            if node_inst.get_nodeattr("multi_dnn_type") == "partial_reconfiguration":
+                for id in range(node_inst.get_nodeattr("bodies")):
+                    body_model = node_inst.get_nodeattr("body_" + str(id))
+                    a = collect_ip_dirs(body_model, None)
+                    ip_dirs += a
+            else:
+                code_gen_dir = node_inst.get_nodeattr("code_gen_dir_ipgen")
+                if code_gen_dir and os.path.isdir(code_gen_dir):
+                    ip_dirs.append(code_gen_dir)
+                ip_dir_value = node_inst.get_nodeattr("ip_path")
+                assert os.path.isdir(
+                    ip_dir_value
+                ), """The directory that should
+                contain the generated ip blocks doesn't exist."""
+                ip_dirs += [ip_dir_value]
+        else:
+            ip_dir_value = node_inst.get_nodeattr("ip_path")
+            assert os.path.isdir(
+                ip_dir_value
+            ), """The directory that should
+            contain the generated ip blocks doesn't exist."""
+            ip_dirs += [ip_dir_value]
         if node.op_type.startswith("MVAU") or node.op_type == "Thresholding_hls":
             if node_inst.get_nodeattr("mem_mode") == "internal_decoupled":
                 need_memstreamer = True
-    ip_dirs += [ipstitch_path + "/ip"]
+    ip_dirs += [ipstitch_path + "/ip"] if ipstitch_path else []
     if need_memstreamer:
         # add RTL streamer IP
         ip_dirs.append("$::env(FINN_RTLLIB)/memstream")
@@ -105,7 +122,6 @@ class MakeZYNQProject(Transformation):
         enable_finn_switch=False,
         live_fifo_sizing=False,
     ):
-        """Initialize MakeZYNQProject with platform settings."""
         super().__init__()
         self.platform = platform
         self.period_ns = period_ns
@@ -113,7 +129,7 @@ class MakeZYNQProject(Transformation):
         self.live_fifo_sizing = live_fifo_sizing
         self.enable_debug = 1 if enable_debug else 0
         self.enable_gpio_reset = 0
-        self.enable_selectable = 1  # TODO make this optional
+        self.enable_selectable = 0
 
     def apply(self, model):
         """Apply the transformation to create a Zynq project."""
@@ -126,6 +142,49 @@ class MakeZYNQProject(Transformation):
         axilite_interconnect_idx = 0
         axilite_idx = 0
         instance_names = {}
+
+        sdp_nodes = model.get_nodes_by_op_type("StreamingDataflowPartition")
+        partial_reconfiguration = False
+        for sdp_node in sdp_nodes:
+            sdp_node = getCustomOp(sdp_node)
+            dataflow_model_filename = sdp_node.get_nodeattr("model")
+            kernel_model = ModelWrapper(dataflow_model_filename)
+            if any(
+                n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+                for n in kernel_model.graph.node
+            ):
+                partial_reconfiguration = True
+                # Copy body_0 metadata to the SDP node
+                pr_node = kernel_model.get_nodes_by_op_type("NodeContainer")[
+                    0
+                ]  # We can assume that we have only one NodeContainer
+                pr_node_inst = getCustomOp(pr_node)
+                body_model = pr_node_inst.get_nodeattr("body_0")
+                kernel_model.set_metadata_prop(
+                    "vivado_stitch_proj", body_model.get_metadata_prop("vivado_stitch_proj")
+                )
+                kernel_model.set_metadata_prop(
+                    "wrapper_filename", body_model.get_metadata_prop("wrapper_filename")
+                )
+                kernel_model.set_metadata_prop(
+                    "vivado_stitch_vlnv", body_model.get_metadata_prop("vivado_stitch_vlnv")
+                )
+                kernel_model.set_metadata_prop(
+                    "vivado_stitch_ifnames", body_model.get_metadata_prop("vivado_stitch_ifnames")
+                )
+                kernel_model.save(dataflow_model_filename)
+
+        sw_nodes = [
+            getCustomOp(n)
+            for sdp in sdp_nodes
+            for n in ModelWrapper(getCustomOp(sdp).get_nodeattr("model")).graph.node
+            if n.op_type == "NodeContainer"
+            and getCustomOp(n).get_nodeattr("multi_dnn_type") == "selectable_weights"
+        ]
+        if sw_nodes:
+            self.enable_selectable = True
+        max_bodies = max((n.get_nodeattr("bodies") for n in sw_nodes), default=0)
 
         # instantiate instrumentation IP if it was generated
         instr_ip_dir = model.get_metadata_prop("instrumentation_ipgen")
@@ -368,7 +427,8 @@ class MakeZYNQProject(Transformation):
                 if self.enable_selectable:
                     config.append(templates.selector_zynq_shell_template_procs)
                     config.append(
-                        templates.selector_zynq_shell_template % (instance_names[node.name], 4)
+                        templates.selector_zynq_shell_template
+                        % (instance_names[node.name], max_bodies)
                     )
                     config.append(
                         "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
@@ -575,6 +635,8 @@ class MakeZYNQProject(Transformation):
 
         fclk_mhz = int(1 / (self.period_ns * 0.001))
 
+        pr_config = self._generate_pr_flow(model) if partial_reconfiguration else ""
+
         # create a TCL recipe for the project
         ipcfg = vivado_pynq_proj_dir + "/ip_config.tcl"
         config = "\n".join(config) + "\n"
@@ -593,7 +655,9 @@ class MakeZYNQProject(Transformation):
                         self.enable_gpio_reset,
                         self.enable_finn_switch,
                     )
-                ).replace("$BOARDFILES$", str(get_settings().finn_deps / "board_files"))
+                )
+                .replace("$BOARDFILES$", str(get_settings().finn_deps / "board_files"))
+                .replace("$PR_CONFIG$", pr_config)
             )
 
         # create a TCL recipe for the project
@@ -641,7 +705,472 @@ class MakeZYNQProject(Transformation):
         # filename for the synth utilization report
         synth_report_filename = vivado_pynq_proj_dir + "/synth_report.xml"
         model.set_metadata_prop("vivado_synth_rpt", synth_report_filename)
+        if partial_reconfiguration:
+            partial_bs_dir = vivado_pynq_proj_dir + "/partial_bitstreams"
+            if os.path.isdir(partial_bs_dir):
+                model.set_metadata_prop("partial_bitfiles_dir", partial_bs_dir)
         return (model, False)
+
+    def _generate_pr_flow(self, model):
+        pr_config = []
+        sdp_nodes = model.get_nodes_by_op_type("StreamingDataflowPartition")
+        pr_sdp_nodes = []
+        for sdp_node in sdp_nodes:
+            sdp_node_inst = getCustomOp(sdp_node)
+            dataflow_model_filename = sdp_node_inst.get_nodeattr("model")
+            kernel_model = ModelWrapper(dataflow_model_filename)
+            if [
+                n
+                for n in kernel_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ]:
+                pr_sdp_nodes.append(sdp_node)
+
+        for pr_sdp_node in pr_sdp_nodes:
+            pr_sdp_node_inst = getCustomOp(pr_sdp_node)
+            dataflow_model_filename = pr_sdp_node_inst.get_nodeattr("model")
+            kernel_model = ModelWrapper(dataflow_model_filename)
+            pr_node = [
+                n
+                for n in kernel_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ][0]
+            pr_node_inst = getCustomOp(pr_node)
+            sdp_name = pr_sdp_node.name
+            for id in range(pr_node_inst.get_nodeattr("bodies")):
+                body_model = pr_node_inst.get_nodeattr("body_" + str(id))
+                if id == 0:
+                    # Special case, as this block is in the main bd
+                    pr_config.append(
+                        "group_bd_cells Hier_%s [get_bd_cells %s]" % (sdp_name, sdp_name)
+                    )
+
+                    # Validate before creating a Block Design Container
+                    pr_config.append("validate_bd_design")
+
+                    pr_config.append("startgroup")
+                    pr_config.append("set curdesign [current_bd_design]")
+                    pr_config.append(
+                        "create_bd_design -cell [get_bd_cells /Hier_%s] Hier_%s"
+                        % (sdp_name, sdp_name)
+                    )
+                    pr_config.append("current_bd_design $curdesign")
+
+                    pr_config.append(
+                        "set new_cell "
+                        "[create_bd_cell -type container -reference Hier_%s Hier_%s_temp]"
+                        % (sdp_name, sdp_name)
+                    )
+                    pr_config.append("replace_bd_cell [get_bd_cells /Hier_%s] $new_cell" % sdp_name)
+
+                    pr_config.append("catch {delete_bd_objs [get_bd_cells /Hier_%s]}" % sdp_name)
+                    pr_config.append("set_property name Hier_%s $new_cell" % sdp_name)
+                    pr_config.append("endgroup")
+
+                    # Enable DFX on the BDC
+                    pr_config.append(
+                        "set_property CONFIG.ENABLE_DFX {true} [get_bd_cells Hier_%s]" % sdp_name
+                    )
+                else:
+                    # For each additional body create a Reconfigurable Module BD
+                    # boundary ports are pre-defined by the container
+                    body_vlnv = body_model.get_metadata_prop("vivado_stitch_vlnv")
+                    body_ipstitch_path = body_model.get_metadata_prop("vivado_stitch_proj")
+                    body_ifnames = eval(body_model.get_metadata_prop("vivado_stitch_ifnames"))
+
+                    body_ip_dirs = ["list"]
+                    body_ip_dirs += collect_ip_dirs(body_model, body_ipstitch_path)
+                    body_ip_dirs_str = "[%s]" % (" ".join(body_ip_dirs))
+
+                    bd_name = "Hier_%s_%d" % (sdp_name, id)
+                    instance_name = "body_%d_ip" % id
+
+                    pr_config.append(
+                        "create_bd_design -boundary_from_container "
+                        "[get_bd_cells /Hier_%s] %s" % (sdp_name, bd_name)
+                    )
+
+                    pr_config.append("current_bd_design [get_bd_designs %s]" % bd_name)
+                    pr_config.append(
+                        "set_property ip_repo_paths "
+                        "[concat [get_property ip_repo_paths [current_project]] %s] "
+                        "[current_project]" % body_ip_dirs_str
+                    )
+                    pr_config.append("update_ip_catalog -rebuild -scan_changes")
+                    pr_config.append(
+                        "create_bd_cell -type ip -vlnv %s %s" % (body_vlnv, instance_name)
+                    )
+                    pr_config.append(
+                        "connect_bd_net [get_bd_pins %s/ap_clk] "
+                        "[get_bd_ports ap_clk]" % instance_name
+                    )
+                    pr_config.append(
+                        "connect_bd_net [get_bd_pins %s/ap_rst_n] "
+                        "[get_bd_ports ap_rst_n]" % instance_name
+                    )
+                    for s_axis_name, _ in body_ifnames.get("s_axis", []):
+                        pr_config.append(
+                            "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
+                            "[get_bd_intf_ports %s]" % (instance_name, s_axis_name, s_axis_name)
+                        )
+                    for m_axis_name, _ in body_ifnames.get("m_axis", []):
+                        pr_config.append(
+                            "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
+                            "[get_bd_intf_ports %s]" % (instance_name, m_axis_name, m_axis_name)
+                        )
+                    for axilite_name in body_ifnames.get("axilite", []):
+                        pr_config.append(
+                            "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
+                            "[get_bd_intf_ports %s]" % (instance_name, axilite_name, axilite_name)
+                        )
+                    for aximm_name, _ in body_ifnames.get("aximm", []):
+                        pr_config.append(
+                            "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
+                            "[get_bd_intf_ports %s]" % (instance_name, aximm_name, aximm_name)
+                        )
+                    pr_config.append("save_bd_design")
+                    pr_config.append("validate_bd_design")
+                    pr_config.append("current_bd_design $curdesign")
+
+        # DFX Controller & ICAP
+
+        pr_config.append("current_bd_design $curdesign")
+        module_dir = os.path.join(get_settings().finn_rtllib, "icap", "icape3_wrapper.v")
+        pr_config.append(
+            "add_files -copy_to [get_property DIRECTORY [current_project]] -norecurse %s"
+            % module_dir
+        )
+        pr_config.append("create_bd_cell -type module -reference icape3_wrapper icape3_wrapper")
+        pr_config.append(
+            "create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_controller:1.0 dfx_controller_0"
+        )
+        pr_config.append(
+            "source [get_property REPOSITORY "
+            "[get_ipdefs *dfx_controller:1.0]]"
+            "/xilinx/dfx_controller_v1_0/tcl/api.tcl -notrace"
+        )
+        pr_config.append(
+            "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/ICAP] "
+            "[get_bd_intf_pins icape3_wrapper/ICAP]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins icape3_wrapper/clk] [get_bd_pins zynq_ps/pl_clk0]"
+        )
+        for pr_sdp in pr_sdp_nodes:
+            pr_sdp_inst = getCustomOp(pr_sdp)
+            pr_sdp_model = ModelWrapper(pr_sdp_inst.get_nodeattr("model"))
+            pr_nodecontainer = [
+                n
+                for n in pr_sdp_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ][0]
+            pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
+            num_bodies = pr_nodecontainer_inst.get_nodeattr("bodies")
+            dfx_cont_vs_config = []
+
+            vs_name = pr_sdp.name
+            dfx_cont_vs_config.append("CONFIG.VS.%s.NUM_RMS_ALLOCATED %d" % (vs_name, num_bodies))
+            for rm_idx in range(num_bodies):
+                dfx_cont_vs_config.append("CONFIG.VS.%s.RM.%d.BS.0.ADDRESS 0x0" % (vs_name, rm_idx))
+            dfx_cont_vs_config.append(
+                "CONFIG.VS.%s.NUM_TRIGGERS_ALLOCATED %d" % (vs_name, num_bodies)
+            )
+            dfx_cont_vs_config.append("CONFIG.VS.%s.NUM_HW_TRIGGERS %d" % (vs_name, num_bodies))
+            for rm_idx in range(num_bodies):
+                dfx_cont_vs_config.append(
+                    "CONFIG.VS.%s.TRIGGER%d_TO_RM %d" % (vs_name, rm_idx, rm_idx)
+                )
+            pr_config.append(
+                "dfx_controller_v1_0::set_property -dict [list %s] [get_bd_cells dfx_controller_0]"
+                % " ".join(dfx_cont_vs_config)
+            )
+
+        pr_config.append("set_property CONFIG.PSU__USE__S_AXI_GP3 {1} [get_bd_cells zynq_ps]")
+
+        # Create dedicated reset controller for DFX controller
+        # (reset 1, independent of main system reset 0)
+        pr_config.append(
+            "create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_dfx"
+        )
+        pr_config.append(
+            "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
+            '"Clk /zynq_ps/$zynq_ps_clkname" '
+            "[get_bd_pins proc_sys_reset_dfx/slowest_sync_clk]"
+        )
+
+        pr_config.append("set_property CONFIG.PSU__NUM_FABRIC_RESETS {2} [get_bd_cells zynq_ps]")
+
+        pr_config.append(
+            "connect_bd_net [get_bd_pins zynq_ps/pl_resetn1] "
+            "[get_bd_pins proc_sys_reset_dfx/ext_reset_in]"
+        )
+
+        # Connect DFX controller clock and reset
+        pr_config.append(
+            "connect_bd_net [get_bd_pins dfx_controller_0/clk] " "[get_bd_pins smartconnect_0/aclk]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins dfx_controller_0/clk] "
+            "[get_bd_pins dfx_controller_0/icap_clk]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins dfx_controller_0/reset] "
+            "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins dfx_controller_0/icap_reset] "
+            "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
+        )
+
+        # Connect DFX controller s_axi_reg to PS master via axi_interconnect_0
+        # (extend axi_interconnect_0 with one extra master port)
+        pr_config.append(
+            "set dfx_mi_idx [get_property CONFIG.NUM_MI [get_bd_cells axi_interconnect_0]]"
+        )
+        pr_config.append(
+            "set_property CONFIG.NUM_MI [expr {$dfx_mi_idx + 1}] [get_bd_cells axi_interconnect_0]"
+        )
+        pr_config.append(
+            "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/s_axi_reg] "
+            "[get_bd_intf_pins axi_interconnect_0/[format M%02d_AXI $dfx_mi_idx]]"
+        )
+        pr_config.append(
+            "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
+            '"Clk /zynq_ps/$zynq_ps_clkname" '
+            "[get_bd_pins axi_interconnect_0/[format M%02d_ACLK $dfx_mi_idx]]"
+        )
+        pr_config.append("assign_bd_address [get_bd_addr_segs {dfx_controller_0/s_axi_reg/Reg}]")
+
+        pr_config.append("save_bd_design")
+
+        # Create a new SmartConnect to route dfx_controller AXI master zynq_ps/S_AXI_HP1_FPD
+        pr_config.append(
+            "set smartconnect_dfx_vlnv "
+            "[get_property VLNV [get_ipdefs xilinx.com:ip:smartconnect:*]]"
+        )
+        pr_config.append("create_bd_cell -type ip -vlnv $smartconnect_dfx_vlnv smartconnect_dfx")
+        pr_config.append(
+            "set_property -dict [list CONFIG.NUM_SI {1}] [get_bd_cells smartconnect_dfx]"
+        )
+        pr_config.append(
+            "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/M_AXI_MEM] "
+            "[get_bd_intf_pins smartconnect_dfx/S00_AXI]"
+        )
+        pr_config.append(
+            "connect_bd_intf_net [get_bd_intf_pins smartconnect_dfx/M00_AXI] "
+            "[get_bd_intf_pins zynq_ps/S_AXI_HP1_FPD]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins smartconnect_dfx/aclk] [get_bd_pins smartconnect_0/aclk]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins smartconnect_dfx/aresetn] "
+            "[get_bd_pins smartconnect_0/aresetn]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins zynq_ps/saxihp1_fpd_aclk] "
+            "[get_bd_pins smartconnect_0/aclk]"
+        )
+
+        pr_config.append(
+            "create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 axi_gpio_pr_trigger"
+        )
+
+        pr_config.append(
+            "connect_bd_net [get_bd_pins axi_gpio_pr_trigger/gpio_io_o] "
+            "[get_bd_pins dfx_controller_0/vsm_*_hw_triggers]"
+        )
+
+        pr_config.append(
+            "set gpio_mi_idx [get_property CONFIG.NUM_MI [get_bd_cells axi_interconnect_0]]"
+        )
+        pr_config.append(
+            "set_property CONFIG.NUM_MI [expr {$gpio_mi_idx + 1}] [get_bd_cells axi_interconnect_0]"
+        )
+        pr_config.append(
+            "connect_bd_intf_net [get_bd_intf_pins axi_gpio_pr_trigger/S_AXI] "
+            "[get_bd_intf_pins axi_interconnect_0/[format M%02d_AXI $gpio_mi_idx]]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins axi_gpio_pr_trigger/s_axi_aclk] "
+            "[get_bd_pins smartconnect_0/aclk]"
+        )
+        pr_config.append(
+            "connect_bd_net [get_bd_pins axi_gpio_pr_trigger/s_axi_aresetn] "
+            "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
+        )
+        pr_config.append("assign_bd_address [get_bd_addr_segs {axi_gpio_pr_trigger/S_AXI/Reg}]")
+        pr_config.append(
+            "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
+            '"Clk /zynq_ps/$zynq_ps_clkname" '
+            "[get_bd_pins axi_interconnect_0/[format M%02d_ACLK $gpio_mi_idx]]"
+        )
+
+        pr_config.append("assign_bd_address")
+
+        for pr_sdp in pr_sdp_nodes:
+            pr_sdp_inst = getCustomOp(pr_sdp)
+            pr_sdp_model = ModelWrapper(pr_sdp_inst.get_nodeattr("model"))
+            pr_nodecontainer = [
+                n
+                for n in pr_sdp_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ][0]
+            pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
+            sdp_name = pr_sdp.name
+            num_bodies = pr_nodecontainer_inst.get_nodeattr("bodies")
+            bd_list = ":".join(
+                ["Hier_%s.bd" % sdp_name]
+                + ["Hier_%s_%d.bd" % (sdp_name, i) for i in range(1, num_bodies)]
+            )
+            pr_config.append(
+                "set_property -dict [list "
+                "CONFIG.LIST_SIM_BD {%s} "
+                "CONFIG.LIST_SYNTH_BD {%s} "
+                "] [get_bd_cells Hier_%s]" % (bd_list, bd_list, sdp_name)
+            )
+
+        pr_config.append("save_bd_design")
+        pr_config.append("make_wrapper -files [get_files top.bd] -import -fileset sources_1 -top")
+        pr_config.append("set_property top top_wrapper [get_filesets sources_1]")
+        pr_config.append("update_compile_order -fileset sources_1")
+        pr_config.append("set_property PR_FLOW 1 [current_project]")
+        pr_config.append("generate_target all [get_files top.bd]")
+
+        pr_sdp_bodies = []
+        pr_sdp_names = []
+        for pr_sdp_node in pr_sdp_nodes:
+            pr_sdp_inst = getCustomOp(pr_sdp_node)
+            pr_sdp_model = ModelWrapper(pr_sdp_inst.get_nodeattr("model"))
+            pr_nodecontainer_inst = getCustomOp(
+                [
+                    n
+                    for n in pr_sdp_model.graph.node
+                    if n.op_type == "NodeContainer"
+                    and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+                ][0]
+            )
+            pr_sdp_names.append(pr_sdp_node.name)
+            pr_sdp_bodies.append(pr_nodecontainer_inst.get_nodeattr("bodies"))
+        assert all(
+            n == pr_sdp_bodies[0] for n in pr_sdp_bodies
+        ), "All NodeContainers must have the same number of bodies for pr"
+        num_bodies = pr_sdp_bodies[0]
+
+        for body_id in range(num_bodies):
+            config_name = "config_%d" % body_id
+            partitions = " ".join(
+                "top_i/Hier_%s:Hier_%s_inst_0" % (sdp_name, sdp_name)
+                if body_id == 0
+                else "top_i/Hier_%s:Hier_%s_%d_inst_0" % (sdp_name, sdp_name, body_id)
+                for sdp_name in pr_sdp_names
+            )
+            pr_config.append(
+                "create_pr_configuration -name %s -partitions [list %s]" % (config_name, partitions)
+            )
+            if body_id == 0:
+                pr_config.append("set_property PR_CONFIGURATION config_0 [get_runs impl_1]")
+            else:
+                impl_run = "impl_body_%d" % body_id
+                pr_config.append(
+                    "create_run %s -parent_run impl_1 "
+                    "-flow {Vivado Implementation 2020} -pr_config %s" % (impl_run, config_name)
+                )
+
+        pr_config.append("launch_runs synth_1 -jobs 4")
+        pr_config.append("wait_on_run synth_1")
+
+        pr_config.append("open_run synth_1 -name synth_1")
+        for pr_sdp in pr_sdp_nodes:
+            pr_sdp_inst = getCustomOp(pr_sdp)
+            sdp_name = pr_sdp.name
+            pr_sdp_model = ModelWrapper(pr_sdp_inst.get_nodeattr("model"))
+            pr_nodecontainer = [
+                n
+                for n in pr_sdp_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ][0]
+            pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
+            pblock = pr_nodecontainer_inst.get_nodeattr("pblock")
+            assert pblock, "NodeContainer %s has no 'pblock' attribute set" % sdp_name
+            pblock_name = "pblock_Hier_%s" % sdp_name
+            cell_path = "top_i/Hier_%s" % sdp_name
+            pr_config.append("create_pblock %s" % pblock_name)
+            pr_config.append(
+                "add_cells_to_pblock [get_pblocks %s] [get_cells %s]" % (pblock_name, cell_path)
+            )
+            pr_config.append("resize_pblock [get_pblocks %s] -add {%s}" % (pblock_name, pblock))
+            pr_config.append("set_property SNAPPING_MODE ON [get_pblocks %s]" % pblock_name)
+        pr_config.append("save_constraints -force")
+        pr_config.append("close_design")
+
+        for body_id in range(num_bodies):
+            run_name = "impl_1" if body_id == 0 else "impl_body_%d" % body_id
+            pr_config.append(
+                "set_property STEPS.WRITE_BITSTREAM.ARGS.BIN_FILE true [get_runs %s]" % run_name
+            )
+
+        pr_config.append("launch_runs impl_1 -to_step write_bitstream -jobs 4")
+        pr_config.append("wait_on_run impl_1")
+        for body_id in range(1, num_bodies):
+            impl_run = "impl_body_%d" % body_id
+            pr_config.append("launch_runs %s -to_step write_bitstream -jobs 4" % impl_run)
+            pr_config.append("wait_on_run %s" % impl_run)
+
+        pr_config.append(
+            "set partial_bs_dir "
+            "[file join [get_property DIRECTORY [current_project]] partial_bitstreams]"
+        )
+        pr_config.append("file mkdir $partial_bs_dir")
+        for body_id in range(num_bodies):
+            impl_run = "impl_1" if body_id == 0 else "impl_body_%d" % body_id
+            pr_config.append(
+                "file copy -force "
+                "[file join [get_property DIRECTORY [get_runs %s]] top_wrapper.bit] "
+                "[file join $partial_bs_dir config_%d.bit]" % (impl_run, body_id)
+            )
+            for sdp_name in pr_sdp_names:
+                if body_id == 0:
+                    partial_bit_name = "top_i_Hier_%s_Hier_%s_inst_0_partial.bit" % (
+                        sdp_name,
+                        sdp_name,
+                    )
+                else:
+                    partial_bit_name = "top_i_Hier_%s_Hier_%s_%d_inst_0_partial.bit" % (
+                        sdp_name,
+                        sdp_name,
+                        body_id,
+                    )
+                pr_config.append(
+                    "file copy -force "
+                    "[file join [get_property DIRECTORY [get_runs %s]] %s] "
+                    "[file join $partial_bs_dir partial_%s_%d.bit]"
+                    % (impl_run, partial_bit_name, sdp_name, body_id)
+                )
+                partial_bin_name = partial_bit_name.replace(".bit", ".bin")
+                pr_config.append(
+                    "file copy -force "
+                    "[file join [get_property DIRECTORY [get_runs %s]] %s] "
+                    "[file join $partial_bs_dir partial_%s_%d.bin]"
+                    % (impl_run, partial_bin_name, sdp_name, body_id)
+                )
+                pr_config.append(
+                    "dfx_controller_v1_0::format_bin_for_icap "
+                    "-bs 1 "
+                    "-i [file join $partial_bs_dir partial_%s_%d.bin] "
+                    "-o [file join $partial_bs_dir partial_%s_%d_icap.bin]"
+                    % (sdp_name, body_id, sdp_name, body_id)
+                )
+
+        pr_config.append("set pr_flow 1")
+        pr_config.append("save_bd_design")
+        pr_config = "\n".join(pr_config) + "\n"
+        return pr_config
 
 
 class ZynqBuild(Transformation):
@@ -717,23 +1246,73 @@ class ZynqBuild(Transformation):
             sdp_node = getCustomOp(sdp_node)
             dataflow_model_filename = sdp_node.get_nodeattr("model")
             kernel_model = ModelWrapper(dataflow_model_filename)
-            # InsertFIFO at this stage interferes with tLastMarker
-            # TODO: is this really needed here at all?
-            if not self.enable_instrumentation:
-                kernel_model = kernel_model.transform(InsertFIFO())
-            kernel_model = kernel_model.transform(SpecializeLayers(self.fpga_part))
 
-            nodecontiner = kernel_model.get_nodes_by_op_type("NodeContainer")
-            if not nodecontiner:
-                kernel_model = kernel_model.transform(GiveUniqueNodeNames(prefix))
-            kernel_model.save(dataflow_model_filename)
-            kernel_model = kernel_model.transform(PrepareIP(self.fpga_part, self.period_ns))
-            kernel_model = kernel_model.transform(HLSSynthIP())
-            kernel_model = kernel_model.transform(
-                CreateStitchedIP(self.fpga_part, self.period_ns, sdp_node.onnx_node.name, False)
-            )
-            kernel_model.set_metadata_prop("platform", "zynq-iodma")
-            kernel_model.save(dataflow_model_filename)
+            if not kernel_model.get_nodes_by_op_type("IODMA_hls"):
+                del kernel_model.model.graph.metadata_props[:]
+                kernel_model.save(dataflow_model_filename)
+
+            prcont = [
+                n
+                for n in kernel_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ]
+            if prcont:
+                assert (
+                    kernel_model.graph.node[0].op_type == "NodeContainer"
+                    and getCustomOp(kernel_model.graph.node[0]).get_nodeattr("multi_dnn_type")
+                    == "partial_reconfiguration"
+                ), "Expected NodeContainer in SDP when using partial reconfiguration"
+                assert (
+                    len(kernel_model.graph.node) == 1
+                ), "Only one NodeContainer per SDP when using partial reconfiguration"
+                prcontainer = prcont[0]
+                pr_container_inst = getCustomOp(prcontainer)
+                for id in range(pr_container_inst.get_nodeattr("bodies")):
+                    body_model = pr_container_inst.get_nodeattr("body_" + str(id))
+
+                    if not self.enable_instrumentation:
+                        body_model = body_model.transform(InsertFIFO())
+                    body_model = body_model.transform(SpecializeLayers(self.fpga_part))
+
+                    body_model.save(dataflow_model_filename)
+                    body_model = body_model.transform(PrepareIP(self.fpga_part, self.period_ns))
+                    body_model = body_model.transform(HLSSynthIP())
+                    body_model = body_model.transform(
+                        CreateStitchedIP(
+                            self.fpga_part,
+                            self.period_ns,
+                            f"sdp_{pr_container_inst.onnx_node.name}_{id}",
+                            vitis=False,
+                        )
+                    )
+                    body_model.set_metadata_prop("platform", "zynq-iodma")
+                    pr_container_inst.set_nodeattr("body_" + str(id), body_model)
+                    body_model.save(dataflow_model_filename)
+
+                kernel_model.set_metadata_prop("platform", "zynq-iodma")
+                kernel_model.save(dataflow_model_filename)
+
+            else:
+                # InsertFIFO at this stage interferes with tLastMarker
+                # TODO: is this really needed here at all?
+                if not self.enable_instrumentation:
+                    kernel_model = kernel_model.transform(InsertFIFO())
+                kernel_model = kernel_model.transform(SpecializeLayers(self.fpga_part))
+
+                nodecontiner = kernel_model.get_nodes_by_op_type("NodeContainer")
+                if not nodecontiner:
+                    kernel_model = kernel_model.transform(GiveUniqueNodeNames(prefix))
+                kernel_model.save(dataflow_model_filename)
+                kernel_model = kernel_model.transform(PrepareIP(self.fpga_part, self.period_ns))
+                kernel_model = kernel_model.transform(HLSSynthIP())
+                kernel_model = kernel_model.transform(
+                    CreateStitchedIP(
+                        self.fpga_part, self.period_ns, sdp_node.onnx_node.name, vitis=False
+                    )
+                )
+                kernel_model.set_metadata_prop("platform", "zynq-iodma")
+                kernel_model.save(dataflow_model_filename)
         # Assemble design from IPs
         model = model.transform(
             MakeZYNQProject(

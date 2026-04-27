@@ -232,12 +232,18 @@ update_compile_order -fileset sources_1
 #set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE AggressiveExplore [get_runs impl_1]
 #set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
 
-# out-of-context synth can't be used for bitstream generation
-# set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} -value {-mode out_of_context} -objects [get_runs synth_1]
-# TODO: make number of jobs configurable
-launch_runs -jobs 4 -to_step write_bitstream impl_1
-wait_on_run [get_runs impl_1]
+set pr_flow 0
 
+$PR_CONFIG$
+
+if {$pr_flow == 0} {
+    # out-of-context synth can't be used for bitstream generation
+    # set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} -value {-mode out_of_context} -objects [get_runs synth_1]
+    # TODO: make number of jobs configurable
+    launch_runs -jobs 4 -to_step write_bitstream impl_1
+    wait_on_run [get_runs impl_1]
+
+}
 # generate synthesis report
 open_run impl_1
 report_utilization -hierarchical -hierarchical_depth 4 -file synth_report.xml -format xml
@@ -259,8 +265,13 @@ proc create_broadcaster_tree {num_outputs base_name} {
         set leaf_broadcasters [list]
         set outputs_left $num_outputs
         set bc_idx 0
+        set eff_max_mi $MAX_MI
+        if {$outputs_left > $MAX_MI && $outputs_left % $MAX_MI == 1} {
+            set eff_max_mi [expr {$MAX_MI - 1}]
+        }
         while {$outputs_left > 0} {
-            set mi [expr {min($outputs_left, $MAX_MI)}]
+            set mi [expr {min($outputs_left, $eff_max_mi)}]
+            set eff_max_mi $MAX_MI
             set cell_name "${base_name}_leaf_${bc_idx}"
             create_bd_cell -type ip -vlnv xilinx.com:ip:axis_broadcaster:1.1 $cell_name
             set_property CONFIG.NUM_MI $mi [get_bd_cells $cell_name]
@@ -279,9 +290,16 @@ proc create_broadcaster_tree {num_outputs base_name} {
             set inputs_needed [llength $current_level]
             set outputs_left $inputs_needed
             set bc_idx 0
+            set tmp_max_mi $MAX_MI
+            if {$inputs_needed % $MAX_MI == 1} {
+                # Reduce the amount of ports for the first broadcaster by one to avoid creating a
+                # leaf broadcaster with just one output port
+                set tmp_max_mi [expr {$MAX_MI - 1}]
+            }
 
             while {$outputs_left > 0} {
-                set mi [expr {min($outputs_left, $MAX_MI)}]
+                set mi [expr {min($outputs_left, $tmp_max_mi)}]
+                set tmp_max_mi $MAX_MI
                 set cell_name "${base_name}_lvl${level}_${bc_idx}"
                 create_bd_cell -type ip -vlnv xilinx.com:ip:axis_broadcaster:1.1 $cell_name
                 set_property CONFIG.NUM_MI $mi [get_bd_cells $cell_name]
@@ -388,7 +406,7 @@ selector_zynq_shell_template = """
 set partition_name %s
 set clk_net [get_bd_pins ${partition_name}/ap_clk]
 set rst_net [get_bd_pins ${partition_name}/ap_rst_n]
-set s_axis_pins [get_bd_intf_pins ${partition_name}/IN_NodeContainer_*]
+set s_axis_pins [get_bd_intf_pins ${partition_name}/s_axis_tap*]
 set num_inputs [llength $s_axis_pins]
 
 set fifo_name "${partition_name}_selector_fifo"
@@ -396,24 +414,28 @@ set broadcaster_name "${partition_name}_selector_broadcaster"
 set selector_name "${partition_name}_selector"
 
 set bc_cells [create_fifo_stage $num_inputs 32 $fifo_name]
-set bc_cells [create_broadcaster_tree $num_inputs $broadcaster_name]
 
 create_bd_cell -type module -reference selector_verilog $selector_name
 set_property CONFIG.N {%d} [get_bd_cells $selector_name]
 # CLK/RESET
-connect_bd_net $clk_net [get_bd_pins $broadcaster_name/aclk]
 connect_bd_net $clk_net [get_bd_pins $fifo_name/aclk]
 connect_bd_net $clk_net [get_bd_pins $selector_name/aclk]
 
 # -boundary_type upper
 connect_bd_net $rst_net [get_bd_pins $fifo_name/aresetn ]
-connect_bd_net $rst_net [get_bd_pins $broadcaster_name/aresetn]
 connect_bd_net $rst_net [get_bd_pins $selector_name/aresetn]
 
 #AXI
-connect_bd_intf_net [get_bd_intf_pins $selector_name/M_AXIS] [get_bd_intf_pins $broadcaster_name/S_AXIS]
-for {set i 0} {$i < $num_inputs} {incr i} {
-    connect_bd_intf_net [get_bd_intf_pins $broadcaster_name/[format "M%%02d_AXIS" $i]] [get_bd_intf_pins $fifo_name/[format "S%%02d_AXIS" $i]]
+if {$num_inputs == 1} {
+    connect_bd_intf_net [get_bd_intf_pins $selector_name/M_AXIS] [get_bd_intf_pins $fifo_name/S00_AXIS]
+} else {
+    set bc_cells [create_broadcaster_tree $num_inputs $broadcaster_name]
+    connect_bd_net $clk_net [get_bd_pins $broadcaster_name/aclk]
+    connect_bd_net $rst_net [get_bd_pins $broadcaster_name/aresetn]
+    connect_bd_intf_net [get_bd_intf_pins $selector_name/M_AXIS] [get_bd_intf_pins $broadcaster_name/S_AXIS]
+    for {set i 0} {$i < $num_inputs} {incr i} {
+        connect_bd_intf_net [get_bd_intf_pins $broadcaster_name/[format "M%%02d_AXIS" $i]] [get_bd_intf_pins $fifo_name/[format "S%%02d_AXIS" $i]]
+    }
 }
 set s_axis_pins_sorted [lsort $s_axis_pins]
 for {set i 0} {$i < $num_inputs} {incr i} {

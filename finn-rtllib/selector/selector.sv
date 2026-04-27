@@ -79,8 +79,8 @@ module selector #(
         .ip_rdata (ip_rdata)
     );
 
-    //   regs[0]   – control/status register
-    //   regs[1..N] – set registers
+    // regs[0]: Bit 0: run/halt, Bits 31:1 reserved
+    // regs[1..N]: Bits 15:0: id, Bits 31:16: repetition count
     logic [31:0] regs [0:N];
 
     logic        ip_rack_d  = '0;
@@ -115,9 +115,6 @@ module selector #(
 
     logic [IDX_BITS-1:0] next_ptr = '0;
     logic loaded = '0;
-
-    // logic [15:0] cur_reps;
-    // assign cur_reps = regs[next_ptr + 1][31:16];
 
     logic fired;
     assign fired = m_axis_tvalid & m_axis_tready;

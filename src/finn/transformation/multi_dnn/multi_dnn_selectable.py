@@ -5,9 +5,9 @@ from qonnx.transformation.base import Transformation
 
 
 class ExtractSelectableWeights(Transformation):
-    def __init__(self, models: list[str]):
+    def __init__(self, **kwargs):
         super().__init__()
-        self.models = models  # First model is always the "master model"
+        self.models = kwargs.get("models", None)  # First model is always the "master model"
 
     def apply(self, model: ModelWrapper) -> ModelWrapper:
         if len(self.models) < 2:
@@ -38,11 +38,6 @@ class ExtractSelectableWeights(Transformation):
                     fm_attr = fm_op.get_nodeattr(attr)
                     body_attr = body_op.get_nodeattr(attr)
                     if fm_attr != body_attr:
-                        print(
-                            f"The graphs differ in attribute {attr} for at least one node pair, "
-                            f"cannot extract selectable weights: {fm_node.name} ({fm_attr})"
-                            f" vs {body_node.name} ({body_attr})"
-                        )
                         raise Exception(
                             f"The graphs differ in attribute {attr} for at least one node pair, "
                             f"cannot extract selectable weights: {fm_node.name} ({fm_attr})"
@@ -51,11 +46,15 @@ class ExtractSelectableWeights(Transformation):
 
         # If we are here, the graphs are identical in structure and only differ in weights,
         # we can extract selectable weights
+        ops = [
+            "MVAU_hls",
+            "MVAU_rtl",
+            "Thresholding_rtl",
+            "Thresholding_hls",
+            "VVAU_hls",
+            "VVAU_rtl",
+        ]
         for node_idx, fm_node in enumerate(fm.graph.node):
-            # Tested for MVAU_rtl, Thresholding_rtl,
-            ops = ["MVAU_rtl", "Thresholding_rtl"]  # add more
-            # TODO: Check that memmode is valid
-            # TODO: Make sure the names are identical (?)
             if fm_node.op_type in ops or fm_node.op_type.startswith("Elementwise"):
                 num_bodies = len(dnn_node_bodies)
 
@@ -109,11 +108,6 @@ class ExtractSelectableWeights(Transformation):
                     for b_idx in range(num_bodies)
                 ]
 
-                # Determine input/output datatypes from the fm node
-                fm_op = getCustomOp(fm_node)
-                idt = fm_op.get_input_datatype().name
-                odt = fm_op.get_output_datatype().name
-
                 # Build the body_i keyword arguments for make_node
                 body_kwargs = {f"body_{i}": body_graphs[i] for i in range(num_bodies)}
 
@@ -129,8 +123,6 @@ class ExtractSelectableWeights(Transformation):
                     name="node_container_" + fm_node.name,
                     multi_dnn_type="selectable_weights",
                     bodies=num_bodies,
-                    inputDataType=idt,
-                    outputDataType=odt,
                     **body_kwargs,
                 )
 

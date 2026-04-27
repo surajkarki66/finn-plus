@@ -543,6 +543,7 @@ class MakePYNQDriver(Transformation):
         clk_period_ns=None,
         validation_datset=None,
         experiment_info=None,
+        multidnn_mode=None,
     ):
         """Initialize PYNQ driver generation.
 
@@ -560,6 +561,7 @@ class MakePYNQDriver(Transformation):
         self.clk_period_ns = clk_period_ns
         self.validation_datset = validation_datset
         self.experiment_info = experiment_info
+        self.multidnn_mode = multidnn_mode
 
     def _generate_driver_files(self, model):
         """Generate PYNQ driver base files."""
@@ -751,6 +753,9 @@ class MakePYNQDriver(Transformation):
 
         if self.validation_datset is not None:
             driver_information["validation_dataset"] = self.validation_datset
+
+        if self.multidnn_mode is not None:
+            driver_information["multidnn_mode"] = self.multidnn_mode
 
         settings = {
             "driver_information": driver_information,

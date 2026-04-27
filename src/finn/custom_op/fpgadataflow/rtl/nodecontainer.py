@@ -1,3 +1,4 @@
+import json
 import math
 import numpy as np
 import os
@@ -6,11 +7,13 @@ from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
-from qonnx.util.basic import get_by_name, is_finn_op, qonnx_make_model, roundup_to_integer_multiple
+from qonnx.util.basic import get_by_name, qonnx_make_model, roundup_to_integer_multiple
 
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
+from finn.util.logging import log
+from finn.util.settings import get_settings
 
 
 class NodeContainer(HWCustomOp, RTLBackend):
@@ -25,8 +28,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         my_attrs = {
             "bodies": ("i", True, 0),
             "multi_dnn_type": ("s", True, ""),
-            "inputDataType": ("s", True, ""),
-            "outputDataType": ("s", True, ""),
+            "pblock": ("s", False, ""),
             **b,
         }
         my_attrs.update(HWCustomOp.get_nodeattr_types(self))
@@ -75,112 +77,109 @@ class NodeContainer(HWCustomOp, RTLBackend):
         except KeyError:
             raise AttributeError("Op has no such attribute: " + name)
 
+    def _get_reference_body(self):
+        # Return the first body
+        # For the selectable_weights case we can assume that all bodies have the same structure
+        return self.get_nodeattr("body_0")
+
+    def _get_reference_node(self):
+        # Return the first node of the first body
+        # For the selectable_weights case we can assume that all bodies have one node
+        # And that they have the same structure (folding, datatype, etc)
+        body = self._get_reference_body()
+        return body.graph.node[0]
+
+    def _check_types(self, node, types: list):
+        node_type = node.op_type
+        for t in types:
+            if t.endswith("_hls") or t.endswith("_rtl"):
+                if node_type == t:
+                    return True
+            else:
+                if node_type.startswith(t):
+                    return True
+        return False
+
     def get_normal_input_shape(self, ind=0):
-        body = self.get_nodeattr("body_0")
-        if ind == 0:
-            # get first node in loop body and return
-            # normal input shape
-            node = body.graph.node[0]
-            if is_finn_op(node.domain):
-                inst = getCustomOp(node)
-                ishape = inst.get_normal_input_shape(0)
-            else:
-                ishape = body.get_tensor_shape(node.input[0])
-        else:
-            body = self.get_nodeattr("body_0")
-            tensor = body.graph.input[ind].name
-            # get consumer, assuming the second input is the parameter input
-            param_node = body.find_consumer(tensor)
-            if is_finn_op(param_node.domain):
-                inst = getCustomOp(param_node)
-                ishape = inst.get_normal_input_shape(1)
-            else:
-                ishape = body.get_tensor_shape(tensor)
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
+        node = body.graph.node[0]
+        inst = getCustomOp(node)
+        ishape = inst.get_normal_input_shape(ind)
         return ishape
 
     def get_normal_output_shape(self, ind=0):
-        body = self.get_nodeattr("body_0")
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
         node = body.graph.node[-1]
-        if is_finn_op(node.domain):
-            inst = getCustomOp(node)
-            oshape = inst.get_normal_output_shape(0)
-        else:
-            oshape = body.get_tensor_shape(node.output[0])
+        inst = getCustomOp(node)
+        oshape = inst.get_normal_output_shape(ind)
         return oshape
 
     def get_folded_input_shape(self, ind=0):
-        body = self.get_nodeattr("body_0")
-        if ind == 0:
-            node = body.graph.node[0]
-            inst = getCustomOp(node)
-            ishape = inst.get_folded_input_shape(0)
-        else:
-            tensor = body.graph.input[ind].name
-            param_node = body.find_consumer(tensor)
-            inst = getCustomOp(param_node)
-            ishape = inst.get_folded_input_shape(1)
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
+        node = body.graph.node[0]
+        inst = getCustomOp(node)
+        ishape = inst.get_folded_input_shape(ind)
         return ishape
 
     def get_folded_output_shape(self, ind=0):
-        body = self.get_nodeattr("body_0")
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
         node = body.graph.node[-1]
         inst = getCustomOp(node)
-        s = inst.get_folded_output_shape(0)
+        s = inst.get_folded_output_shape(ind)
         return s
 
     def infer_node_datatype(self, model):
-        for i in range(self.get_nodeattr("bodies")):
-            body = self.get_nodeattr(f"body_{i}")
-            node = body.graph.node[-1]
-            inst = getCustomOp(node)
-            inst.infer_node_datatype(body)
+        pass
 
     def get_input_datatype(self, ind=0):
-        """Returns FINN DataType of input."""
-        if ind == 0:
-            idt = DataType[self.get_nodeattr("inputDataType")]
-        else:
-            loop_body = self.get_nodeattr("body")
-            tensor = loop_body.graph.input[ind].name
-            # get consumer, assuming the second input is the parameter input
-            param_node = loop_body.find_consumer(tensor)
-            if is_finn_op(param_node.domain):
-                inst = getCustomOp(param_node)
-                idt = inst.get_input_datatype(1)
-            else:
-                idt = loop_body.get_tensor_datatype(tensor)
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
+        first_inst = getCustomOp(body.graph.node[0])
+        idt = first_inst.get_input_datatype(ind)
         return idt
 
     def get_output_datatype(self, ind=0):
-        odt = DataType[self.get_nodeattr("outputDataType")]
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
+        last_inst = getCustomOp(body.graph.node[-1])
+        odt = last_inst.get_output_datatype(ind)
         return odt
 
     def get_instream_width(self, ind=0):
-        body = self.get_nodeattr("body_0")
-        if ind == 0:
-            node = body.graph.node[0]
-            inst = getCustomOp(node)
-            iwidth = inst.get_instream_width(0)
-        else:
-            tensor = body.graph.input[ind].name
-            param_node = body.find_consumer(tensor)
-            inst = getCustomOp(param_node)
-            iwidth = inst.get_instream_width(1)
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
+        node = body.graph.node[0]
+        inst = getCustomOp(node)
+        iwidth = inst.get_instream_width(ind)
         return iwidth
 
-    def make_shape_compatible_op(self, model):
-        assert False
+    def get_exp_cycles(self):
+        if self.get_nodeattr("multi_dnn_type") == "selectable_weights":
+            body = self._get_reference_body()
+            node = body.graph.node[-1]
+            inst = getCustomOp(node)
+            exp_cycles = inst.get_exp_cycles()
+        elif self.get_nodeattr("multi_dnn_type") == "partial_reconfiguration":
+            exp_cycles = 0
+            for i in range(self.bodies):
+                temp_exp_cycles = 0
+                body = self.get_nodeattr(f"body_{i}")
+                for node in body.graph.node:
+                    inst = getCustomOp(node)
+                    temp_exp_cycles += inst.get_exp_cycles()
+                exp_cycles = max(exp_cycles, temp_exp_cycles)
+        return exp_cycles
 
-    def _get_reference_node(self):
-        # Return the first body and first node in that body
-        # This can be used because we made sure all bodies have the same structure
-        body = self.get_nodeattr("body_0")
-        node = body.graph.node[0]
-        return node
-
-    def _get_reference_body(self):
-        body = self.get_nodeattr("body_0")
-        return body
+    def get_outstream_width(self, ind=0):
+        assert ind == 0  # We currently only support one input
+        body = self._get_reference_body()
+        node = body.graph.node[-1]
+        inst = getCustomOp(node)
+        return inst.get_outstream_width(ind=ind)
 
     def generate_hdl_memstream(self, fpgapart, pumped_memory=0):
         inst = getCustomOp(self._get_reference_node())
@@ -205,10 +204,10 @@ class NodeContainer(HWCustomOp, RTLBackend):
             inst.generate_params(body, path)
             param_file = "{}/memblock.dat".format(path)
             new_param_file = "{}/{}_memblock_{}.dat".format(path, node.op_type, i)
-            if node.op_type.startswith("MVAU") or node.op_type.startswith("Elementwise"):
+            if self._check_types(node, ["MVAU", "Elementwise", "Thresholding_hls", "VVAU"]):
                 # rename so it doesn't get overwritten
                 shutil.move(param_file, new_param_file)
-            elif node.op_type.startswith("Thresholding"):
+            elif self._check_types(node, ["Thresholding_rtl"]):
                 # get all generated Thresholding dat files
                 pe = inst.get_nodeattr("PE")
                 output_data_type = inst.get_nodeattr("outputDataType")
@@ -234,9 +233,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
             else:
                 raise Exception
 
-        if reference_node.op_type.startswith("MVAU") or reference_node.op_type.startswith(
-            "Elementwise"
-        ):
+        if self._check_types(node, ["MVAU", "Elementwise", "Thresholding_hls", "VVAU"]):
             # concatinate all .dat files together
             param_file = "{}/memblock.dat".format(path)
             with open(param_file, "w") as outfile:
@@ -246,7 +243,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
                         for line in infile:
                             outfile.write(line)
                     os.remove(memblock_file)
-        elif reference_node.op_type.startswith("Thresholding"):
+        elif self._check_types(reference_node, ["Thresholding_rtl"]):
             # concatinate all .dat files together
             pe = reference_inst.get_nodeattr("PE")
             output_data_type = reference_inst.get_nodeattr("outputDataType")
@@ -282,7 +279,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
 
     def generate_hdl(self, model, fpgapart, clk):
         multi_dnn_type = self.get_nodeattr("multi_dnn_type")
-        if multi_dnn_type:
+        if multi_dnn_type == "selectable_weights":
             self.generate_hdl_memstream(fpgapart)
             self.generate_params(model, self.get_nodeattr("code_gen_dir_ipgen"))
             self.generate_hdl_stream_tap()
@@ -298,10 +295,32 @@ class NodeContainer(HWCustomOp, RTLBackend):
             # Generate reference node hw and copy needed files to correct location
             reference_node = self._get_reference_node()
             reference_inst = getCustomOp(reference_node)
+
+            has_mem_mode = "mem_mode" in reference_inst.get_nodeattr_types()
+            memode = (
+                reference_inst.get_nodeattr("mem_mode") if has_mem_mode else "internal_decoupled"
+            )
+            if memode is None:
+                log.warning(
+                    f"Node {reference_node.name} of type "
+                    f"{reference_node.op_type} does not have a set mem_mode, "
+                    f"which is required for selectable weights extraction. "
+                    f"Assuming 'internal_decoupled'."
+                )
+                reference_inst.set_nodeattr("mem_mode", "internal_decoupled")
+            elif memode != "internal_decoupled":
+                raise Exception(
+                    f"Node {reference_node.name} has mem_mode {memode}, "
+                    f"which is not supported for selectable weights extraction. "
+                    f"Only 'internal_decoupled' is supported."
+                )
+
             reference_inst.set_nodeattr("code_gen_dir_ipgen", code_gen_dir_ipgen)
             bodies = self.get_nodeattr("bodies")
             reference_inst.set_nodeattr("bodies", bodies)
-            if reference_node.op_type.startswith("Elementwise"):
+            if self._check_types(
+                reference_node, ["Elementwise", "MVAU_hls", "Thresholding_hls", "VVAU_hls"]
+            ):
                 reference_inst.code_generation_ipgen(self._get_reference_body(), fpgapart, clk)
                 reference_inst.ipgen_singlenode_code()
             else:
@@ -323,8 +342,51 @@ class NodeContainer(HWCustomOp, RTLBackend):
             raise ValueError  # Make more verbose?
         return
 
+    def collect_ip_dirs(self, model, ipstitch_path):
+        # collect list of all IP dirs
+        ip_dirs = []
+        need_memstreamer = False
+        for node in model.graph.node:
+            node_inst = getCustomOp(node)
+            ip_dir_value = node_inst.get_nodeattr("ip_path")
+            assert os.path.isdir(
+                ip_dir_value
+            ), """The directory that should
+            contain the generated ip blocks doesn't exist."""
+            ip_dirs += [ip_dir_value]
+            if node.op_type.startswith("MVAU") or node.op_type == "Thresholding_hls":
+                if node_inst.get_nodeattr("mem_mode") == "internal_decoupled":
+                    need_memstreamer = True
+        ip_dirs += [ipstitch_path + "/ip"]
+        if need_memstreamer:
+            # add RTL streamer IP
+            ip_dirs.append(os.path.join(get_settings().finn_rtllib, "memstream"))
+        return ip_dirs
+
     def code_generation_ipi(self):
-        body = self.get_nodeattr("body_0")
+        ip_vlnv = self.get_nodeattr("ip_vlnv")
+        stitched_top = self.onnx_node.name + "_wrapper"
+        if ip_vlnv and self.get_nodeattr("gen_top_module") == stitched_top:
+            cmd = []
+
+            code_gen_dir_ipgen = self.get_nodeattr("code_gen_dir_ipgen")
+            if code_gen_dir_ipgen and os.path.isdir(code_gen_dir_ipgen):
+                cmd.append(
+                    "set_property ip_repo_paths "
+                    "[concat [get_property ip_repo_paths [current_project]] %s] "
+                    "[current_project]" % code_gen_dir_ipgen
+                )
+
+            cmd.append("update_ip_catalog -rebuild -scan_changes")
+            cmd.append("create_bd_cell -type ip -vlnv %s %s" % (ip_vlnv, self.onnx_node.name))
+            stname = "IN_%s" % self.onnx_node.name
+            cmd.append(
+                "make_bd_intf_pins_external -name %s [get_bd_intf_pins %s/%s]"
+                % (stname, self.onnx_node.name, stname)
+            )
+            return cmd
+
+        body = self._get_reference_body()
         node = body.graph.node[-1]
         inst = getCustomOp(node)
         set_attr_inst = ["code_gen_dir_ipgen", "ipgen_path"]
@@ -336,17 +398,21 @@ class NodeContainer(HWCustomOp, RTLBackend):
         for attr in set_attr_inst:
             attr_val = self.get_nodeattr(attr)
             inst.set_nodeattr(attr, attr_val)
+        inst.set_nodeattr("bodies", self.get_nodeattr("bodies"))
 
         orginal_name, inst.onnx_node.name = inst.onnx_node.name, self.onnx_node.name
         cmd = inst.code_generation_ipi()
         inst.onnx_node.name = orginal_name
 
-        # TODO Merge this code
-        if inst.onnx_node.op_type == "MVAU_rtl":
-            stname = "IN_%s" % self.onnx_node.name
-            stream_tap = os.path.join(
-                self.get_nodeattr("code_gen_dir_ipgen"), stname + "_stream_tap_wrapper.v"
-            )
+        # Here we unify the representation of the IPs with Streamtap
+        # The IO is always the same as the reference IP, but we add a stream tapper
+        # The stream tapper is connect as the last s_axis
+
+        if self._check_types(inst.onnx_node, ["MVAU", "Thresholding", "Elementwise", "VVAU"]):
+            stname = f"{self.onnx_node.name}_stream_tap_wrapper"
+            hier = self.onnx_node.name  # We sometimes have to make sure the hier exists
+
+            stream_tap = os.path.join(self.get_nodeattr("code_gen_dir_ipgen"), stname + ".v")
             source_target = "./ip/verilog/rtl_ops/%s" % self.onnx_node.name
             cmd += ["add_files -copy_to %s -norecurse %s" % (source_target, stream_tap)]
             cmd += [
@@ -357,115 +423,113 @@ class NodeContainer(HWCustomOp, RTLBackend):
                 "add_files -copy_to %s -norecurse %s"
                 % (source_target, os.environ["FINN_RTLLIB"] + "/stream_tap/hdl/skid.sv")
             ]
-            cmd += [
-                "create_bd_cell -type module -reference %s %s/%s"
-                % (
-                    stname + "_stream_tap_wrapper",
-                    self.onnx_node.name,
-                    stname + "_stream_tap_wrapper",
-                )
-            ]
-            cmd += [
-                "connect_bd_net [get_bd_pins %s/ap_clk] [get_bd_pins %s/%s/ap_clk]"
-                % (self.onnx_node.name, self.onnx_node.name, stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_net [get_bd_pins %s/ap_rst_n] [get_bd_pins %s/%s/ap_rst_n]"
-                % (self.onnx_node.name, self.onnx_node.name, stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_intf_net [get_bd_intf_pins %s/%s/m_axis_1]"
-                " [get_bd_intf_pins %s/%s/s_axis_0]"
-                % (
-                    self.onnx_node.name,
-                    stname + "_stream_tap_wrapper",
-                    self.onnx_node.name,
-                    self.onnx_node.name + "_wstrm",
-                )
-            ]
-            cmd += [
-                "make_bd_intf_pins_external -name %s [get_bd_intf_pins %s/%s/s_axis_0]"
-                % (stname, self.onnx_node.name, stname + "_stream_tap_wrapper")
-            ]
-
-        elif inst.onnx_node.op_type == "Thresholding_rtl":
-            stname = "IN_%s" % self.onnx_node.name
-            stream_tap = os.path.join(
-                self.get_nodeattr("code_gen_dir_ipgen"), stname + "_stream_tap_wrapper.v"
-            )
-            source_target = "./ip/verilog/rtl_ops/%s" % self.onnx_node.name
-            cmd += ["add_files -copy_to %s -norecurse %s" % (source_target, stream_tap)]
-            cmd += [
-                "add_files -copy_to %s -norecurse %s"
-                % (source_target, os.environ["FINN_RTLLIB"] + "/stream_tap/hdl/stream_tap.sv")
-            ]
-            cmd += [
-                "add_files -copy_to %s -norecurse %s"
-                % (source_target, os.environ["FINN_RTLLIB"] + "/stream_tap/hdl/skid.sv")
-            ]
-            cmd += [
-                "create_bd_cell -type module -reference %s %s"
-                % (stname + "_stream_tap_wrapper", stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_net [get_bd_pins %s/ap_clk] [get_bd_pins %s/ap_clk]"
-                % (self.onnx_node.name, stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_net [get_bd_pins %s/ap_rst_n] [get_bd_pins %s/ap_rst_n]"
-                % (self.onnx_node.name, stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_intf_net [get_bd_intf_pins %s/m_axis_1] [get_bd_intf_pins %s/in1_V]"
-                % (stname + "_stream_tap_wrapper", self.onnx_node.name)
-            ]
-            cmd += [
-                "make_bd_intf_pins_external -name %s [get_bd_intf_pins %s/s_axis_0]"
-                % (stname, stname + "_stream_tap_wrapper")
-            ]
-
-        elif inst.onnx_node.op_type.startswith("Elementwise"):
-            source_target = "./ip/verilog/rtl_ops/%s" % self.onnx_node.name
-
-            stname = "IN_%s" % self.onnx_node.name
-            stream_tap = os.path.join(
-                self.get_nodeattr("code_gen_dir_ipgen"), stname + "_stream_tap_wrapper.v"
-            )
-            cmd += ["add_files -copy_to %s -norecurse %s" % (source_target, stream_tap)]
-            cmd += [
-                "add_files -copy_to %s -norecurse %s"
-                % (source_target, os.environ["FINN_RTLLIB"] + "/stream_tap/hdl/stream_tap.sv")
-            ]
-            cmd += [
-                "add_files -copy_to %s -norecurse %s"
-                % (source_target, os.environ["FINN_RTLLIB"] + "/stream_tap/hdl/skid.sv")
-            ]
-            cmd += [
-                "create_bd_cell -type module -reference %s %s"
-                % (stname + "_stream_tap_wrapper", stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_net [get_bd_pins %s/ap_clk] [get_bd_pins %s/ap_clk]"
-                % (self.onnx_node.name, stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_net [get_bd_pins %s/ap_rst_n] [get_bd_pins %s/ap_rst_n]"
-                % (self.onnx_node.name, stname + "_stream_tap_wrapper")
-            ]
-            cmd += [
-                "connect_bd_intf_net [get_bd_intf_pins %s/m_axis_1] [get_bd_intf_pins %s/%s/s_axis_0]"
-                % (stname + "_stream_tap_wrapper", self.onnx_node.name, self.onnx_node.name + "_wstrm")
-            ]
-            cmd += [
-                "make_bd_intf_pins_external -name %s [get_bd_intf_pins %s/s_axis_0]"
-                % (stname, stname + "_stream_tap_wrapper")
-            ]
-
+            if self._check_types(
+                inst.onnx_node, ["MVAU", "Thresholding_hls", "VVAU", "Elementwise"]
+            ):
+                cmd += ["create_bd_cell -type module -reference %s %s/%s" % (stname, hier, stname)]
+                cmd += [
+                    "connect_bd_net [get_bd_pins %s/ap_clk] [get_bd_pins %s/%s/ap_clk]"
+                    % (self.onnx_node.name, hier, stname)
+                ]
+                cmd += [
+                    "connect_bd_net [get_bd_pins %s/ap_rst_n] [get_bd_pins %s/%s/ap_rst_n]"
+                    % (self.onnx_node.name, hier, stname)
+                ]
+                cmd += [
+                    "connect_bd_intf_net [get_bd_intf_pins %s/%s/m_axis_1]"
+                    " [get_bd_intf_pins %s/%s/s_axis_0]"
+                    % (hier, stname, hier, self.onnx_node.name + "_wstrm")
+                ]
+                cmd += [
+                    "create_bd_intf_pin -mode Slave -vlnv xilinx.com:interface:axis_rtl:1.0 %s/%s"
+                    % (hier, self.get_verilog_top_module_intf_names()["s_axis"][-1][0])
+                ]
+                cmd += [
+                    "connect_bd_intf_net [get_bd_intf_pins %s/%s] [get_bd_intf_pins %s/%s/s_axis_0]"
+                    % (
+                        hier,
+                        self.get_verilog_top_module_intf_names()["s_axis"][-1][0],
+                        hier,
+                        stname,
+                    )
+                ]
+            else:
+                # Thresholding_rtl
+                cmd += [
+                    "set_property name ip_%s [get_bd_cells %s]"
+                    % (self.onnx_node.name, self.onnx_node.name)
+                ]
+                cmd += ["group_bd_cells %s [get_bd_cells ip_%s]" % (hier, self.onnx_node.name)]
+                cmd += [
+                    "set_property name %s [get_bd_cells %s/ip_%s]"
+                    % (self.onnx_node.name, hier, self.onnx_node.name)
+                ]
+                cmd += ["create_bd_cell -type module -reference %s %s/%s" % (stname, hier, stname)]
+                cmd += ["save_bd_design"]
+                # Internal connection: stream tap output -> inner IP data input
+                cmd += [
+                    "connect_bd_intf_net "
+                    "[get_bd_intf_pins %s/%s/m_axis_1] [get_bd_intf_pins %s/%s/in1_V]"
+                    % (hier, stname, hier, self.onnx_node.name)
+                ]
+                # Expose all hierarchy pins and connect them to internal cells
+                intf_names = self.get_verilog_top_module_intf_names()
+                for intf_name, _width in intf_names.get("s_axis", []):
+                    cmd += [
+                        "create_bd_intf_pin -mode Slave "
+                        "-vlnv xilinx.com:interface:axis_rtl:1.0 %s/%s" % (hier, intf_name)
+                    ]
+                    inner_cell = stname if intf_name == "s_axis_tap" else self.onnx_node.name
+                    inner_port = "s_axis_0" if intf_name == "s_axis_tap" else intf_name
+                    cmd += [
+                        "connect_bd_intf_net [get_bd_intf_pins %s/%s] [get_bd_intf_pins %s/%s/%s]"
+                        % (hier, intf_name, hier, inner_cell, inner_port)
+                    ]
+                for intf_name, _width in intf_names.get("m_axis", []):
+                    cmd += [
+                        "create_bd_intf_pin -mode Master "
+                        "-vlnv xilinx.com:interface:axis_rtl:1.0 %s/%s" % (hier, intf_name)
+                    ]
+                    cmd += [
+                        "connect_bd_intf_net [get_bd_intf_pins %s/%s] [get_bd_intf_pins %s/%s/%s]"
+                        % (hier, intf_name, hier, self.onnx_node.name, intf_name)
+                    ]
+                for clk_name in intf_names.get("clk", []):
+                    cmd += ["create_bd_pin -dir I -type clk %s/%s" % (hier, clk_name)]
+                    cmd += [
+                        "connect_bd_net "
+                        "[get_bd_pins %s/%s] [get_bd_pins %s/%s/%s] [get_bd_pins %s/%s/%s]"
+                        % (
+                            hier,
+                            clk_name,
+                            hier,
+                            self.onnx_node.name,
+                            clk_name,
+                            hier,
+                            stname,
+                            clk_name,
+                        )
+                    ]
+                for rst_name in intf_names.get("rst", []):
+                    cmd += ["create_bd_pin -dir I -type rst %s/%s" % (hier, rst_name)]
+                    cmd += [
+                        "connect_bd_net "
+                        "[get_bd_pins %s/%s] [get_bd_pins %s/%s/%s] [get_bd_pins %s/%s/%s]"
+                        % (
+                            hier,
+                            rst_name,
+                            hier,
+                            self.onnx_node.name,
+                            rst_name,
+                            hier,
+                            stname,
+                            rst_name,
+                        )
+                    ]
         return cmd
 
     def execute_node(self, context, graph):
-        body = self.get_nodeattr("body_0")
-        node = body.graph.node[-1]
+        node = self._get_reference_node()
         inst = getCustomOp(node)
         set_attr_inst = ["code_gen_dir_ipgen", "gen_top_module"]
         for attr in set_attr_inst:
@@ -475,30 +539,8 @@ class NodeContainer(HWCustomOp, RTLBackend):
         ret = inst.execute_node(context, graph)
         return ret
 
-    # def get_input_datatype(self, ind=0):
-    #     """Returns FINN DataType of input."""
-    #     if ind == 0:
-    #         idt = DataType[self.get_nodeattr("inputDataType")]
-    #     else:
-    #         body = self.get_nodeattr("body_0")
-    #         tensor = body.graph.input[ind].name
-    #         param_node = body.find_consumer(tensor)
-    #         if is_finn_op(param_node.domain):
-    #             inst = getCustomOp(param_node)
-    #             idt = inst.get_input_datatype(1)
-    #         else:
-    #             idt = body.get_tensor_datatype(tensor)
-    #     return idt
-
-    def get_outstream_width(self, ind=0):
-        body = self.get_nodeattr("body_0")
-        node = body.graph.node[-1]
-        inst = getCustomOp(node)
-        return inst.get_outstream_width(ind=ind)
-
     def get_rtl_file_list(self, abspath=False):
-        body = self.get_nodeattr("body_0")
-        node = body.graph.node[-1]
+        node = self._get_reference_node()
         inst = getCustomOp(node)
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         gen_top_module = self.get_nodeattr("gen_top_module")
@@ -506,18 +548,18 @@ class NodeContainer(HWCustomOp, RTLBackend):
         inst.set_nodeattr("gen_top_module", gen_top_module)
         return inst.get_rtl_file_list(abspath)
 
-    def get_exp_cycles(self):
-        body = self.get_nodeattr("body_0")
-        node = body.graph.node[-1]
-        inst = getCustomOp(node)
-        return inst.get_exp_cycles()
-
     def get_verilog_top_module_intf_names(self):
-        inst = getCustomOp(self._get_reference_node())
-        intf_names = inst.get_verilog_top_module_intf_names()
-        name = f"s_axis_0_{self.onnx_node.name.split('_')[-1]}"
-        intf_names["s_axis"].append((name, 32))
-        return intf_names
+        if self.get_nodeattr("multi_dnn_type") == "selectable_weights":
+            inst = getCustomOp(self._get_reference_node())
+            intf_names = inst.get_verilog_top_module_intf_names()
+            if self._check_types(inst.onnx_node, ["Thresholding", "Elementwise"]):
+                intf_names["s_axis"] = [x for x in intf_names["s_axis"] if x[0] != "in1_V"]
+            intf_names["s_axis"].append(("s_axis_tap", 32))
+            return intf_names
+        elif self.get_nodeattr("multi_dnn_type") == "partial_reconfiguration":
+            body = self._get_reference_body()
+            ifnames_raw = body.get_metadata_prop("vivado_stitch_ifnames")
+            return json.loads(ifnames_raw)
 
     def generate_hdl_stream_tap(self):
         """Helper function to generate verilog code for stream tap components."""
@@ -531,19 +573,21 @@ class NodeContainer(HWCustomOp, RTLBackend):
             data_width = roundup_to_integer_multiple(data_width, 8)
             code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
             # calculate TAP_REP
-            # for Thresholds this value is fm size / pe
             tap_rep = 1
-            if node.op_type == "Thresholding_rtl":
+            if self._check_types(node, ["Thresholding_hls"]):
+                tap_rep = np.prod(reference_inst.get_nodeattr("numInputVectors"))
+            elif self._check_types(node, ["Thresholding_rtl"]):
+                # for RTL Thresholds this value is fm size / pe
                 tap_rep = np.prod(reference_inst.get_folded_input_shape(0)[:-1])
-            elif node.op_type == "MVAU_rtl":
-                num_inp_vec = reference_inst.get_nodeattr("numInputVectors")
-                tap_rep = np.prod(num_inp_vec)
-            elif node.op_type == "ElementwiseAdd_hls":
-                tap_rep = 1
-
+            elif self._check_types(node, ["MVAU"]):
+                tap_rep = np.prod(reference_inst.get_nodeattr("numInputVectors"))
+            elif self._check_types(node, ["VVAU"]):
+                tap_rep = np.prod(reference_inst.get_nodeattr("Dim"))
+            elif self._check_types(node, ["Elementwise"]):
+                tap_rep = np.prod(reference_inst.get_normal_output_shape()[:-1])
             tap_rep = int(tap_rep)
 
-            stname = "IN_%s" % self.onnx_node.name
+            stname = self.onnx_node.name
             code_gen_dict = {
                 "$MODULE_NAME$": [stname],
                 "$DATA_WIDTH$": [str(data_width)],
@@ -561,122 +605,3 @@ class NodeContainer(HWCustomOp, RTLBackend):
                 "w",
             ) as f:
                 f.write(template_wrapper)
-
-    def _get_larget_dt(self, dt_list):
-        def _category(dt):
-            if dt.get_canonical_name().startswith("FLOAT"):
-                return "float"
-            elif dt.is_integer():
-                return "integer"
-            elif dt.is_fixed_point():
-                return "fixed_point"
-            else:
-                raise ValueError(f"Unknown datatype category for {dt}")
-
-        categories = {_category(dt) for dt in dt_list}
-        if len(categories) > 1:
-            raise ValueError(
-                "All datatypes must be either all FLOAT, all integer, or all fixed-point."
-            )
-
-        largest_dt = dt_list[0]
-        for dt in dt_list[1:]:
-            if dt.bitwidth() > largest_dt.bitwidth():
-                largest_dt = dt
-        return largest_dt
-
-    def minimize_weight_bit_width(self, model):
-        if self._get_reference_node().op_type.startswith(
-            "VVAU"
-        ) or self._get_reference_node().op_type.startswith("MVAU"):
-            # VVAU, MVAU just return the bit width
-            wdts = []
-            for body_ind in range(self.get_nodeattr("bodies")):
-                body = self.get_nodeattr(f"body_{body_ind}")
-                node = body.graph.node[0]
-                inst = getCustomOp(node)
-                wdts += [inst.minimize_weight_bit_width(body)]
-            largest_dt = self._get_larget_dt(wdts)
-            for body_ind in range(self.get_nodeattr("bodies")):
-                body = self.get_nodeattr(f"body_{body_ind}")
-                node = body.graph.node[0]
-                inst = getCustomOp(node)
-                inst.set_nodeattr("weightDataType", largest_dt.name)
-                self.set_nodeattr(f"body_{body_ind}", body)
-        elif self._get_reference_node().op_type.startswith("Elementwise"):
-            # Elementwise applies directly
-            lhs_wdts = []
-            rhs_wdts = []
-            for body_ind in range(self.get_nodeattr("bodies")):
-                body = self.get_nodeattr(f"body_{body_ind}")
-                node = body.graph.node[0]
-                inst = getCustomOp(node)
-                inst.minimize_weight_bit_width(body)
-
-                lhs_dt = None
-                if body.get_initializer(node.input[0]) is not None:
-                    lhs_dt = body.get_tensor_datatype(node.input[0])
-                lhs_wdts += [lhs_dt]
-
-                rhs_dt = None
-                if body.get_initializer(node.input[1]) is not None:
-                    rhs_dt = body.get_tensor_datatype(node.input[1])
-                rhs_wdts += [rhs_dt]
-
-            # Check if all are none or all are not none
-            if None in lhs_wdts and not all(wdt is None for wdt in lhs_wdts):
-                raise ValueError("Either all or none of the inputs should have a weight datatype")
-            if None in rhs_wdts and not all(wdt is None for wdt in rhs_wdts):
-                raise ValueError("Either all or none of the inputs should have a weight datatype")
-
-            largest_lhs_dt = None
-            if all(wdt is not None for wdt in lhs_wdts):
-                largest_lhs_dt = self._get_larget_dt(lhs_wdts)
-
-            largest_rhs_dt = None
-            if all(wdt is not None for wdt in rhs_wdts):
-                largest_rhs_dt = self._get_larget_dt(rhs_wdts)
-
-            for body_ind in range(self.get_nodeattr("bodies")):
-                body = self.get_nodeattr(f"body_{body_ind}")
-                node = body.graph.node[0]
-                inst = getCustomOp(node)
-                if largest_lhs_dt is not None:
-                    inst.set_nodeattr("lhs_dtype", largest_lhs_dt.name)
-                    body.set_tensor_datatype(node.input[0], largest_lhs_dt)
-
-                if largest_rhs_dt is not None:
-                    inst.set_nodeattr("rhs_dtype", largest_rhs_dt.name)
-                    body.set_tensor_datatype(node.input[1], largest_rhs_dt)
-
-                self.set_nodeattr(f"body_{body_ind}", body)
-
-    def minimize_accumulator_width(self, model):
-        # Ignore attention at first
-        # VVAU, Thres, MVAU, Elementwise
-        if (
-            self._get_reference_node().op_type.startswith("VVAU")
-            or self._get_reference_node().op_type.startswith("MVAU")
-            or self._get_reference_node().op_type.startswith("Elementwise")
-            or self._get_reference_node().op_type.startswith("Thresholding")
-        ):
-            adts = []
-            for body_ind in range(self.get_nodeattr("bodies")):
-                body = self.get_nodeattr(f"body_{body_ind}")
-                node = body.graph.node[0]
-                inst = getCustomOp(node)
-                adts += [inst.minimize_accumulator_width(body)]
-            largest_adt = self._get_larget_dt(adts)
-            for body_ind in range(self.get_nodeattr("bodies")):
-                body = self.get_nodeattr(f"body_{body_ind}")
-                node = body.graph.node[0]
-                inst = getCustomOp(node)
-                if node.op_type.startswith("MVAU") or node.op_type.startswith("VVAU"):
-                    if inst.get_nodeattr("noActivation"):
-                        inst.set_nodeattr("outputDataType", largest_adt.name)
-                    inst.set_nodeattr("accDataType", largest_adt.name)
-                elif node.op_type.startswith("Thresholding"):
-                    inst.set_nodeattr("weightDataType", largest_adt.name)
-                elif node.op_type.startswith("Elementwise"):
-                    inst.set_nodeattr("out_dtype", largest_adt.name)
-                self.set_nodeattr(f"body_{body_ind}", body)

@@ -121,6 +121,9 @@ from finn.transformation.multi_dnn.mutli_dnn_steps import (
     step_apply_multi_dnn,
     step_collapse_multi_dnn,
 )
+from finn.transformation.multi_dnn.nodecontainer_transformations import (
+    GenerateNodeContainerStitched,
+)
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
 from finn.transformation.qonnx.quant_act_to_multithreshold import default_filter_function_generator
 from finn.transformation.streamline import Streamline
@@ -410,6 +413,14 @@ def prepare_loop_ops_ipgen(node, cfg):
         )
     )
     node_inst.set_nodeattr("body", loop_model.graph)
+
+
+def step_prepare_nodecontainer(model: ModelWrapper, cfg: DataflowBuildConfig):
+    # Generate a stitched ip of every nodecontainer (body)
+    # For selectable weights generate a stitiched ip for the entire container
+    # For the partial reconfiguration case generate a stitched ip for every body
+    model = model.transform(GenerateNodeContainerStitched(cfg))
+    return model
 
 
 def step_qonnx_to_finn(model: ModelWrapper, cfg: DataflowBuildConfig):
@@ -869,7 +880,6 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
     Coherency with config file node naming is ensured by calling
     `GiveUniqueNodeNames`.
     """
-    apply_to_subgraphs = True if cfg.multi_dnn_config_path is not None else False
     hw_attrs = [
         "PE",
         "SIMD",
@@ -1019,9 +1029,7 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
         model = model.transform(GiveUniqueNodeNames())
         model = model.transform(GiveReadableTensorNames())
         if cfg.folding_config_file is not None:
-            model = model.transform(
-                ApplyConfig(cfg.folding_config_file), apply_to_subgraphs=apply_to_subgraphs
-            )
+            model = model.transform(ApplyConfig(cfg.folding_config_file))
 
     # extract the final configuration and save it as json
     if model.get_nodes_by_op_type("InnerShuffle_rtl") or model.get_nodes_by_op_type(
@@ -1245,6 +1253,13 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig):
 
         experiment_info = cfg.experiments_config_path
 
+        if cfg.multi_dnn_config_path is not None:
+            with open(cfg.multi_dnn_config_path, "r") as f:
+                multi_dnn_config = json.load(f)
+            multidnn_mode = multi_dnn_config["Generation"]["mode"]
+        else:
+            multidnn_mode = None
+
         model = model.transform(
             MakePYNQDriver(
                 cfg._resolve_driver_platform(),
@@ -1252,6 +1267,7 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig):
                 clk_period_ns=cfg.synth_clk_period_ns,
                 validation_datset=cfg.validation_dataset,
                 experiment_info=experiment_info,
+                multidnn_mode=multidnn_mode,
             )
         )
 
@@ -1358,6 +1374,12 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
                 model.get_metadata_prop("vivado_synth_rpt"),
                 report_dir + "/post_synth_resources.xml",
             )
+
+            partial_bitfiles_dir = model.get_metadata_prop("partial_bitfiles_dir")
+            if partial_bitfiles_dir is not None and os.path.isdir(partial_bitfiles_dir):
+                partial_bitfile_out_dir = os.path.join(bitfile_dir, "partial_bitstreams")
+                shutil.copytree(partial_bitfiles_dir, partial_bitfile_out_dir, dirs_exist_ok=True)
+                log.info(f"Partial bitstreams copied into {partial_bitfile_out_dir}")
 
             model.set_metadata_prop("bitfile_output", os.path.abspath(bitfile_path))
 
@@ -1493,4 +1515,5 @@ build_dataflow_step_lookup = {
     "step_apply_multi_dnn": step_apply_multi_dnn,
     "step_collapse_multi_dnn": step_collapse_multi_dnn,
     "step_loop_rolling": step_loop_rolling,
+    "step_prepare_nodecontainer": step_prepare_nodecontainer,
 }
