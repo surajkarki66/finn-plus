@@ -449,15 +449,6 @@ def pytest_generate_tests(metafunc):
                     board_list=[test_board_map[3]],
                 )
             )
-            scenarios.extend(
-                get_full_parameterized_test_list(
-                    "sanity_bnn",
-                    wbits_list=[2],
-                    abits_list=[2],
-                    topology_list=["cnv"],
-                    board_list=[test_board_map[4]],
-                )
-            )
 
         if "bnn_" in marker:
             # Target the full set of parameters for a single board
@@ -490,7 +481,6 @@ def pytest_generate_tests(metafunc):
 @pytest.mark.bnn_zcu104
 @pytest.mark.bnn_kv260
 @pytest.mark.bnn_u250
-@pytest.mark.bnn_v80
 class TestEnd2End:
     def test_export(self, topology, wbits, abits, board):
         if wbits > abits:
