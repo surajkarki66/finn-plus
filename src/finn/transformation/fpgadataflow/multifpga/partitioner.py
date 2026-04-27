@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import mip
+import yaml
 from abc import ABC, abstractmethod
 from math import ceil
 from mip import Model, xsum
-from pathlib import Path
+from pathlib import Path, PosixPath, PurePath, WindowsPath
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveUniqueNodeNames
 from rich import box
@@ -15,7 +16,6 @@ from rich.table import Table
 from typing import TYPE_CHECKING, Any
 
 from finn.builder.build_dataflow_config import (
-    DataflowBuildConfig,
     MFCommunicationKernel,
     MFTopology,
     MFVerbosity,
@@ -35,8 +35,6 @@ from finn.util.platforms import platforms
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
-
-    from finn.transformation.fpgadataflow.multifpga.metadata import Device
 
 
 class Partitioner(ABC):
@@ -73,6 +71,19 @@ class Partitioner(ABC):
         max_utilization: float | None = None,
         ideal_utilization: float | None = None,
     ) -> None:
+        # MIP member variables first
+        self.status: mip.OptimizationStatus | None
+        try:
+            self.model = Model()
+        except OSError:
+            log.warning(
+                "Creation of mip.Model failed. This might be known bug "
+                "(LD_LIBRARY_PATH only modified at runtime to point to "
+                "libgurobi instead of before). Falling back to CBC"
+            )  # See finn-plus issue #67
+            self.model = Model(solver_name=mip.CBC)
+
+        # Details about the partitioning
         self.strategy = strategy
         self.max_utilization = max_utilization
         self.topology = topology
@@ -91,15 +102,6 @@ class Partitioner(ABC):
         self.network_ports_per_device = network_ports_per_device
         self.output_dir = output_dir
         self.working_directory = Path(make_build_dir(prefix="partitioning_")).absolute()
-        try:
-            self.model = Model()
-        except OSError:
-            log.warning(
-                "Creation of mip.Model failed. This might be known bug "
-                "(LD_LIBRARY_PATH only modified at runtime to point to "
-                "libgurobi instead of before). Falling back to CBC"
-            )  # See finn-plus issue #67
-            self.model = Model(solver_name=mip.CBC)
         self.latest_snapshot_path: Path | None = None
         if self.verbosity.value > MFVerbosity.NONE.value:
             log.info(f"Starting network partitioning. Selected strategy: {self.strategy.name}")
@@ -124,59 +126,38 @@ class Partitioner(ABC):
             )
 
     @abstractmethod
-    def _solve(self, solver_timeout: int) -> dict[int, Device] | None:
-        """The real solving function. Should be called indirectly via solve()."""  # noqa
-
-    @abstractmethod
-    def _write_solution_data(self, node_index_name_map: dict[int, str] | None) -> None:
-        """Write the partition results into the output directory."""
-        pass  # noqa
+    def create_result(self) -> dict[str, int]:
+        """Method that is used to generate a uniform solution type from the internal model.
+        Any model / solver can implement its constraints and variables differently and overwrite
+        this method, so that any class inheriting from the base can have a uniform result type.
+        This type should map node-names to devices.
+        The method should also error, if it is called before a solution was found.
+        """
 
     def solve(
         self,
         solver_timeout: int,
-        node_index_name_map: dict[int, str] | None = None,
-    ) -> dict[int, Device] | None:
+    ) -> dict[str, int] | None:
         """Try to optimize the objective function. If no feasible solution is found
         return None, otherwise return a mapping of nodes to their device. After trying
         to solve, creates a snapshot description of the model in a temp build dir, as well
         as a solution in the same dir, if one was found.
         """
-        result = self._solve(solver_timeout)
-        self._create_model_snapshot()
-        if result is not None:
-            self._write_solution_data(node_index_name_map)
-        return result
+        self.status = self.model.optimize(solver_timeout)  # type: ignore
+        if self.status == mip.OptimizationStatus.ERROR:
+            raise FINNMultiFPGAUserError("The solver returned an error status!")
+        if self.status in [
+            mip.OptimizationStatus.INFEASIBLE,
+            mip.OptimizationStatus.NO_SOLUTION_FOUND,
+        ]:
+            return None
+        return self.create_result()
 
-    def _create_model_snapshot(self) -> None:
-        """Create a snapshot of all model variables and conditions in a temporary
-        build dir. This is useful for debugging and checking on why a model is
-        infeasible for example.
-        """
-        constraints = ""
-        for constr in self.model.constrs:
-            constraints += f"\t{constr}\n"
-        content = "Model Snapshot\n"
-        content += f"Strategy: {self.strategy}\n"
-        content += f"Max utilization: {self.max_utilization}\n"
-        content += f"Ideal utilization: {self.ideal_util}\n"
-        content += f"Considered resource types: {self.considered_resources}\n"
-        content += f"Inseperable nodes: {self.inseperable_nodes}\n"
-        content += f"Device count: {self.device_count}\n"
-        content += f"Node count: {self.node_count}\n"
-        content += f"Resources per device: {self.get_resource_use_relative()}\n"
-        if self.resource_estimates is not None:
-            content += "Resource estimates per node:\n"
-            for node in self.resource_estimates.keys():
-                content += f"{node}\n"
-                for restype in self.resource_estimates[node].keys():
-                    if restype in self.considered_resources:
-                        content += f"\t{restype}: {self.resource_estimates[node][restype]}\n"
-        content += "Constraints:\n"
-        for cons in self.model.constrs:
-            content += f"{cons}\n"
-        with (self.working_directory / "snapshot.txt").open("w+") as f:
-            f.write(content)
+    def write_results(self, p: Path) -> None:
+        """Write the partition results as a YAML to the given directory."""
+        results = self.create_result()
+        with p.open("w+") as f:
+            yaml.dump(results, f, yaml.Dumper)
 
     @abstractmethod
     def _get_resource_use_relative(self) -> dict[int, dict[str, Any]]:
@@ -397,7 +378,8 @@ class AuroraPartitioner(Partitioner):  # noqa
                 self.model += self.chosen_device[-1] == self.device_count - 1
 
             case MFTopology.RETURNCHAIN:
-                raise NotImplementedError()
+                self.model += self.chosen_device[0] == 0
+                self.model += self.chosen_device[-1] == self.chosen_device[0]
 
             case _:
                 raise FINNMultiFPGAConfigError(
@@ -559,42 +541,19 @@ class AuroraPartitioner(Partitioner):  # noqa
             self.model.sense = mip.MINIMIZE
 
         else:
-            raise AssertionError(f"Unknown partitioning strategy: {self.strategy}")
+            raise FINNMultiFPGAConfigError(f"Unknown partitioning strategy: {self.strategy}")
 
-    def _write_solution_data(self, node_index_name_map: dict[int, str] | None) -> None:
-        """Write the solution into the output directory of the FINN build."""
-        assert self.resource_estimates is not None
-        sol = ""
-        if node_index_name_map is None:
-            node_index_name_map = {i: str(i) for i in range(self.node_count)}
-        for node in range(self.node_count):
-            sol += f"\n\nNode {node}: {node_index_name_map[node]}\n"
-            sol += f"\t\tDevice: {self.chosen_device[node].x}\n"
-            for res in self.considered_resources:
-                if res not in self.resource_estimates[node].keys():
-                    continue
-                sol += f"\t\t{res}:" + "{:.2f}%".format(
-                    100 * self.resource_estimates[node][res] / self.resources_per_device[res]
-                )
-        with (self.output_dir / "solution.txt").open("w+") as f:
-            f.write(sol)
-
-    def _solve(self, solver_timeout: int) -> dict[int, Device] | None:
-        """Solve the model and print some relevant resource information if needed."""
-        self.status = self.model.optimize(solver_timeout)  # type: ignore
-        if self.status == mip.OptimizationStatus.ERROR:
-            raise FINNMultiFPGAUserError("The solver returned an error status!")
-        if self.status in [
-            mip.OptimizationStatus.INFEASIBLE,
-            mip.OptimizationStatus.NO_SOLUTION_FOUND,
-        ]:
-            return None
+    def create_result(self) -> dict[str, int]:
+        """Create a uniform result mapping from the internal model. Refer to baseclass docstring
+        for more information.
+        """
         mapping = {}
         for i in range(self.node_count):
             mapping[i] = self.chosen_device[i].x
         return mapping
 
-    def _get_resource_use_relative(self) -> dict[Device, dict[str, Any]]:
+    def _get_resource_use_relative(self) -> dict[int, dict[str, Any]]:
+        # TODO: Return string-> mapping instead of int->
         if self.status is None:
             raise FINNMultiFPGAError(
                 "Resource utilization per device was requested "
@@ -608,26 +567,83 @@ class AuroraPartitioner(Partitioner):  # noqa
         return data
 
 
+class ApplyPartitioning(Transformation):
+    """Apply partitioning from a YAML file to the graph. Can be used to load an existing
+    configuration. Afterwards every node has their device_id node attribute set.
+    """
+
+    def __init__(self, mapping: dict[str, int] | Path) -> None:
+        """Load the mapping either directly or from the specified path."""
+        super().__init__()
+        self.mapping: dict[str, int] = {}
+        if type(mapping) is dict:
+            self.mapping = mapping
+        elif type(mapping) in [PurePath, Path, PosixPath, WindowsPath]:
+            mapping = Path(mapping)  # type: ignore
+            if not mapping.exists():
+                raise FINNMultiFPGAUserError(
+                    f"Cannot read partitioning from " f"{mapping}. No such file exists."
+                )
+            with mapping.open("r") as f:
+                self.mapping = yaml.load(f, yaml.Loader)
+        else:
+            raise FINNMultiFPGAError(f"Cannot read partitioning config of type {type(mapping)}.")
+
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+        """Assign the device ids to the nodes."""
+        for nodename, device in self.mapping.items():
+            node = model.get_node_from_name(nodename)
+            if node is None:
+                raise FINNMultiFPGAError(
+                    f"Tried assigning node {nodename} "
+                    f"to device {device}, but the model does "
+                    f"not contain any nodes of that name. "
+                    f"Is your partitioning config outdated?"
+                )
+            set_device_id(node, device)
+        return model, False
+
+
 class PartitionForMultiFPGA(Transformation):
     """Receive a model with only FPGADataflow nodes and partition it by assigning it's
     device node attribute. Partitioning is done with respect to the chosen strategy.
     To determine how partitioning is done, pass the partitioner type yourself.
+
+    The resulting IDs are assigned to the nodes
+    and additionally stored in .../output_dir/partitioning.yaml.
     """
 
-    def __init__(self, cfg: DataflowBuildConfig) -> None:
-        self.cfg = cfg
-        if self.cfg.partitioning_configuration is None:
-            raise FINNMultiFPGAConfigError(
-                "When trying to partition for Multi-FPGA (either "
-                "through a specific step or step_make_multifpga), a partitioning configuration "
-                "needs to be provided in your dataflow build configuration. Take a look at "
-                "finn/builder/build_dataflow_config.py for the definition of the partitioning "
-                "configuration."
-            )
-        self.verbosity = self.cfg.partitioning_configuration.verbosity
+    def __init__(  # noqa
+        self,
+        partitioning_strategy: PartitioningStrategy,
+        num_fpgas: int,
+        topology: MFTopology,
+        communication_kernel: MFCommunicationKernel,
+        considered_resources: list[str],
+        max_utilization: float,
+        ideal_utilization: float,
+        ports_per_device: int,
+        fpga_part: str,
+        board: str,
+        timeout: int,
+        output_dir: Path,
+        verbosity: MFVerbosity,
+    ) -> None:
+        self.verbosity = verbosity
+        self.board = board
+        self.topology = topology
+        self.output_dir = output_dir
+        self.part = fpga_part
+        self.num_fpgas = num_fpgas
+        self.considered_resources = considered_resources
+        self.max_utilization = max_utilization
+        self.ideal_utilization = ideal_utilization
+        self.ports_per_device = ports_per_device
+        self.communication_kernel = communication_kernel
+        self.partitioning_strategy = partitioning_strategy
+        self.timeout = timeout
 
         # Select the partitioner class based on the communication kernel
-        communication_kernel = self.cfg.partitioning_configuration.communication_kernel
         partitioners = {MFCommunicationKernel.AURORA: AuroraPartitioner}
         try:
             self.partitioner_type = partitioners[communication_kernel]
@@ -637,7 +653,7 @@ class PartitionForMultiFPGA(Transformation):
                 f"for usage with the communication kernel "
                 f"{communication_kernel.name}"
             ) from ke
-        if self.verbosity.value > MFVerbosity.LOW.value:
+        if verbosity.value > MFVerbosity.LOW.value:
             log.info(
                 f"Based on the communication kernel, "
                 f'partitioner "{self.partitioner_type.__name__}" was chosen!'
@@ -645,17 +661,17 @@ class PartitionForMultiFPGA(Transformation):
 
         # Run some checks
         # Needed to resolve platform
-        if self.cfg.board is None:
+        if board is None:
             raise FINNMultiFPGAConfigError(
                 "Parameter 'board' is required in config for MultiFPGA partitioning"
             )
 
         # Set the target device count
-        if self.cfg.partitioning_configuration.num_fpgas < 0:
+        if num_fpgas < 0:
             self.devices = self.estimate_required_fpgas()
             raise NotImplementedError()
         else:  # noqa
-            self.devices = self.cfg.partitioning_configuration.num_fpgas
+            self.devices = num_fpgas
 
     def estimate_required_fpgas(self) -> int:
         """Use resource utilization to estimate how many FPGAs will be needed to
@@ -663,15 +679,11 @@ class PartitionForMultiFPGA(Transformation):
         """
         raise NotImplementedError()
 
-    def check_missing_estimates(self, estimates: dict[int, dict[str, int]]) -> None:
+    def check_missing_estimates(self, estimates: dict[int, dict[str, int | float]]) -> None:
         """Check that all layers have some resource estimation associated.
         The test is only done if the RESOURCE_UTILIZATION partitioning strategy is used.
         """
-        assert self.cfg.partitioning_configuration is not None
-        if (
-            self.cfg.partitioning_configuration.partition_strategy
-            == PartitioningStrategy.RESOURCE_UTILIZATION
-        ):
+        if self.partitioning_strategy == PartitioningStrategy.RESOURCE_UTILIZATION:
             missing_estimates = False
             for layer in estimates.keys():
                 if all(estimates[layer][res] <= 0 for res in estimates[layer].keys()):
@@ -687,7 +699,7 @@ class PartitionForMultiFPGA(Transformation):
                     "about which layers have missing resource estimates!"
                 )
 
-    def show_mapping(self, model: ModelWrapper, mapping: dict[int, int]) -> None:
+    def show_mapping(self, model: ModelWrapper, mapping: dict[str, int]) -> None:
         """Display mapping either as table or prints, depending on console size."""
         # TODO: Make dependent on verbose info flag in partitioning config
         with LogDisabledConsole() as cons:
@@ -704,21 +716,22 @@ class PartitionForMultiFPGA(Transformation):
                     table.add_column("Dev", justify="left", header_style="bold", style="bold green")
                 for i, node in enumerate(model.graph.node):
                     log.info(str(i) + ": " + str(i // entries_per_table))
-                    tables[i // entries_per_table].add_row(str(i), node.name, str(int(mapping[i])))
+                    tables[i // entries_per_table].add_row(
+                        str(i), node.name, str(int(mapping[node.name]))
+                    )
                 cons.print(layout)
                 return
-        for i, node in enumerate(model.graph.node):
-            log.info(f"Mapping {node.name} -> {int(mapping[i])}")
+        for node in model.graph.node:
+            log.info(f"Mapping {node.name} -> {int(mapping[node.name])}")
         return
 
     def _log_pre_solve_information(self, partitioner: Partitioner) -> None:
         """Log some information before starting to solve the LP."""
-        assert self.cfg.partitioning_configuration is not None
         if self.verbosity.value > MFVerbosity.LOW.value:
             log.info(
                 f"[bold green]Starting solver [/bold green][Name: [bold blue]"
                 f"{partitioner.model.solver_name}[/bold blue], "
-                f"Timeout: {self.cfg.partitioning_configuration.partition_solver_timeout}]...",
+                f"Timeout: {self.timeout}]...",
                 extra={"markup": True},
             )
         if self.verbosity.value > MFVerbosity.MEDIUM.value:
@@ -728,11 +741,10 @@ class PartitionForMultiFPGA(Transformation):
     def _log_post_solve_information(
         self,
         model: ModelWrapper,
-        mapping: dict[int, int],
-        util: dict[Device, dict[str, Any]] | None,
+        mapping: dict[str, int],
+        util: dict[int, dict[str, Any]] | None,
     ) -> None:
         """Log some information after the solver is done. Also shows the partitioning results."""
-        assert self.cfg.partitioning_configuration is not None
         if self.verbosity.value > MFVerbosity.LOW.value:
             log.info("[bold green]Solver done.[/bold green]", extra={"markup": True})
         # Resource utilization
@@ -752,7 +764,7 @@ class PartitionForMultiFPGA(Transformation):
         if self.verbosity.value > MFVerbosity.NONE.value:
             device_nodes = {}
             for i in range(len(model.graph.node)):
-                dev = int(mapping[i])
+                dev = int(mapping[model.graph.node[i].name])
                 if dev not in device_nodes.keys():
                     device_nodes[dev] = 0
                 device_nodes[dev] += 1
@@ -761,10 +773,7 @@ class PartitionForMultiFPGA(Transformation):
                 percentage = float(device_nodes[dev]) / float(len(model.graph.node))
                 log.info(f"Device {dev}: {device_nodes[dev]} nodes ({percentage:.1%})")
 
-    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
-        # Checks to ensure the model can be partitioned
-        if self.cfg.partitioning_configuration is None:
-            return model, False
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         if self.devices > len(model.graph.node):
             # Stop if there are more devices than nodes
             raise FINNMultiFPGAConfigError(
@@ -785,45 +794,38 @@ class PartitionForMultiFPGA(Transformation):
 
         # Calculate resource estimates for the solver objective function (if needed)
         model = model.transform(GiveUniqueNodeNames())
-        estimates = get_estimated_model_resources(model, self.cfg._resolve_fpga_part())  # noqa
+        estimates = get_estimated_model_resources(model, self.part)
         self.check_missing_estimates(estimates)
 
         # Create the partitioner itself
-        device_resources = available_resources(
-            platforms[self.cfg.board](), self.cfg.partitioning_configuration.considered_resources
-        )
+        device_resources = available_resources(platforms[self.board](), self.considered_resources)
         partitioner = self.partitioner_type(
             devices=self.devices,
-            topology=self.cfg.partitioning_configuration.topology,
-            strategy=self.cfg.partitioning_configuration.partition_strategy,
+            topology=self.topology,
+            strategy=self.partitioning_strategy,
             inseperable_nodes=inseperable_nodes,
             nodes=len(model.graph.node),
             verbosity=self.verbosity,
-            output_dir=Path(self.cfg.output_dir),
+            output_dir=self.output_dir,
             resources_per_device=device_resources,
-            considered_resources=self.cfg.partitioning_configuration.considered_resources,
+            considered_resources=self.considered_resources,
             resource_estimates=estimates,
-            max_utilization=self.cfg.partitioning_configuration.max_utilization,
-            ideal_utilization=self.cfg.partitioning_configuration.ideal_utilization,
-            network_ports_per_device=self.cfg.partitioning_configuration.ports_per_device,
+            max_utilization=self.max_utilization,
+            ideal_utilization=self.ideal_utilization,
+            network_ports_per_device=self.ports_per_device,
         )
 
         # Temporary dir to store information regarding the partitioning
         logdir = Path(make_build_dir("partition_solver_"))
 
-        # Try and solve the model
+        # Print information
         self._log_pre_solve_information(partitioner)
-        index_name_map = dict(enumerate([node.name for node in model.graph.node]))
+
+        # Actually try to solve the model
         mapping = partitioner.solve(
-            solver_timeout=self.cfg.partitioning_configuration.partition_solver_timeout,
-            node_index_name_map=index_name_map,
+            solver_timeout=self.timeout,
         )
         if mapping is None:
-            if partitioner.latest_snapshot_path is not None:
-                log.error(
-                    f"Model solver failed. Snapshot can be "
-                    f"found in {partitioner.latest_snapshot_path.absolute()}"
-                )
             raise FINNMultiFPGAConfigError(
                 f"No feasible partitioning solution could be found for "
                 f"the given model and configuration. If you are sure "
@@ -834,8 +836,10 @@ class PartitionForMultiFPGA(Transformation):
 
         # Apply results back to the model
         # TODO: Warning for very low resource usage
-        for i, node in enumerate(model.graph.node):
-            set_device_id(node, int(mapping[i]))
+        model = model.transform(ApplyPartitioning(mapping))
+
+        # Write results
+        partitioner.write_results(self.output_dir / "partitioning.yaml")
 
         # Print results to console
         self._log_post_solve_information(model, mapping, partitioner.get_resource_use_relative())

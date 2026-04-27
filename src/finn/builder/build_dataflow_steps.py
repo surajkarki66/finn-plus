@@ -106,7 +106,10 @@ from finn.transformation.fpgadataflow.multifpga.communication_kernels import Pre
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
-from finn.transformation.fpgadataflow.multifpga.partitioner import PartitionForMultiFPGA
+from finn.transformation.fpgadataflow.multifpga.partitioner import (
+    ApplyPartitioning,
+    PartitionForMultiFPGA,
+)
 from finn.transformation.fpgadataflow.prepare_cppsim import PrepareCppSim
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
@@ -1258,7 +1261,33 @@ def step_partition_for_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) 
             "and that it has more target devices than 1!"
         )
     model.set_metadata_prop("is_multifpga", "True")
-    model = model.transform(PartitionForMultiFPGA(cfg))
+    if cfg.board is None:
+        raise FINNMultiFPGAUserError(
+            "DataflowBuildConfig parameter 'board' is missing "
+            "but required for Multi-FPGA builds!"
+        )
+
+    if cfg.partitioning_configuration.partitioning is not None:
+        log.info("Loading pre-existing partitioning...")
+        model = model.transform(ApplyPartitioning(cfg.partitioning_configuration.partitioning))
+    else:
+        model = model.transform(
+            PartitionForMultiFPGA(
+                partitioning_strategy=cfg.partitioning_configuration.partition_strategy,
+                num_fpgas=cfg.partitioning_configuration.num_fpgas,
+                topology=cfg.partitioning_configuration.topology,
+                communication_kernel=cfg.partitioning_configuration.communication_kernel,
+                considered_resources=cfg.partitioning_configuration.considered_resources,
+                max_utilization=cfg.partitioning_configuration.max_utilization,
+                ideal_utilization=cfg.partitioning_configuration.ideal_utilization,
+                ports_per_device=cfg.partitioning_configuration.ports_per_device,
+                fpga_part=cfg._resolve_fpga_part(),
+                board=cfg.board,
+                timeout=cfg.partitioning_configuration.partition_solver_timeout,
+                output_dir=Path(cfg.output_dir),
+                verbosity=cfg.partitioning_configuration.verbosity,
+            )
+        )
     return model
 
 

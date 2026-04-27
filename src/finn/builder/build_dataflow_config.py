@@ -210,6 +210,11 @@ class PartitioningConfiguration:
     set in the BuildDataflowConfig, FINN+ automatically switches to Multi-FPGA.
     """
 
+    # Existing partitionings can either be loaded from a file or
+    # passed directly. If set to None, partitioning is done and the results are
+    # saved in the output dir instead.
+    partitioning: dict[str, int] | Path | None = None
+
     # The number of FPGAs to use for Multi-FPGA
     # TODO: Allow -1, etc.
     num_fpgas: int = 0
