@@ -84,7 +84,7 @@ class CreateVitisXO(Transformation):
         vivado_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
         if vivado_proj_dir is None:
             raise FINNUserError(
-                "Error while building xo: " "'vivado_stitch_proj' was not set in the model."
+                "Error while building xo: 'vivado_stitch_proj' was not set in the model."
             )
         vivado_proj_dir = Path(vivado_proj_dir)
         stitched_ip_dir = vivado_proj_dir / "ip"
@@ -92,16 +92,10 @@ class CreateVitisXO(Transformation):
             raise FINNInternalError(f"Stitched IP directory does not exist: {stitched_ip_dir}")
 
         # Load the interface names
-        ifnames_path = model.get_metadata_prop("vivado_stitch_ifnames")
-        if ifnames_path is None:
+        ifnames = model.get_metadata_prop("vivado_stitch_ifnames")
+        if ifnames is None:
             raise FINNInternalError("Error building xo: 'vivado_stitch_ifnames' was not set!")
-        ifnames_path = Path(ifnames_path)
-        if not ifnames_path.exists():
-            raise FINNInternalError(
-                f"Error building xo: Stitched interface names "
-                f"file does not exist at {ifnames_path}"
-            )
-        interfaces = json.loads(ifnames_path.read_text())
+        interfaces = json.loads(ifnames)
 
         # NOTE: this assumes the graph is Vitis-compatible: max one axi lite interface
         # developed from instructions in UG1393 (v2019.2) and package_xo documentation
