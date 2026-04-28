@@ -177,13 +177,6 @@ class NodeConnectedSimulationController(SimulationController):
                             self._run_binary,
                             binary,
                             name,
-                            i % len(os.sched_getaffinity(0))
-                            if len(os.sched_getaffinity(0)) < len(self.names)
-                            else -1,  # sched_getaffinity needed, because
-                            # cpu_count does not handle well with workload schedulers.
-                            # We only pin the core if we have more simulations than cores to avoid
-                            # simulations moving around too much and hurting performance. If we have
-                            # more cores than simulations, we leave it to the OS to schedule.
                             depth[i] if depth is not None else None,
                             is_last_node,  # Only last node has no output FIFOs
                             is_special_for_display,  # First and last get special coloring
@@ -319,7 +312,6 @@ class NodeConnectedSimulationController(SimulationController):
         self,
         binary: Path,
         name: str | None,
-        _cpu: int | None,
         depth: list[int] | None = None,
         is_last_node: bool = False,
         is_special_for_display: bool = False,
@@ -331,7 +323,6 @@ class NodeConnectedSimulationController(SimulationController):
         Args:
             binary: Path to simulation binary
             name: Name of simulation node
-            _cpu: CPU affinity (unused)
             depth: List of FIFO depths for this node's output FIFOs
             is_last_node: True if this is the last node (no output FIFOs to configure)
             is_special_for_display: True if this node should get special color in logs
@@ -368,7 +359,7 @@ class NodeConnectedSimulationController(SimulationController):
             try:
                 # Start the simulation process with socket communication
                 proc_idx = self._start_process(
-                    binary, process_index, cpu=_cpu if _cpu is not None else -1
+                    binary, process_index
                 )
 
                 # Send configuration commands

@@ -5,6 +5,7 @@ import numpy as np
 import onnx
 import os
 import psutil
+import re
 import shlex
 import subprocess
 import sys
@@ -662,13 +663,79 @@ class SimulationBuilder:
             return _f
 
         # Build sims in parallel
-        synth_workers = max(
-            1, cast("int", (psutil.virtual_memory().free / 1024 / 1024 / 1024) // 10)
-        )  # 10GB per synthesis
-        if not functional_sim:
-            # When not having to do synthesis, the build is not memory bottlenecked and
-            # can be executed as parallel as possible
-            synth_workers = int(os.environ.get("NUM_DEFAULT_WORKERS", len(self.model.graph.node)))
+        def _try_int(value: str | None) -> int | None:
+            if value is None:
+                return None
+            try:
+                parsed = int(value)
+            except ValueError:
+                return None
+            return parsed if parsed > 0 else None
+
+        def _parse_slurm_job_cpus_per_node(value: str | None) -> int | None:
+            if value is None:
+                return None
+            # Example values: "16", "16(x2)", "16(x2),8"
+            first_chunk = value.split(",")[0].strip()
+            match = re.match(r"^(\d+)", first_chunk)
+            if match is None:
+                return None
+            parsed = int(match.group(1))
+            return parsed if parsed > 0 else None
+
+        def _get_slurm_cpus() -> int | None:
+            cpus_per_task = _try_int(os.environ.get("SLURM_CPUS_PER_TASK"))
+            if cpus_per_task is not None:
+                return cpus_per_task
+
+            cpus_on_node = _try_int(os.environ.get("SLURM_CPUS_ON_NODE"))
+            if cpus_on_node is not None:
+                return cpus_on_node
+
+            return _parse_slurm_job_cpus_per_node(os.environ.get("SLURM_JOB_CPUS_PER_NODE"))
+
+        def _get_slurm_mem_workers(cpus_alloc: int | None) -> int | None:
+            # SLURM memory env vars are in MB.
+            mem_per_node_mb = _try_int(os.environ.get("SLURM_MEM_PER_NODE"))
+            if mem_per_node_mb is not None:
+                return max(1, mem_per_node_mb // (10 * 1024))  # 10GB per synthesis
+
+            mem_per_cpu_mb = _try_int(os.environ.get("SLURM_MEM_PER_CPU"))
+            if mem_per_cpu_mb is not None and cpus_alloc is not None:
+                return max(1, (mem_per_cpu_mb * cpus_alloc) // (10 * 1024))
+
+            return None
+
+        slurm_detected = os.environ.get("SLURM_JOB_ID") is not None
+        if slurm_detected:
+            cpus_alloc = _get_slurm_cpus()
+            if cpus_alloc is None:
+                cpus_alloc = 1
+
+            if functional_sim:
+                mem_workers = _get_slurm_mem_workers(cpus_alloc)
+                if mem_workers is not None:
+                    synth_workers = max(1, min(cpus_alloc, mem_workers))
+                else:
+                    synth_workers = max(1, cpus_alloc)
+            else:
+                synth_workers = max(1, cpus_alloc)
+
+            synth_workers = min(synth_workers, len(self.model.graph.node))
+            log.info(
+                "[BuildSimulation] SLURM job detected, using "
+                f"{synth_workers} workers based on allocation."
+            )
+        else:
+            synth_workers = max(
+                1, cast("int", (psutil.virtual_memory().free / 1024 / 1024 / 1024) // 10)
+            )  # 10GB per synthesis
+            if not functional_sim:
+                # When not having to do synthesis, the build is not memory bottlenecked and
+                # can be executed as parallel as possible
+                synth_workers = int(
+                    os.environ.get("NUM_DEFAULT_WORKERS", len(self.model.graph.node))
+                )
 
         # Build (stitched IP, cmake, make) all sims in parallel and return paths to
         # the compiled executables

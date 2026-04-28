@@ -1,7 +1,6 @@
 """Control (node based) simulations via unix sockets."""
 
 import json
-import os
 import socket
 import subprocess
 import threading
@@ -64,13 +63,12 @@ class SimulationController:
         self.should_stop = False
         self.stop_lock = Lock()
 
-    def _start_process(self, binary: Path, process_id: int, cpu: int = -1) -> int:
+    def _start_process(self, binary: Path, process_id: int) -> int:
         """Start a single C++ simulation process with its own Unix socket.
 
         Args:
             binary: Path to the simulation executable
             process_id: Unique identifier for this process
-            cpu: CPU core to bind to (if -1, no binding)
 
         Returns:
             Index of the started process
@@ -99,10 +97,8 @@ class SimulationController:
 
         # Start C++ process - redirect stdout/stderr to files
         cwd = binary.parent
-        # Set CPU affinity if a specific core is requested
-        preexec_fn = (lambda: os.sched_setaffinity(0, {cpu})) if cpu != -1 else None
         proc = subprocess.Popen(
-            cmd, stdout=stdout_file, stderr=stderr_file, text=True, cwd=cwd, preexec_fn=preexec_fn
+            cmd, stdout=stdout_file, stderr=stderr_file, text=True, cwd=cwd
         )
 
         # Check if process started successfully
