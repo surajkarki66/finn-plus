@@ -158,7 +158,7 @@ class NodeIsolatedSimulationController(SimulationController):
             response = self._send_and_receive(proc_idx, "start", {})
             if response is None:
                 write_log(
-                    "No answer for the clients 'start' " "command received. Timeout or disconnect."
+                    "No answer for the clients 'start' command received. Timeout or disconnect."
                 )
                 return None
             write_log(f"Start response: {response}")
@@ -600,7 +600,7 @@ class RunLayerIsolatedSimulation(Transformation):
                             node.name
                         ][
                             key
-                        ]  # noqa
+                        ]
                         log.info(
                             f"Incoming FIFO {node.name}[{key}/{consumer_idx}] "
                             f"-> outgoing FIFO {predecessor.name}[{producer_idx}]"

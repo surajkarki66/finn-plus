@@ -57,13 +57,13 @@ def edit_file(p: Path) -> None:
 
 def output(f: Callable) -> Callable[..., Any]:
     """Add a click parameter named --output (-o) that defaults to
-    None if the param is empty, and a path otherwise."""  # noqa
+    None if the param is empty, and a path otherwise."""
     return click.option("--output", "-o", "output", default="", type=NullablePath())(f)
 
 
 def finn_deps(f: Callable) -> Callable[..., Any]:
     """Add a click parameter named --dependency-path (-d) (finn_deps) that defaults to
-    None if the param is empty, and a path otherwise."""  # noqa
+    None if the param is empty, and a path otherwise."""
     return click.option("--dependency-path", "-d", "finn_deps", default="", type=NullablePath())(f)
 
 
@@ -77,7 +77,7 @@ def finn_deps_definitions(f: Callable) -> Callable[..., Any]:
 
 def finn_build_dir(f: Callable) -> Callable[..., Any]:
     """Add a click parameter named --build-path (-b) (finn_build_dir) that defaults to
-    None if the param is empty, and a path otherwise."""  # noqa
+    None if the param is empty, and a path otherwise."""
     return click.option(
         "--build-path",
         "-b",
@@ -604,7 +604,7 @@ def _build(
         else:
             model = mp
     status(
-        f"Starting FINN build with config {flow_config.name} and model " f"{model.name}!"
+        f"Starting FINN build with config {flow_config.name} and model {model.name}!"
     )  # type: ignore
     if finn_build_dir is not None:
         finn_build_dir = finn_build_dir.expanduser().absolute()
@@ -644,7 +644,7 @@ def _build(
         )
         sys.exit(1)
     except FileNotFoundError:
-        error(f"The flow configuration file could not be found at " f"{flow_config}.")
+        error(f"The flow configuration file could not be found at {flow_config}.")
         sys.exit(1)
 
     if dfbc is None:

@@ -111,7 +111,7 @@ class ReplicateStream(HWCustomOp):
 
     # Infers the datatype of the node output
     def infer_node_datatype(self, model: ModelWrapper):  # noqa
-        # Get the node wrapped by this custom op  # noqa Duplicate
+        # Get the node wrapped by this custom op
         node = self.onnx_node
         # Test for changing input datatype
         if model.get_tensor_datatype(node.input[0]) != self.dtype:
@@ -229,8 +229,7 @@ class ReplicateStream(HWCustomOp):
         num_outputs_per_stream = np.prod(self.get_folded_output_shape()[:-1])
         if self.num > 1:
             return {f"out{i}": num_outputs_per_stream for i in range(self.num)}
-        else:
-            return num_outputs_per_stream
+        return num_outputs_per_stream
 
     # Derives the expected cycles for the stream replication operation given the
     # folding configuration

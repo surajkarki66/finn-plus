@@ -29,9 +29,9 @@ from finn.util.logging import log
 _auto_install_attempted = False
 
 # Cache for loaded modules
-_adapter_module: Optional[Any] = None
-_sim_engine_module: Optional[Any] = None
-_xsi_module: Optional[Any] = None
+_adapter_module: Any | None = None
+_sim_engine_module: Any | None = None
+_xsi_module: Any | None = None
 
 
 def is_available() -> bool:
@@ -85,9 +85,8 @@ def _attempt_auto_install() -> bool:
             if result == 0:
                 print("✓ XSI installation completed successfully!")
                 return True
-            else:
-                print("✗ XSI installation failed. Run 'python -m finn.xsi.setup' for details.")
-                return False
+            print("✗ XSI installation failed. Run 'python -m finn.xsi.setup' for details.")
+            return False
         finally:
             sys.argv = original_argv
 

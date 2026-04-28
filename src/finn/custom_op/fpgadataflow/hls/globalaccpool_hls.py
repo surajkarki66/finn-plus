@@ -91,10 +91,6 @@ class GlobalAccPool_hls(GlobalAccPool, HLSBackend):
 
     def blackboxfunction(self):
         self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-            """void {}(hls::stream<ap_uint<{}>> &in0_V,
-                hls::stream<ap_uint<{}>> &out0_V)""".format(
-                self.onnx_node.name,
-                self.get_instream_width(),
-                self.get_outstream_width(),
-            )
+            f"""void {self.onnx_node.name}(hls::stream<ap_uint<{self.get_instream_width()}>> &in0_V,
+                hls::stream<ap_uint<{self.get_outstream_width()}>> &out0_V)"""
         ]

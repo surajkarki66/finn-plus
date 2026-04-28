@@ -9,15 +9,13 @@
 
 import math
 import numpy as np
-from typing import Optional
 
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 from finn.custom_op.fpgadataflow.outer_shuffle import OuterShuffle
 
 
-def auto_size_simd(I_dim: int, SIMD: int) -> Optional[int]:
-    """
-    Return the smallest divisor d of I_dim such that d > SIMD.
+def auto_size_simd(I_dim: int, SIMD: int) -> int | None:
+    """Return the smallest divisor d of I_dim such that d > SIMD.
     if no such divisor exists, return None.
     """
     if I_dim <= 0:
@@ -26,7 +24,7 @@ def auto_size_simd(I_dim: int, SIMD: int) -> Optional[int]:
         raise ValueError("SIMD must be a non-negative integer")
 
     candidates = []
-    limit = int(math.isqrt(I_dim))
+    limit = math.isqrt(I_dim)
     for a in range(1, limit + 1):
         if I_dim % a == 0:
             b = I_dim // a

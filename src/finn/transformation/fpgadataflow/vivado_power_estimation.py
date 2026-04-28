@@ -75,7 +75,7 @@ class VivadoPowerEstimation(Transformation):
             testbench = testbench.replace("$OUTSTREAM_WIDTH$", str(out_width))
             testbench = testbench.replace("$DTYPE_WIDTH$", str(dtype_width))
             testbench = testbench.replace(
-                "$RANDOM_FUNCTION$", "$urandom_range(0, {max})".format(max=2**dtype_width - 1)
+                "$RANDOM_FUNCTION$", f"$urandom_range(0, {2**dtype_width - 1})"
             )
             with open(tmp_dir + "/switching_simulation_tb.v", "w") as tb_file:
                 tb_file.write(testbench)

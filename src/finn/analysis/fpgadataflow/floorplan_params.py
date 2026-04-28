@@ -28,15 +28,17 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from qonnx.custom_op.registry import getCustomOp
-
 from finn.util.fpgadataflow import is_fpgadataflow_node
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from qonnx.core.modelwrapper import ModelWrapper
 
 
-def floorplan_params(model):
+def floorplan_params(model:"ModelWrapper"):
     """Gathers SLR and partition IDs from nodes.
 
     Returns {node name : {slr, device id, partition id, memory port}}."""
-
     ret_dict = {
         "Defaults": {
             "slr": [-1, ["all"]],
@@ -48,9 +50,9 @@ def floorplan_params(model):
     for node in model.graph.node:
         if is_fpgadataflow_node(node):
             node_inst = getCustomOp(node)
-            node_slr = node_inst.get_nodeattr("slr")
-            node_pid = node_inst.get_nodeattr("partition_id")
-            node_mport = node_inst.get_nodeattr("mem_port")
+            node_slr = cast("int", node_inst.get_nodeattr("slr"))
+            node_pid = cast("int", node_inst.get_nodeattr("partition_id"))
+            node_mport = cast("str", node_inst.get_nodeattr("mem_port"))
             ret_dict[node.name] = {
                 "slr": node_slr,
                 "partition_id": node_pid,

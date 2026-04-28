@@ -27,23 +27,25 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import qonnx.custom_op.registry as registry
-
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
+from finn.util.basic import getHWCustomOp
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from qonnx.core.modelwrapper import ModelWrapper
 
 
-def exp_cycles_per_layer(model):
+def exp_cycles_per_layer(model:"ModelWrapper") -> dict[str, int]:
     """Estimates the number of cycles per sample for dataflow layers in the given model.
     Ensure that all nodes have unique names (by calling the GiveUniqueNodeNames
     transformation) prior to calling this analysis pass to ensure all nodes are
     visible in the results.
 
     Returns {node name : cycle estimation}."""
-
     cycle_dict = {}
     for node in model.graph.node:
         if is_hls_node(node) or is_rtl_node(node):
-            inst = registry.getCustomOp(node)
+            inst = getHWCustomOp(node)
             cycle_dict[node.name] = int(inst.get_exp_cycles())
 
     return cycle_dict

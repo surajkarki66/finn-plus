@@ -56,7 +56,7 @@ class InnerShuffle(HWCustomOp):
         dt = model.get_tensor_datatype(node.input[0])
         if dt != self.get_input_datatype():
             warn_str = (
-                f"data_type changing for {node.name}: {str(self.get_input_datatype())} -> {str(dt)}"
+                f"data_type changing for {node.name}: {self.get_input_datatype()!s} -> {dt!s}"
             )
             log.warning(warn_str)
         self.set_nodeattr("data_type", dt.name)

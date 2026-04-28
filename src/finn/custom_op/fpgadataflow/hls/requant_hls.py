@@ -226,7 +226,7 @@ static inline T clip(T const x, TLo const lo, THi const hi) {
     def dataoutstrm(self):
         """Generate code for writing output data to .npy file."""
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
-        shape = f"{{{','.join((str(i) for i in self.get_folded_output_shape(0)))}}}"
+        shape = f"{{{','.join(str(i) for i in self.get_folded_output_shape(0))}}}"
         odt = self.get_output_datatype()
         elem_hls_type = odt.get_hls_datatype_str()
         npy_type = "half" if elem_hls_type == "half" else "float"

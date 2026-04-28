@@ -40,7 +40,7 @@ class RemoveIdentityReshape(Transformation):
                     inp = model.get_tensor_shape(node.input[0])
                     # If input and target shape are the same, this is an
                     # identity operation
-                    if len(shape) == len(inp) and (shape == inp).all():  # noqa
+                    if len(shape) == len(inp) and (shape == inp).all():
                         # Remove and rewire this node
                         remove_node_and_rewire(model, node)
                         # Track whether the graph has been modified, never

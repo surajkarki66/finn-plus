@@ -119,7 +119,7 @@ class VVAU_rtl(VVAU, RTLBackend):
                     # make copy before saving the array
                     reshaped_input = reshaped_input.copy()
                     np.save(
-                        os.path.join(code_gen_dir, "input_{}.npy".format(in_ind)),
+                        os.path.join(code_gen_dir, f"input_{in_ind}.npy"),
                         reshaped_input,
                     )
                 elif in_ind > 2:
@@ -128,7 +128,7 @@ class VVAU_rtl(VVAU, RTLBackend):
 
                 sim = self.get_rtlsim()
                 nbits = self.get_instream_width(0)
-                inp = npy_to_rtlsim_input("{}/input_0.npy".format(code_gen_dir), export_idt, nbits)
+                inp = npy_to_rtlsim_input(f"{code_gen_dir}/input_0.npy", export_idt, nbits)
                 super().reset_rtlsim(sim)
 
                 if mem_mode in ["external", "internal_decoupled"]:
@@ -139,7 +139,7 @@ class VVAU_rtl(VVAU, RTLBackend):
                     if self.get_input_datatype(1) == DataType["BIPOLAR"]:
                         export_wdt = DataType["BINARY"]
                     wei = npy_to_rtlsim_input(
-                        "{}/weights.npy".format(code_gen_dir), export_wdt, wnbits
+                        f"{code_gen_dir}/weights.npy", export_wdt, wnbits
                     )
                     dim_h, dim_w = self.get_nodeattr("Dim")
                     num_w_reps = dim_h * dim_w
@@ -159,7 +159,7 @@ class VVAU_rtl(VVAU, RTLBackend):
                 odt = self.get_output_datatype()
                 target_bits = odt.bitwidth()
                 packed_bits = self.get_outstream_width()
-                out_npy_path = "{}/output.npy".format(code_gen_dir)
+                out_npy_path = f"{code_gen_dir}/output.npy"
                 out_shape = self.get_folded_output_shape()
                 rtlsim_output_to_npy(output, out_npy_path, odt, out_shape, packed_bits, target_bits)
 
@@ -170,10 +170,8 @@ class VVAU_rtl(VVAU, RTLBackend):
                 context[node.output[0]] = output
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
     def lut_estimation(self):
@@ -284,7 +282,7 @@ class VVAU_rtl(VVAU, RTLBackend):
         self.set_nodeattr("gen_top_module", self.get_verilog_top_module_name())
 
         # apply code generation to template
-        with open(template_path, "r") as f:
+        with open(template_path) as f:
             template_wrapper = f.read()
         for key in code_gen_dict:
             # transform list into long string separated by '\n'
@@ -329,10 +327,8 @@ class VVAU_rtl(VVAU, RTLBackend):
         # clk >= (critical_path_dsps - 1) * 0.605 + 0.741
         assert (
             clk > 0.741
-        ), """Infeasible clk target of {} ns has been set,
-        consider lowering the targeted clock frequency!""".format(
-            clk
-        )
+        ), f"""Infeasible clk target of {clk} ns has been set,
+        consider lowering the targeted clock frequency!"""
         critical_path_dsps = np.floor((clk - 0.741) / 0.605 + 1)
         max_chain_len = np.ceil(self.get_nodeattr("SIMD") / 3)
         dsp_chain_len = critical_path_dsps if critical_path_dsps < max_chain_len else max_chain_len
@@ -360,10 +356,8 @@ class VVAU_rtl(VVAU, RTLBackend):
         # supported RTL compute core
         assert (
             self.get_nodeattr("resType") != "lut"
-        ), """LUT-based RTL-VVU implementation currently not supported!
-        Please change resType for {} to 'dsp' or consider switching to HLS-based VVAU!""".format(
-            self.onnx_node.name
-        )
+        ), f"""LUT-based RTL-VVU implementation currently not supported!
+        Please change resType for {self.onnx_node.name} to 'dsp' or consider switching to HLS-based VVAU!"""
         is_versal_family = is_versal(fpgapart)
         assert (
             is_versal_family

@@ -14,13 +14,11 @@ from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.infer_shapes import InferShapes
-from typing import List, Optional, Tuple
 from finn.util.logging import log
 
 
 def shuffle_perfect_loopnest_coeffs(shape: tuple[int], perm: tuple[int]) -> tuple[int]:
-    """
-    Given an input shape and permutation matrix calculate the
+    """Given an input shape and permutation matrix calculate the
     coefficients for the perfect loop nest for HLS generation.
     """
     adjusted_shape = list(shape) + [1]
@@ -30,10 +28,9 @@ def shuffle_perfect_loopnest_coeffs(shape: tuple[int], perm: tuple[int]) -> tupl
 
 
 def apply_inner_shuffle_operation(
-    perm: List[int], shape: List[int] = None, simd: int = 1
-) -> List[int]:
-    """
-    Apply inner_shuffle operation: swap the last two positions
+    perm: list[int], shape: list[int] = None, simd: int = 1
+) -> list[int]:
+    """Apply inner_shuffle operation: swap the last two positions
     (..., a, b) -> (..., b, a)
     """
     if len(perm) < 2:
@@ -52,10 +49,9 @@ def apply_inner_shuffle_operation(
 
 
 def apply_outer_shuffle_operation(
-    perm: List[int], i: int, j: int, shape: List[int] = None, simd: int = 1
-) -> Optional[List[int]]:
-    """
-    Apply outer_shuffle operation: swap positions i and j
+    perm: list[int], i: int, j: int, shape: list[int] = None, simd: int = 1
+) -> list[int] | None:
+    """Apply outer_shuffle operation: swap positions i and j
     Constraint: cannot move the very last dimension
     """
     n = len(perm)
@@ -83,10 +79,9 @@ def apply_outer_shuffle_operation(
 
 
 def get_all_possible_moves(
-    perm: List[int], shape: List[int] = None, simd: int = 1
-) -> List[Tuple[List[int], str, Optional[Tuple[int, int]]]]:
-    """
-    Get all possible moves from current permutation.
+    perm: list[int], shape: list[int] = None, simd: int = 1
+) -> list[tuple[list[int], str, tuple[int, int] | None]]:
+    """Get all possible moves from current permutation.
     Returns list of (new_permutation, operation_type, operation_params) tuples.
 
     Each outer_shuffle move represents a single pairwise swap that doesn't
@@ -114,9 +109,8 @@ def get_all_possible_moves(
     return moves
 
 
-def is_valid_hardware_permutation(perm_array: List[int]) -> bool:
-    """
-    Check if a permutation array represents a valid hardware operation.
+def is_valid_hardware_permutation(perm_array: list[int]) -> bool:
+    """Check if a permutation array represents a valid hardware operation.
     Valid operations are:
     - inner_shuffle: swap last two elements
     - outer_shuffle: any permutation that doesn't move the last element
@@ -150,13 +144,12 @@ def is_valid_hardware_permutation(perm_array: List[int]) -> bool:
 
 
 def find_minimal_operation_sequence(
-    start_perm: List[int],
-    target_perm: List[int],
-    shape: List[int] = None,
+    start_perm: list[int],
+    target_perm: list[int],
+    shape: list[int] = None,
     simd: int = 1,
-) -> Optional[List[Tuple[str, Optional[Tuple[int, int]]]]]:
-    """
-    Find minimal sequence of operations to transform start_perm into target_perm.
+) -> list[tuple[str, tuple[int, int] | None]] | None:
+    """Find minimal sequence of operations to transform start_perm into target_perm.
     Uses BFS to find shortest path, ensuring all intermediate permutations
     are hardware-valid.
     Returns list of (operation_type, operation_params) tuples.
@@ -194,13 +187,12 @@ def find_minimal_operation_sequence(
 
 
 def convert_operations_to_permutations(
-    start_perm: List[int],
-    operations: List[Tuple[str, Optional[Tuple[int, int]]]],
-    shape: List[int] = None,
+    start_perm: list[int],
+    operations: list[tuple[str, tuple[int, int] | None]],
+    shape: list[int] = None,
     simd: int = 1,
-) -> List[List[int]]:
-    """
-    Convert a sequence of operations to a list of permutation arrays.
+) -> list[list[int]]:
+    """Convert a sequence of operations to a list of permutation arrays.
     Each permutation represents the transformation for that step.
     """
     current_perm = start_perm[:]
@@ -229,10 +221,9 @@ def convert_operations_to_permutations(
 
 
 def can_be_single_operation(
-    target_perm: List[int], shape: List[int] = None, simd: int = 1
-) -> Optional[Tuple[str, Optional[Tuple[int, int]]]]:
-    """
-    Check if the target permutation can be achieved with a single operation.
+    target_perm: list[int], shape: list[int] = None, simd: int = 1
+) -> tuple[str, tuple[int, int] | None] | None:
+    """Check if the target permutation can be achieved with a single operation.
     i.e. no decomposition is required.
     Returns (operation_type, operation_params) or None if not possible.
     """
@@ -260,10 +251,9 @@ def can_be_single_operation(
 
 
 def decompose_transpose_with_constraints(
-    target_perm: List[int], shape: List[int] = None, simd: int = 1
-) -> Tuple[List[List[int]], List[str]]:
-    """
-    Decompose a target permutation into a sequence of hardware-constrained
+    target_perm: list[int], shape: list[int] = None, simd: int = 1
+) -> tuple[list[list[int]], list[str]]:
+    """Decompose a target permutation into a sequence of hardware-constrained
     operations.
 
     inner_shuffle: swaps the last two dimensions
@@ -306,8 +296,7 @@ def decompose_transpose_with_constraints(
 
 
 class ShuffleDecomposition(Transformation):
-    """
-    Transformation that decomposes Shuffle nodes into
+    """Transformation that decomposes Shuffle nodes into
     a chain of Shuffle ops that can map to InnerShuffle
     and OuterShuffle nodes.
     """
@@ -321,7 +310,7 @@ class ShuffleDecomposition(Transformation):
         self._name_counter += 1
         return f"{base}_{self._name_counter}"
 
-    def get_perm(self, node) -> List[int]:
+    def get_perm(self, node) -> list[int]:
         for a in node.attribute:
             if a.name == "perm":
                 return list(a.ints)
@@ -420,8 +409,7 @@ class ShuffleDecomposition(Transformation):
 
 
 def _is_inner_shuffle(perm, shape):
-    """
-    Check if the permutation represents a streaming InnerShuffle case.
+    """Check if the permutation represents a streaming InnerShuffle case.
     A streaming InnerShuffle is only possible when only the last two dimensions
     are swapped, regardless of how many outer dimensions there are.
     """
@@ -434,8 +422,7 @@ def _is_inner_shuffle(perm, shape):
 
 
 class InferInnerOuterShuffles(Transformation):
-    """
-    Infers Inner and Outer Shuffles from Shuffle operators.
+    """Infers Inner and Outer Shuffles from Shuffle operators.
     This should run after the ShuffleDecomposition transformation.
     """
 

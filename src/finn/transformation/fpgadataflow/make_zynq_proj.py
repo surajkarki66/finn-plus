@@ -566,9 +566,9 @@ class MakeZYNQProject(Transformation):
         working_dir = os.getcwd()
         with open(synth_project_sh, "w") as f:
             f.write("#!/bin/bash \n")
-            f.write("cd {}\n".format(vivado_pynq_proj_dir))
+            f.write(f"cd {vivado_pynq_proj_dir}\n")
             f.write("vivado -mode batch -source %s\n" % ipcfg)
-            f.write("cd {}\n".format(working_dir))
+            f.write(f"cd {working_dir}\n")
 
         # call the synthesis script
         bash_command = ["bash", synth_project_sh]

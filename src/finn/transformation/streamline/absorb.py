@@ -508,7 +508,7 @@ class AbsorbTransposeIntoFlatten(Transformation):
                                 please set tensor data layout."""
                         )
                         continue
-                    elif data_layout == DataLayout.NCHW:
+                    if data_layout == DataLayout.NCHW:
                         (b, c, h, w) = model.get_tensor_shape(prod.input[0])
                         # if h=w=1 the transposition can be absorbed, otherwise
                         # the absorption would lead to an error in the behavior

@@ -56,7 +56,7 @@ class LayerNorm_rtl(LayerNorm, RTLBackend):
 
         # apply code generation to templates
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
-        with open(template_path, "r") as f:
+        with open(template_path) as f:
             template = f.read()
         for key in code_gen_dict:
             template = template.replace(key, str(code_gen_dict[key]))

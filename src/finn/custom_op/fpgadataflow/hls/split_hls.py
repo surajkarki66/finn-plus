@@ -88,7 +88,7 @@ class StreamingSplit_hls(StreamingSplit, HLSBackend):
     def timeout_condition(self):
         condition = []
         for i in range(self.get_n_outputs()):
-            condition.append("out{}_V.empty()".format(i))
+            condition.append(f"out{i}_V.empty()")
         condition = " && ".join(condition)
         self.code_gen_dict["$TIMEOUT_CONDITION$"] = [condition]
 

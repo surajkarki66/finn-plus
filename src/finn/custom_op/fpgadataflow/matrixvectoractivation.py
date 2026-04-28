@@ -256,10 +256,8 @@ class MVAU(MemStreamSupport, HWCustomOp):
                 )
         else:
             info_messages.append(
-                """noActivation attribute contains {} should
-                be 0 or 1""".format(
-                    no_act
-                )
+                f"""noActivation attribute contains {no_act} should
+                be 0 or 1"""
             )
         return info_messages
 
@@ -291,10 +289,9 @@ class MVAU(MemStreamSupport, HWCustomOp):
         # parameter can be > 0 (referring to the weights) so handle that here
         if ind == 0:
             return DataType[self.get_nodeattr("inputDataType")]
-        elif ind == 1:
+        if ind == 1:
             return DataType[self.get_nodeattr("weightDataType")]
-        else:
-            raise Exception("Undefined input ind for this layer type")
+        raise Exception("Undefined input ind for this layer type")
 
     def get_accumulator_datatype(self):
         """Returns FINN DataType of accumulator"""
@@ -480,10 +477,9 @@ class MVAU(MemStreamSupport, HWCustomOp):
         """Calculates and returns TMEM."""
         if self.get_nodeattr("noActivation") == 1:
             return 0
-        else:
-            mh = self.get_nodeattr("MH")
-            pe = self.get_nodeattr("PE")
-            return mh // pe
+        mh = self.get_nodeattr("MH")
+        pe = self.get_nodeattr("PE")
+        return mh // pe
 
     def uram_estimation(self):
         """Estimate UltraRAM (URAM) resource usage.
@@ -545,16 +541,15 @@ class MVAU(MemStreamSupport, HWCustomOp):
         # which is more efficient than internal_embedded (HLS)
         if mem_width == 1:
             return math.ceil(omega / 16384)
-        elif mem_width == 2:
+        if mem_width == 2:
             return math.ceil(omega / 8192)
-        elif mem_width <= 4:
+        if mem_width <= 4:
             return (math.ceil(omega / 4096)) * (math.ceil(mem_width / 4))
-        elif mem_width <= 9:
+        if mem_width <= 9:
             return (math.ceil(omega / 2048)) * (math.ceil(mem_width / 9))
-        elif mem_width <= 18 or omega > 512:
+        if mem_width <= 18 or omega > 512:
             return (math.ceil(omega / 1024)) * (math.ceil(mem_width / 18))
-        else:
-            return (math.ceil(omega / 512)) * (math.ceil(mem_width / 36))
+        return (math.ceil(omega / 512)) * (math.ceil(mem_width / 36))
 
     def bram_efficiency_estimation(self):
         """Estimate BRAM utilization efficiency.
@@ -783,7 +778,6 @@ class MVAU(MemStreamSupport, HWCustomOp):
         of weights.
 
         Arguments:
-
         * weights : numpy array with weights to be put into the file
         * weight_file_mode : one of {hls_header, decoupled_verilog_dat,
           decoupled_runtime}
@@ -917,16 +911,16 @@ class MVAU(MemStreamSupport, HWCustomOp):
         if weights is not None:
             if mem_mode == "internal_embedded":
                 # save hlslib-compatible weights in params.h
-                weight_filename = "{}/params.h".format(code_gen_dir)
+                weight_filename = f"{code_gen_dir}/params.h"
                 self.make_weight_file(weights, "hls_header", weight_filename)
             elif mem_mode == "internal_decoupled" or mem_mode == "external":
-                weight_filename_sim = "{}/input_1.npy".format(code_gen_dir)
+                weight_filename_sim = f"{code_gen_dir}/input_1.npy"
                 # save internal_decoupled weights for cppsim
                 self.make_weight_file(weights, "decoupled_npy", weight_filename_sim)
                 if mem_mode == "internal_decoupled":
                     # also save weights as Verilog .dat file
                     # This file will be ignored when synthesizing UltraScale memory.
-                    weight_filename_rtl = "{}/memblock.dat".format(code_gen_dir)
+                    weight_filename_rtl = f"{code_gen_dir}/memblock.dat"
                     self.make_weight_file(weights, "decoupled_verilog_dat", weight_filename_rtl)
         else:
             if not (
@@ -965,7 +959,7 @@ class MVAU(MemStreamSupport, HWCustomOp):
                     threshold_tensor, tdt, "thresholds", False, True
                 )
                 # write thresholds into thresh.h
-                f_thresh = open("{}/thresh.h".format(code_gen_dir), "w")
+                f_thresh = open(f"{code_gen_dir}/thresh.h", "w")
                 tdt_hls = tdt.get_hls_datatype_str()
                 # use binary to export bipolar activations
                 export_odt = self.get_output_datatype()

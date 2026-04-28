@@ -200,7 +200,7 @@ class ElementwiseBinaryOperation(MemStreamSupport, HWCustomOp):
             # Get the new datatype
             new_dtype = model.get_tensor_datatype(node.input[0])
             # Issue a warning message
-            log.warning(f"{node.name}: lhs_dtype changing from" f" {self.lhs_dtype} to {new_dtype}")
+            log.warning(f"{node.name}: lhs_dtype changing from {self.lhs_dtype} to {new_dtype}")
             # Set the new datatype attribute
             self.set_nodeattr("lhs_dtype", new_dtype.name)
         # Test for changing right-hand-side input datatype
@@ -208,7 +208,7 @@ class ElementwiseBinaryOperation(MemStreamSupport, HWCustomOp):
             # Get the new datatype
             new_dtype = model.get_tensor_datatype(node.input[1])
             # Issue a warning message
-            log.warning(f"{node.name}: rhs_dtype changing from" f" {self.rhs_dtype} to {new_dtype}")
+            log.warning(f"{node.name}: rhs_dtype changing from {self.rhs_dtype} to {new_dtype}")
             # Set the new datatype attribute
             self.set_nodeattr("rhs_dtype", new_dtype.name)
         # Force the output data type stored as a node attribute
@@ -878,30 +878,28 @@ class ElementwiseMax(ElementwiseBinaryOperation):
             # if any of the inputs are float, make the output float as well
             max_bitwidth = max(self.lhs_dtype.bitwidth(), self.rhs_dtype.bitwidth())
             return DataType[f"FLOAT{max_bitwidth}"]
+        all_ints = all([self.lhs_dtype.is_integer(), self.rhs_dtype.is_integer()])
+        # Get the width of the data types of the inputs  # noqa: Duplicate
+        lhs_width = self.lhs_dtype.bitwidth()
+        rhs_width = self.rhs_dtype.bitwidth()
+        if all_ints:
+            # output will be signed if both inputs are signed
+            signed = all([self.lhs_dtype.signed(), self.rhs_dtype.signed()])
+            # use the greater of the two input bitwidths for the output
+            out_width = max(lhs_width, rhs_width)
+            return DataType[f"INT{out_width}" if signed else f"UINT{out_width}"]
+        # use fixed point with max of intbits and fracbits from both sides
+        # to make sure an output coming from either input is representable
+        lhs_fracbits = self.lhs_dtype.frac_bits() if self.lhs_dtype.is_fixed_point() else 0
+        rhs_fracbits = self.rhs_dtype.frac_bits() if self.rhs_dtype.is_fixed_point() else 0
+        out_fracbits = max(lhs_fracbits, rhs_fracbits)
+        if self.lhs_dtype.is_fixed_point():
+            lhs_intbits = self.lhs_dtype.int_bits()
         else:
-            all_ints = all([self.lhs_dtype.is_integer(), self.rhs_dtype.is_integer()])
-            # Get the width of the data types of the inputs  # noqa: Duplicate
-            lhs_width = self.lhs_dtype.bitwidth()
-            rhs_width = self.rhs_dtype.bitwidth()
-            if all_ints:
-                # output will be signed if both inputs are signed
-                signed = all([self.lhs_dtype.signed(), self.rhs_dtype.signed()])
-                # use the greater of the two input bitwidths for the output
-                out_width = max(lhs_width, rhs_width)
-                return DataType[f"INT{out_width}" if signed else f"UINT{out_width}"]
-            else:
-                # use fixed point with max of intbits and fracbits from both sides
-                # to make sure an output coming from either input is representable
-                lhs_fracbits = self.lhs_dtype.frac_bits() if self.lhs_dtype.is_fixed_point() else 0
-                rhs_fracbits = self.rhs_dtype.frac_bits() if self.rhs_dtype.is_fixed_point() else 0
-                out_fracbits = max(lhs_fracbits, rhs_fracbits)
-                if self.lhs_dtype.is_fixed_point():
-                    lhs_intbits = self.lhs_dtype.int_bits()
-                else:
-                    lhs_intbits = self.lhs_dtype.bitwidth()
-                if self.rhs_dtype.is_fixed_point():
-                    rhs_intbits = self.rhs_dtype.int_bits()
-                else:
-                    rhs_intbits = self.rhs_dtype.bitwidth()
-                out_intbits = max(lhs_intbits, rhs_intbits)
-                return DataType[f"FIXED<{out_fracbits+out_intbits},{out_intbits}>"]
+            lhs_intbits = self.lhs_dtype.bitwidth()
+        if self.rhs_dtype.is_fixed_point():
+            rhs_intbits = self.rhs_dtype.int_bits()
+        else:
+            rhs_intbits = self.rhs_dtype.bitwidth()
+        out_intbits = max(lhs_intbits, rhs_intbits)
+        return DataType[f"FIXED<{out_fracbits+out_intbits},{out_intbits}>"]

@@ -187,7 +187,7 @@ def rtlsim_exec_cppxsi(
     top_module_name = top_module_file_name.strip(".v")
     if (rtlsim_so is None) or (not os.path.isfile(rtlsim_so)):
         vivado_stitch_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
-        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt", "r") as f:
+        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt") as f:
             all_verilog_srcs = f.read().split()
         rtlsim_name = model.graph.node[0].name if is_single_node else top_module_name
         single_src_dir = make_build_dir("rtlsim_" + rtlsim_name + "_")
@@ -242,9 +242,7 @@ def rtlsim_exec_cppxsi(
     # retrieve the number of inputs from execution_context
     n_inferences = execution_context[model.get_first_global_in()]
     ifnames = model.get_metadata_prop("vivado_stitch_ifnames")
-    assert not (
-        ifnames is None
-    ), "Couldn't find stitched-IP interface names, did you run IP stitching first?"
+    assert ifnames is not None, "Couldn't find stitched-IP interface names, did you run IP stitching first?"
     ifnames = eval(ifnames)
     if "aximm" in ifnames.keys() and ifnames["aximm"] != []:
         assert (
@@ -371,7 +369,7 @@ def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None)
     rtlsim_so = model.get_metadata_prop("rtlsim_so")
     if (rtlsim_so is None) or (not os.path.isfile(rtlsim_so)):
         vivado_stitch_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
-        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt", "r") as f:
+        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt") as f:
             all_verilog_srcs = f.read().split()
         top_module_file_name = file_to_basename(model.get_metadata_prop("wrapper_filename"))
         top_module_name = top_module_file_name.strip(".v")

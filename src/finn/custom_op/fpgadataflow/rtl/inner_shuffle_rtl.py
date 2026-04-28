@@ -10,16 +10,14 @@ import math
 import os
 import shutil
 from qonnx.core.datatype import DataType
-from typing import Optional
 
 from finn.custom_op.fpgadataflow.inner_shuffle import InnerShuffle
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.util.settings import get_settings
 
 
-def auto_size_simd(I_dim: int, SIMD: int) -> Optional[int]:
-    """
-    Return the smallest divisor d of I_dim such that d > SIMD.
+def auto_size_simd(I_dim: int, SIMD: int) -> int | None:
+    """Return the smallest divisor d of I_dim such that d > SIMD.
     if no such divisor exists, return None.
     """
     if I_dim <= 0:
@@ -28,7 +26,7 @@ def auto_size_simd(I_dim: int, SIMD: int) -> Optional[int]:
         raise ValueError("SIMD must be a non-negative integer")
 
     candidates = []
-    limit = int(math.isqrt(I_dim))
+    limit = math.isqrt(I_dim)
     for a in range(1, limit + 1):
         if I_dim % a == 0:
             b = I_dim // a
@@ -90,7 +88,7 @@ class InnerShuffle_rtl(InnerShuffle, RTLBackend):
             "WIDTH": dt.bitwidth(),
             "STREAM_BITS": simd * dt.bitwidth(),
         }
-        with open(template_path, "r") as f:
+        with open(template_path) as f:
             template = f.read()
         for key_name in code_gen_dict:
             key = f"${key_name}$"

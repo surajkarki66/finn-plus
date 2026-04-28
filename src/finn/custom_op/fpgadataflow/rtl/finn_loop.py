@@ -116,18 +116,15 @@ class FINNLoop(RTLBackend, HWCustomOp):
                     ret = attr.__getattribute__(dtype)
                     ret = ModelWrapper(qonnx_make_model(ret))
                     return ret
-                else:
-                    return super().get_nodeattr(name)
-            else:
-                if req:
-                    raise Exception(
-                        """Required attribute %s unspecified in
+                return super().get_nodeattr(name)
+            if req:
+                raise Exception(
+                    """Required attribute %s unspecified in
                     a %s node"""
-                        % (name, self.onnx_node.op_type)
-                    )
-                else:
-                    # not set, return default value
-                    return def_val
+                    % (name, self.onnx_node.op_type)
+                )
+            # not set, return default value
+            return def_val
         except KeyError:
             raise AttributeError("Op has no such attribute: " + name)
 
@@ -299,9 +296,8 @@ class FINNLoop(RTLBackend, HWCustomOp):
     def prepare_rtlsim(self, behav=False):
         """Creates a xsi emulation library for the RTL code generated
         for this node, sets the rtlsim_so attribute to its path."""
-
         vivado_stitch_proj_dir = self.get_nodeattr("code_gen_dir_ipgen")
-        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt", "r") as f:
+        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt") as f:
             all_verilog_srcs = f.read().split()
         top_module_file_name = os.path.basename(os.path.realpath(self.get_nodeattr("ipgen_path")))
         top_module_name = top_module_file_name.strip(".v")
@@ -406,7 +402,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         ]  # need to get correct value
 
         template_path = os.path.join(get_settings().finn_rtllib, "mlo", "loop_control_wrapper.v")
-        with open(template_path, "r") as f:
+        with open(template_path) as f:
             template_wrapper = f.read()
         for key in code_gen_dict:
             # transform list into long string separated by '\n'
@@ -434,8 +430,8 @@ class FINNLoop(RTLBackend, HWCustomOp):
                 loop_body.set_tensor_datatype(loop_tensor, param_dtype)
                 inst = getCustomOp(param_node)
                 inst.generate_params(loop_body, path)
-                param_file = "{}/memblock.dat".format(path)
-                new_param_file = "{}/{}_memblock_{}.dat".format(path, param_node.op_type, iter)
+                param_file = f"{path}/memblock.dat"
+                new_param_file = f"{path}/{param_node.op_type}_memblock_{iter}.dat"
                 if param_node.op_type.startswith("MVAU") or param_node.op_type.startswith(
                     "Elementwise"
                 ):
@@ -471,13 +467,11 @@ class FINNLoop(RTLBackend, HWCustomOp):
                 "Elementwise"
             ):
                 # concatinate all .dat files together
-                param_file = "{}/memblock_{}_id_{}.dat".format(path, param_node.op_type, i + 1)
+                param_file = f"{path}/memblock_{param_node.op_type}_id_{i + 1}.dat"
                 with open(param_file, "w") as outfile:
                     for iter in range(iteration):
-                        memblock_file = "{}/{}_memblock_{}.dat".format(
-                            path, param_node.op_type, iter
-                        )
-                        with open(memblock_file, "r") as infile:
+                        memblock_file = f"{path}/{param_node.op_type}_memblock_{iter}.dat"
+                        with open(memblock_file) as infile:
                             for line in infile:
                                 outfile.write(line)
                         os.remove(memblock_file)
@@ -491,7 +485,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
                             for fname in files:
                                 if fname.endswith("_memstream_wrapper.v"):
                                     fpath = os.path.join(dname, fname)
-                                    with open(fpath, "r") as f:
+                                    with open(fpath) as f:
                                         s = f.read()
                                     old = "%s/memblock.dat" % ipgen_path
                                     new = "%s/memblock_%s_id_%s.dat" % (
@@ -516,10 +510,8 @@ class FINNLoop(RTLBackend, HWCustomOp):
                         )
                         with open(param_file, "w") as outfile:
                             for iter in range(iteration):
-                                iter_file = "{}/{}_threshs_{}_{}_i{}.dat".format(
-                                    path, param_node.name, pe_value, stage, iter
-                                )
-                                with open(iter_file, "r") as infile:
+                                iter_file = f"{path}/{param_node.name}_threshs_{pe_value}_{stage}_i{iter}.dat"
+                                with open(iter_file) as infile:
                                     cnt = 0
                                     for line in infile:
                                         if cnt == 0:
@@ -545,7 +537,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
                         for fname in files:
                             if fname.endswith(".v"):
                                 fpath = os.path.join(dname, fname)
-                                with open(fpath, "r") as f:
+                                with open(fpath) as f:
                                     s = f.read()
                                 old = "./%s" % param_node.name
                                 new = "%s/Thresholding_id_%s" % (path, i + 1)
@@ -582,7 +574,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
                     "$TAP_REP$": [str(tap_rep)],
                 }
                 # apply code generation to template
-                with open(template_path, "r") as f:
+                with open(template_path) as f:
                     template_wrapper = f.read()
                 for key in code_gen_dict:
                     # transform list into long string separated by '\n'
@@ -1106,9 +1098,9 @@ class FINNLoop(RTLBackend, HWCustomOp):
         working_dir = os.environ["PWD"]
         with open(make_project_sh, "w") as f:
             f.write("#!/bin/bash \n")
-            f.write("cd {}\n".format(vivado_stitch_proj_dir))
+            f.write(f"cd {vivado_stitch_proj_dir}\n")
             f.write("vivado -mode batch -source make_loop_ip.tcl\n")
-            f.write("cd {}\n".format(working_dir))
+            f.write(f"cd {working_dir}\n")
         bash_command = ["bash", make_project_sh]
         process_compile = subprocess.Popen(bash_command, stdout=subprocess.PIPE)
         process_compile.communicate()

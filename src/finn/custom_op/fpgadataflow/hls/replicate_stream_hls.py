@@ -34,7 +34,7 @@ class ReplicateStream_hls(  # noqa: Class name does not follow
         # Find the widths of the widest output
         # Note: there is one output per replica
         o_bits_max = max(
-            (self.get_outstream_width(ind) for ind in range(self.num))
+            self.get_outstream_width(ind) for ind in range(self.num)
         )
         # Find the biggest of the inputs/outputs
         return max([i_bits_max, o_bits_max])
@@ -92,7 +92,7 @@ class ReplicateStream_hls(  # noqa: Class name does not follow
             # Write the same input element into each output stream
             *(f"{out(i)}.write(x);" for i in range(self.num)),
             # End of for-loop over repetitions body
-            f"}}"  # noqa: f-string symmetry
+            "}"  # noqa: f-string symmetry
         ]
 
     # Generates essentially the head of the C++ function from which the IP block
@@ -136,9 +136,9 @@ class ReplicateStream_hls(  # noqa: Class name does not follow
 
     # Returns the names of input and output interfaces grouped by protocol
     def get_verilog_top_module_intf_names(self):
-        # Start collecting interface names in a dictionary  # noqa Duplicate
+        # Start collecting interface names in a dictionary
         # starting with clock and reset
-        intf_names = {"clk": ["ap_clk"], "rst": ["ap_rst_n"]}  # noqa
+        intf_names = {"clk": ["ap_clk"], "rst": ["ap_rst_n"]}
         # AXI stream input interfaces
         intf_names["s_axis"] = [
             # Just one input stream

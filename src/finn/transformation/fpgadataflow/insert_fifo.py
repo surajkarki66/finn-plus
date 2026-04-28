@@ -39,8 +39,7 @@ from finn.util.logging import log
 def _is_fifo_node(node):
     if node.op_type.startswith("StreamingFIFO"):
         return True
-    else:
-        return False
+    return False
 
 
 def _suitable_node(node):
@@ -48,12 +47,9 @@ def _suitable_node(node):
         if is_fpgadataflow_node(node):
             if not _is_fifo_node(node):
                 return True
-            else:
-                return False
-        else:
             return False
-    else:
         return False
+    return False
 
 
 def _suitable_folded_shapes(ishape, oshape):

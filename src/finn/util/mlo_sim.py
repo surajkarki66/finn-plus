@@ -33,7 +33,7 @@
 import numpy as np
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
-from typing import Callable
+from collections.abc import Callable
 
 from finn import xsi
 
@@ -51,7 +51,7 @@ def is_mlo(model: ModelWrapper) -> bool:
 def dat_file_to_numpy_array(file_path):
     byte_values = []
 
-    with open(file_path, "r") as file:
+    with open(file_path) as file:
         for line in file:
             hex_string = line.strip()
             for i in range(len(hex_string) - 2, -1, -2):
@@ -68,7 +68,6 @@ def mlo_prehook_func_factory(node) -> Callable[[SimEngine], None]:
     """Factory that will construct a prehook function to
     setup the axi memory mapped interfaces for MLO validation.
     """
-
     # Get the FINNLoop
     finnloop_op = getCustomOp(node)
 

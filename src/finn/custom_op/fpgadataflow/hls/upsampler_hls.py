@@ -31,8 +31,7 @@ from finn.custom_op.fpgadataflow.upsampler import UpsampleNearestNeighbour
 
 
 class UpsampleNearestNeighbour_hls(UpsampleNearestNeighbour, HLSBackend):
-    """
-    Corresponds to finn-hlslib UpsampleNearestNeighbour function.
+    """Corresponds to finn-hlslib UpsampleNearestNeighbour function.
     Upsampling is done with the Nearest Neighbour algorithm.
     The layer expects square feature maps for the in and output.
     """
@@ -53,21 +52,21 @@ class UpsampleNearestNeighbour_hls(UpsampleNearestNeighbour, HLSBackend):
         self.code_gen_dict["$DEFINES$"] = []
 
         HI = self.get_nodeattr("HI")
-        self.code_gen_dict["$DEFINES$"] += ["#define HI {}".format(HI)]
+        self.code_gen_dict["$DEFINES$"] += [f"#define HI {HI}"]
 
         WI = self.get_nodeattr("WI")
-        self.code_gen_dict["$DEFINES$"] += ["#define WI {}".format(WI)]
+        self.code_gen_dict["$DEFINES$"] += [f"#define WI {WI}"]
 
         HO = self.get_nodeattr("HO")
-        self.code_gen_dict["$DEFINES$"] += ["#define HO {}".format(HO)]
+        self.code_gen_dict["$DEFINES$"] += [f"#define HO {HO}"]
 
         WO = self.get_nodeattr("WO")
-        self.code_gen_dict["$DEFINES$"] += ["#define WO {}".format(WO)]
+        self.code_gen_dict["$DEFINES$"] += [f"#define WO {WO}"]
 
         SIMD = self.get_nodeattr("SIMD")
 
         CF = self.get_nodeattr("NumChannels") // SIMD
-        self.code_gen_dict["$DEFINES$"] += ["#define CF {}".format(CF)]
+        self.code_gen_dict["$DEFINES$"] += [f"#define CF {CF}"]
 
     def docompute(self):
         self.code_gen_dict["$DOCOMPUTE$"] = [

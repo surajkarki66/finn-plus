@@ -1,5 +1,4 @@
-"""
-Base class for FINN benchmarking framework.
+"""Base class for FINN benchmarking framework.
 
 This module provides the foundational `bench` class for running automated benchmarks
 of FINN dataflow builds. It wraps the existing FINN builder and handles configuration
@@ -26,8 +25,7 @@ from finn.util.settings import get_settings
 
 
 class bench:
-    """
-    Base class for FINN benchmarking operations.
+    """Base class for FINN benchmarking operations.
 
     This class provides the foundational framework for running automated benchmarks
     of FINN dataflow builds. It manages the complete lifecycle from configuration
@@ -41,8 +39,7 @@ class bench:
     """
 
     def __init__(self, params, task_id, run_id, work_dir, artifacts_dir, save_dir, debug=True):
-        """
-        Initialize a new benchmark instance that manages a single FINN build.
+        """Initialize a new benchmark instance that manages a single FINN build.
 
         Args:
             params (dict): Parameters for the FINN builder and the bench instance itself
@@ -144,7 +141,7 @@ class bench:
         dut_yaml_name = self._params["dut"] + ".yml"
         dut_path = os.path.join(os.path.dirname(__file__), "dut", dut_yaml_name)
         if os.path.isfile(dut_path):
-            with open(dut_path, "r") as f:
+            with open(dut_path) as f:
                 dut_cfg = yaml.load(f, Loader=yaml.SafeLoader)
             for key in dut_cfg:
                 if key in custom_params:
@@ -197,8 +194,7 @@ class bench:
         self._artifacts_collection.append(("deploy", os.path.join(self._build_dir, "deploy"), True))
 
     def _save_artifact(self, target_path, source_path, archive=False):
-        """
-        Save a single artifact from source to target location.
+        """Save a single artifact from source to target location.
 
         Args:
             target_path (str): Destination path where artifact will be saved
@@ -223,8 +219,7 @@ class bench:
             shcopy(source_path, target_path)
 
     def save_artifacts_collection(self):
-        """
-        Save all collected pipeline artifacts.
+        """Save all collected pipeline artifacts.
 
         This method should be called upon successful or failed completion of a run.
         It processes all artifacts in the artifacts_collection list and saves them
@@ -241,8 +236,7 @@ class bench:
             self._save_artifact(target_path, source_path, archive)
 
     def save_local_artifacts_collection(self):
-        """
-        Save all collected local artifacts for debugging.
+        """Save all collected local artifacts for debugging.
 
         This method should be called upon successful or failed completion of a run.
         It processes all artifacts in the local_artifacts_collection list and saves
@@ -257,8 +251,7 @@ class bench:
             self._save_artifact(target_path, source_path, archive)
 
     def _step_export_onnx(self):
-        """
-        Export or generate ONNX model for benchmarking.
+        """Export or generate ONNX model for benchmarking.
 
         This method must be implemented by subclasses to provide the ONNX model
         that will be processed by the FINN build flow.
@@ -272,11 +265,9 @@ class bench:
             This is an abstract method that must be overridden by concrete
             benchmark implementations.
         """
-        pass
 
     def _step_build_setup(self):
-        """
-        Initialize the DataflowBuildConfig for this benchmark.
+        """Initialize the DataflowBuildConfig for this benchmark.
 
         This method can be overridden by subclasses if the setup is too complex
         for YAML definition. The default implementation loads configuration from
@@ -294,14 +285,13 @@ class bench:
         dut_yaml_name = self._params["dut"] + ".yml"
         dut_path = os.path.join(os.path.dirname(__file__), "dut", dut_yaml_name)
         if os.path.isfile(dut_path):
-            with open(dut_path, "r") as f:
+            with open(dut_path) as f:
                 return DataflowBuildConfig.from_yaml(f)
         else:
             raise Exception("No DUT-specific YAML build definition found")
 
     def run(self):
-        """
-        Execute the benchmark run.
+        """Execute the benchmark run.
 
         This method defaults to running the complete FINN build flow but may be
         overridden by subclasses to implement custom benchmark sequences.
@@ -313,8 +303,7 @@ class bench:
         return self._steps_full_build_flow()
 
     def _step_parse_builder_output(self, build_dir):
-        """
-        Parse and analyze the output from the FINN builder.
+        """Parse and analyze the output from the FINN builder.
 
         Args:
             build_dir (str): Path to the build output directory
@@ -341,8 +330,7 @@ class bench:
             # TODO: mark job as failed if verification fails?
 
     def _steps_full_build_flow(self):
-        """
-        Execute the complete FINN dataflow build sequence.
+        """Execute the complete FINN dataflow build sequence.
 
         This method implements the default step sequence for benchmarking a full
         FINN builder flow, including:

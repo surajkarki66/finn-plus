@@ -42,7 +42,6 @@ def post_synth_res(model, override_synth_report_filename=None):
     visible in the results.
 
     Returns {node name : resources_dict}."""
-
     res_dict = {}
     if override_synth_report_filename is not None:
         synth_report_filename = override_synth_report_filename
@@ -112,8 +111,7 @@ def post_synth_res(model, override_synth_report_filename=None):
             for restype, ind in restype_to_ind.items():
                 node_dict[restype] = int(row[ind].attrib["contents"])
             return node_dict
-        else:
-            return None
+        return None
 
     # global (top-level) stats, including shell etc.
     top_dict = get_instance_stats("(top)")

@@ -163,7 +163,7 @@ class RTLBackend(HWCustomOp, ABC):
 
     def execute_node(
         self, context: dict[str, npt.NDArray], graph: "GraphProto"
-    ) -> None:  # noqa: ARG002
+    ) -> None:
         """Execute this node's RTL simulation.
 
         Args:

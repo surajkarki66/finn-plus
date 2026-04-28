@@ -47,8 +47,7 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
         return my_attrs
 
     def adapt_for_loop_body(self, input_types):
-        """
-        Adapt elementwise binary operator for loop body execution.
+        """Adapt elementwise binary operator for loop body execution.
 
         When an elementwise operator is placed inside a loop, parameters that
         are indexed per iteration (PARAMETER type) need to be received as
@@ -104,7 +103,7 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
             "STREAM_BITS": pe * 32,
         }
 
-        with open(template_path, "r") as f:
+        with open(template_path) as f:
             template = f.read()
         for key_name in code_gen_dict:
             template = template.replace(f"${key_name}$", str(code_gen_dict[key_name]))
@@ -138,8 +137,7 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
         ]
 
     def get_verilog_top_module_intf_names(self):
-        """
-        Return the interface names for the Verilog top module.
+        """Return the interface names for the Verilog top module.
 
         For RTL elementwise operations, this includes handling for MLO mode
         where the rhs parameter may be streamed as an input.

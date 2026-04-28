@@ -103,8 +103,7 @@ class ElementwiseBinaryOperation_hls(
         return max([i_bits_max, o_bits_max])
 
     def adapt_for_loop_body(self, input_types):
-        """
-        Adapt elementwise binary operator for loop body execution.
+        """Adapt elementwise binary operator for loop body execution.
 
         When an elementwise operator is placed inside a loop, parameters that
         are indexed per iteration (PARAMETER type) need to be received as
@@ -1212,4 +1211,3 @@ class ElementwiseMax_hls(
 ):
     """HLS Implementation of the elementwise max operation."""
 
-    pass

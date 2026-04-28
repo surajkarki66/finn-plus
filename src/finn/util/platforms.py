@@ -220,7 +220,7 @@ class Zynq7020_Platform(Platform):
         limits=DEFAULT_RES_LIMITS,
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
-        super(Zynq7020_Platform, self).__init__(
+        super().__init__(
             nslr=1,
             ndevices=ndevices,
             sll_count=[[0]],
@@ -243,7 +243,7 @@ class ZU3EG_Platform(Platform):
         limits=DEFAULT_RES_LIMITS,
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
-        super(ZU3EG_Platform, self).__init__(
+        super().__init__(
             nslr=1,
             ndevices=ndevices,
             sll_count=[[0]],
@@ -266,7 +266,7 @@ class ZU7EV_Platform(Platform):
         limits=DEFAULT_RES_LIMITS,
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
-        super(ZU7EV_Platform, self).__init__(
+        super().__init__(
             nslr=1,
             ndevices=ndevices,
             sll_count=[[0]],
@@ -289,7 +289,7 @@ class ZU9EG_Platform(Platform):
         limits=DEFAULT_RES_LIMITS,
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
-        super(ZU9EG_Platform, self).__init__(
+        super().__init__(
             nslr=1,
             ndevices=ndevices,
             sll_count=[[0]],
@@ -312,7 +312,7 @@ class ZU28DR_Platform(Platform):
         limits=DEFAULT_RES_LIMITS,
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
-        super(ZU28DR_Platform, self).__init__(
+        super().__init__(
             nslr=1,
             ndevices=ndevices,
             sll_count=[[0]],
@@ -337,7 +337,7 @@ class Alveo_NxU50_Platform(Platform):
     ):
         # according to Vivado: 23040 SLR0 <-> SLR1
         sll_counts = [[0, 5000], [5000, 0]]
-        super(Alveo_NxU50_Platform, self).__init__(
+        super().__init__(
             nslr=2,
             ndevices=ndevices,
             sll_count=sll_counts,
@@ -369,7 +369,7 @@ class Alveo_NxU200_Platform(Platform):
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
         sll_counts = [[0, 5000, 0], [5000, 0, 5000], [0, 5000, 0]]
-        super(Alveo_NxU200_Platform, self).__init__(
+        super().__init__(
             nslr=3,
             ndevices=ndevices,
             sll_count=sll_counts,
@@ -407,7 +407,7 @@ class Alveo_NxU250_Platform(Platform):
             [0, 5000, 0, 5000],
             [0, 0, 5000, 0],
         ]
-        super(Alveo_NxU250_Platform, self).__init__(
+        super().__init__(
             nslr=4,
             ndevices=ndevices,
             sll_count=sll_counts,
@@ -435,7 +435,7 @@ class Alveo_NxU280_Platform(Platform):
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
         sll_counts = [[0, 5000, 0], [5000, 0, 5000], [0, 5000, 0]]
-        super(Alveo_NxU280_Platform, self).__init__(
+        super().__init__(
             nslr=3,
             ndevices=ndevices,
             sll_count=sll_counts,
@@ -469,7 +469,7 @@ class Alveo_NxU55C_Platform(Platform):
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
         sll_counts = [[0, 5000, 0], [5000, 0, 5000], [0, 5000, 0]]
-        super(Alveo_NxU55C_Platform, self).__init__(
+        super().__init__(
             nslr=3,
             ndevices=ndevices,
             sll_count=sll_counts,

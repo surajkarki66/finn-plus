@@ -41,7 +41,6 @@ from finn.util.fpgadataflow import is_hls_node
 def _codegen_single_node(node, model):
     """Calls C++ code generation for one node. Resulting code can be used
     to simulate node using cppsim."""
-
     op_type = node.op_type
     try:
         # lookup op_type in registry of CustomOps

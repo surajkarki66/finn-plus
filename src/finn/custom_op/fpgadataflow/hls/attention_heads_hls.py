@@ -11,7 +11,7 @@ import os
 # Base class for specializing HW operators as implemented via HLS
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 # The generic HW custom operator version of the operator as a base class
-from finn.custom_op.fpgadataflow.attention_heads import (  # noqa
+from finn.custom_op.fpgadataflow.attention_heads import (
     MergeMultiHeads, SplitMultiHeads
 )
 
@@ -33,8 +33,8 @@ class SplitMultiHeads_hls(  # noqa: Class name does not follow
 
     # Executes multi-head splitting in C++ simulation
     def _execute_node_cppsim(self, context, graph):  # noqa: graph unused
-        # Get the node wrapped by this custom op  # noqa Duplicate
-        node = self.onnx_node   # noqa Duplicate
+        # Get the node wrapped by this custom op
+        node = self.onnx_node
         # Input data is stored in numpy files in the code generation dictionary
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
         # Get the input out of the execution context
@@ -66,7 +66,7 @@ class SplitMultiHeads_hls(  # noqa: Class name does not follow
         # Find the widths of the widest output
         # Note: there is one output per head
         o_bits_max = max(
-            (self.get_outstream_width(ind) for ind in range(self.heads))
+            self.get_outstream_width(ind) for ind in range(self.heads)
         )
         # Find the biggest of the inputs/outputs
         return max([i_bits_max, o_bits_max])
@@ -151,13 +151,13 @@ class SplitMultiHeads_hls(  # noqa: Class name does not follow
             # output elements per head and write into the corresponding stream
             *(f"{out(i)}.write(x{split(i)});" for i in range(self.heads)),
             # End of for-loop over repetitions body
-            f"}}"  # noqa: f-string symmetry
+            "}"  # noqa: f-string symmetry
         ]
 
     # Generates C++ code for reading the output stream and converting back to
     # numpy format for testing in C++ simulation
     def dataoutstrm(self):
-        # Output data will be stored in numpy files in the  # noqa Duplicate
+        # Output data will be stored in numpy files in the
         # code generation dictionary
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
         # Get the expected shape of the folded output array formatted as a C++
@@ -165,7 +165,7 @@ class SplitMultiHeads_hls(  # noqa: Class name does not follow
         # Note: Valid formatting relies on correct placement of curly braces
         # and line breaks: Open/close all three braces on the same line of code
         # to avoid '\n' to be inserted into the string
-        shape = f"""{{{','.join((str(i) for i in self.get_folded_output_shape()))}}}"""
+        shape = f"""{{{','.join(str(i) for i in self.get_folded_output_shape())}}}"""
         # Start collecting function calls to write the output data stream
         self.code_gen_dict["$DATAOUTSTREAM$"] = []
 
@@ -233,9 +233,9 @@ class SplitMultiHeads_hls(  # noqa: Class name does not follow
 
     # Returns the names of input and output interfaces grouped by protocol
     def get_verilog_top_module_intf_names(self):
-        # Start collecting interface names in a dictionary  # noqa Duplicate
+        # Start collecting interface names in a dictionary
         # starting with clock and reset
-        intf_names = {"clk": ["ap_clk"], "rst": ["ap_rst_n"]}  # noqa
+        intf_names = {"clk": ["ap_clk"], "rst": ["ap_rst_n"]}
         # AXI stream input interfaces
         intf_names["s_axis"] = [
             # Just one input stream
@@ -308,7 +308,7 @@ class MergeMultiHeads_hls(  # noqa: Class name does not follow
         # Find the widths of the widest output
         # Note: there is one output per head
         o_bits_max = max(
-            (self.get_outstream_width(ind) for ind in range(self.heads))
+            self.get_outstream_width(ind) for ind in range(self.heads)
         )
         # Find the biggest of the inputs/outputs
         return max([i_bits_max, o_bits_max])
@@ -405,7 +405,7 @@ class MergeMultiHeads_hls(  # noqa: Class name does not follow
         # Note: Valid formatting relies on correct placement of curly braces
         # and line breaks: Open/close all three braces on the same line of code
         # to avoid '\n' to be inserted into the string
-        shape = f"""{{{','.join((str(i) for i in self.get_folded_output_shape()))}}}"""
+        shape = f"""{{{','.join(str(i) for i in self.get_folded_output_shape())}}}"""
         # Generate function call for reading from the output stream into the
         # output file
         self.code_gen_dict["$DATAOUTSTREAM$"] = [
@@ -466,7 +466,7 @@ class MergeMultiHeads_hls(  # noqa: Class name does not follow
     def get_verilog_top_module_intf_names(self):
         # Start collecting interface names in a dictionary starting with clock
         # and reset
-        intf_names = {"clk": ["ap_clk"], "rst": ["ap_rst_n"]}  # noqa
+        intf_names = {"clk": ["ap_clk"], "rst": ["ap_rst_n"]}
         # AXI stream input interfaces
         intf_names["s_axis"] = [
             # One input stream per head

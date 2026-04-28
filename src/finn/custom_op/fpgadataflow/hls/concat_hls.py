@@ -63,7 +63,7 @@ class StreamingConcat_hls(StreamingConcat, HLSBackend):
             in_streams.append("in%d_V" % i)
         in_stream_names = ", ".join(in_streams)
         in_stream_folds = ", ".join(input_folds)
-        comp_call = "StreamingConcat<{}>(out0_V, {});".format(in_stream_folds, in_stream_names)
+        comp_call = f"StreamingConcat<{in_stream_folds}>(out0_V, {in_stream_names});"
         self.code_gen_dict["$DOCOMPUTE$"] = [comp_call]
 
     def blackboxfunction(self):

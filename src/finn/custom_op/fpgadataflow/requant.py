@@ -96,9 +96,8 @@ class Requant(HWCustomOp):
         """Returns FINN DataType of input."""
         if ind == 0:
             return DataType[self.get_nodeattr("inputDataType")]
-        else:
-            # Scale and bias are float
-            return DataType["FLOAT32"]
+        # Scale and bias are float
+        return DataType["FLOAT32"]
 
     def get_output_datatype(self, ind=0):
         """Returns FINN DataType of output."""
@@ -122,8 +121,7 @@ class Requant(HWCustomOp):
             num_channels = self.get_nodeattr("NumChannels")
             fold = num_channels // pe
             return tuple(list(normal_shape[:-1]) + [fold, pe])
-        else:
-            return self.get_normal_input_shape(ind)
+        return self.get_normal_input_shape(ind)
 
     def get_folded_output_shape(self, ind=0):
         """Returns folded output shape."""
@@ -172,9 +170,8 @@ class Requant(HWCustomOp):
             pe = self.get_nodeattr("PE")
             idt = self.get_input_datatype(0)
             return pe * idt.bitwidth()
-        else:
-            # Scale and bias (inputs 1, 2) are embedded, not streamed
-            return 0
+        # Scale and bias (inputs 1, 2) are embedded, not streamed
+        return 0
 
     def get_outstream_width(self, ind=0):
         """Returns output stream width."""

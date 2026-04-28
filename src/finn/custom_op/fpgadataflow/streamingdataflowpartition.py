@@ -81,7 +81,6 @@ class StreamingDataflowPartition(CustomOp):
             for tname in ret.keys():
                 if tname not in [x.name for x in model.graph.output]:
                     context[node.name + "_" + tname] = ret[tname]
-        pass
 
     def verify_node(self):
         info_messages = []
@@ -92,10 +91,8 @@ class StreamingDataflowPartition(CustomOp):
             info_messages.append("The number of attributes is correct")
         else:
             info_messages.append(
-                """The number of attributes is incorrect,
-            {} should have {} attributes""".format(
-                    self.onnx_node.op_type, num_of_attr
-                )
+                f"""The number of attributes is incorrect,
+            {self.onnx_node.op_type} should have {num_of_attr} attributes"""
             )
         # verify that all necessary attributes exist
         try:

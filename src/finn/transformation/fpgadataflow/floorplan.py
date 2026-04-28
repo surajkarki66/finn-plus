@@ -152,7 +152,7 @@ class Floorplan(Transformation):
                 node_inst.set_nodeattr("partition_id", partition_cnt)
                 partition_cnt += 1
                 continue
-            elif not (
+            if not (
                 node.op_type.startswith("MVAU")
                 and node_inst.get_nodeattr("mem_mode") is not None
                 and node_inst.get_nodeattr("mem_mode") == "external"
@@ -188,9 +188,8 @@ class Floorplan(Transformation):
                     partition_id = pre_inst.get_nodeattr("partition_id")
                     node_inst.set_nodeattr("partition_id", partition_id)
                     break
-                else:
-                    # SLR mismatch with predecessor, can't assign same partition
-                    slr_mismatch_count += 1
+                # SLR mismatch with predecessor, can't assign same partition
+                slr_mismatch_count += 1
 
             if slr_mismatch_count == len(pre_nodes):
                 # SLR mismatch with ALL predecessors -> start new partition

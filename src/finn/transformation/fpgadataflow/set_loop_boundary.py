@@ -11,8 +11,7 @@ from qonnx.transformation.base import Transformation
 
 
 class SetLoopBoundary(Transformation):
-    """
-    Sets metadata attributes to nodes between defined node or tensor ranges in an ONNX model.
+    """Sets metadata attributes to nodes between defined node or tensor ranges in an ONNX model.
 
     :param node_metadata: Dictionary containing metadata attributes to set on the nodes.
     :param node_range: Tuple containing start and end node names (start_node, end_node).

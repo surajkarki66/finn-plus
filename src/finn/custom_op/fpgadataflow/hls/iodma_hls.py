@@ -115,32 +115,30 @@ class IODMA_hls(HLSBackend, HWCustomOp):
     def get_folded_input_shape(self, ind=0):
         if self.get_nodeattr("direction") == "in":
             raise ValueError("Folded input shape not defined for input IODMA")
-        else:
-            shape = list(self.get_normal_input_shape())
-            itype_bits = self.get_input_datatype().bitwidth()
-            intfw = self.get_nodeattr("streamWidth")
-            assert intfw % itype_bits == 0, "Input stream width must be a multiple of datatype bits"
-            elems_per_word = intfw // itype_bits
-            assert shape[-1] % elems_per_word == 0, "Fold depth must be integer"
-            fold_depth = shape[-1] // elems_per_word
-            shape[-1] = fold_depth
-            shape.append(elems_per_word)
-            return tuple(shape)
+        shape = list(self.get_normal_input_shape())
+        itype_bits = self.get_input_datatype().bitwidth()
+        intfw = self.get_nodeattr("streamWidth")
+        assert intfw % itype_bits == 0, "Input stream width must be a multiple of datatype bits"
+        elems_per_word = intfw // itype_bits
+        assert shape[-1] % elems_per_word == 0, "Fold depth must be integer"
+        fold_depth = shape[-1] // elems_per_word
+        shape[-1] = fold_depth
+        shape.append(elems_per_word)
+        return tuple(shape)
 
     def get_folded_output_shape(self, ind=0):
         if self.get_nodeattr("direction") == "out":
             raise ValueError("Folded output shape not defined for output IODMA")
-        else:
-            shape = list(self.get_normal_output_shape())
-            itype_bits = self.get_output_datatype().bitwidth()
-            intfw = self.get_nodeattr("streamWidth")
-            assert intfw % itype_bits == 0, "Input stream width must be a multiple of datatype bits"
-            elems_per_word = intfw // itype_bits
-            assert shape[-1] % elems_per_word == 0, "Fold depth must be integer"
-            fold_depth = shape[-1] // elems_per_word
-            shape[-1] = fold_depth
-            shape.append(elems_per_word)
-            return tuple(shape)
+        shape = list(self.get_normal_output_shape())
+        itype_bits = self.get_output_datatype().bitwidth()
+        intfw = self.get_nodeattr("streamWidth")
+        assert intfw % itype_bits == 0, "Input stream width must be a multiple of datatype bits"
+        elems_per_word = intfw // itype_bits
+        assert shape[-1] % elems_per_word == 0, "Fold depth must be integer"
+        fold_depth = shape[-1] // elems_per_word
+        shape[-1] = fold_depth
+        shape.append(elems_per_word)
+        return tuple(shape)
 
     def infer_node_datatype(self, model):
         node = self.onnx_node
@@ -166,18 +164,16 @@ class IODMA_hls(HLSBackend, HWCustomOp):
     def get_instream_width(self, ind=0):
         if self.get_nodeattr("direction") == "in":
             return self.get_nodeattr("intfWidth")
-        elif self.get_nodeattr("direction") == "out":
+        if self.get_nodeattr("direction") == "out":
             return self.get_nodeattr("streamWidth")
-        else:
-            raise ValueError("Invalid IODMA direction, please set to in or out")
+        raise ValueError("Invalid IODMA direction, please set to in or out")
 
     def get_outstream_width(self, ind=0):
         if self.get_nodeattr("direction") == "out":
             return self.get_nodeattr("intfWidth")
-        elif self.get_nodeattr("direction") == "in":
+        if self.get_nodeattr("direction") == "in":
             return self.get_nodeattr("streamWidth")
-        else:
-            raise ValueError("Invalid IODMA direction, please set to in or out")
+        raise ValueError("Invalid IODMA direction, please set to in or out")
 
     def get_number_output_values(self):
         oshape = self.get_normal_output_shape()
@@ -205,7 +201,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         ]
 
     def get_ap_int_max_w(self):
-        "Return the maximum width of any ap_int used in this module."
+        """Return the maximum width of any ap_int used in this module."""
         instream = self.get_instream_width()
         outstream = self.get_outstream_width()
         width_lcm = (instream * outstream) // math.gcd(instream, outstream)

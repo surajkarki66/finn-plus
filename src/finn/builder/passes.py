@@ -19,7 +19,7 @@ from onnx_passes.ops import DOMAIN as CUSTOM_DOMAIN
 from onnx_passes.ops import inject_custom_ops
 
 # Make custom Im2Col operator available for convolution lowering
-from onnx_passes.ops.im2col import Im2Col  # noqa: Used indirectly via registry
+from onnx_passes.ops.im2col import Im2Col  # noqa: Used indirectly via registry  # noqa: F401
 from onnx_passes.ops.qonnx import DOMAIN as QONNX_DOMAIN
 
 # Collects named passes from the ONNX Passes registry
@@ -42,7 +42,7 @@ from finn.builder.build_dataflow_config import DataflowBuildConfig, Verification
 
 # Makes custom QONNX import and inlining passes available
 import onnx_passes.passes.imports.qonnx  # isort:skip # noqa: Used indirectly via registry
-import onnx_passes.passes.inline.qonnx  # isort:skip # noqa: Used indirectly via registry
+import onnx_passes.passes.inline.qonnx  # isort:skip # noqa: Used indirectly via registry  # noqa: F401
 
 
 def _make_pass_config(cfg: DataflowBuildConfig):

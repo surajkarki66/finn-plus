@@ -40,8 +40,7 @@ from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 def _is_hook_node(node):
     if node.op_type in ["CheckSum_hls"]:
         return True
-    else:
-        return False
+    return False
 
 
 def _suitable_node(node):
@@ -49,12 +48,9 @@ def _suitable_node(node):
         if is_hls_node(node) or is_rtl_node(node):
             if not _is_hook_node(node):
                 return True
-            else:
-                return False
-        else:
             return False
-    else:
         return False
+    return False
 
 
 class InsertHook(Transformation):

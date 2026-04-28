@@ -168,20 +168,18 @@ class StreamingFIFO(HWCustomOp):
 
         if W == 1:
             return math.ceil(depth / 16384)
-        elif W == 2:
+        if W == 2:
             return math.ceil(depth / 8192)
-        elif W <= 4:
+        if W <= 4:
             return (math.ceil(depth / 4096)) * (math.ceil(W / 4))
-        elif W <= 9:
+        if W <= 9:
             return (math.ceil(depth / 2048)) * (math.ceil(W / 9))
-        elif W <= 18 or depth > 512:
+        if W <= 18 or depth > 512:
             return (math.ceil(depth / 1024)) * (math.ceil(W / 18))
-        else:
-            return (math.ceil(depth / 512)) * (math.ceil(W / 36))
+        return (math.ceil(depth / 512)) * (math.ceil(W / 36))
 
     def uram_estimation(self):
         """Calculates resource estimation for URAM"""
-
         try:
             impl = self.get_nodeattr("impl_style") == "rtl"
         except AttributeError:
@@ -200,8 +198,7 @@ class StreamingFIFO(HWCustomOp):
         if impl == "rtl" or (impl == "vivado" and ram_type != "ultra"):
             # Non-BRAM based implementation
             return 0
-        else:
-            return (math.ceil(depth / 4096)) * (math.ceil(W / 72))
+        return (math.ceil(depth / 4096)) * (math.ceil(W / 72))
 
     def bram_efficiency_estimation(self):
         try:

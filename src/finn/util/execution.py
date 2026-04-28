@@ -26,8 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""
-Utility functions for executing ONNX models in FINN.
+"""Utility functions for executing ONNX models in FINN.
 
 This module contains functions for executing parent models containing
 StreamingDataflowPartition nodes and other execution-related utilities.
@@ -55,8 +54,7 @@ def load_model_checkpoint(filename):
     if os.path.isfile(filename):
         model = ModelWrapper(filename)
         return model
-    else:
-        raise FileNotFoundError(f"Model file {filename} not found")
+    raise FileNotFoundError(f"Model file {filename} not found")
 
 
 def execute_parent(parent_path, child_path, input_tensor_npy, return_full_ctx=False):
@@ -83,5 +81,4 @@ def execute_parent(parent_path, child_path, input_tensor_npy, return_full_ctx=Fa
     ret = execute_onnx(parent_model, {iname: input_tensor_npy}, True)
     if return_full_ctx:
         return ret
-    else:
-        return ret[oname]
+    return ret[oname]

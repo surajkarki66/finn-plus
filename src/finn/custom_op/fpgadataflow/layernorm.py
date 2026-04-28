@@ -73,8 +73,7 @@ class LayerNorm(HWCustomOp):
         """Returns FINN DataType of input."""
         if ind == 0:
             return DataType[self.get_nodeattr("inputDataType")]
-        else:
-            raise Exception("Undefined input ind for this layer type")
+        raise Exception("Undefined input ind for this layer type")
 
     def get_output_datatype(self, ind=0):
         """Returns FINN DataType of output."""

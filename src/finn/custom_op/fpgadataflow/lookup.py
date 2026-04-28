@@ -75,10 +75,9 @@ class Lookup(HWCustomOp):
     def get_normal_input_shape(self, ind=0):
         if ind == 0:
             return self.get_nodeattr("InputShape")
-        elif ind == 1:
+        if ind == 1:
             return tuple([self.get_nodeattr("NumEmbeddings"), self.get_nodeattr("EmbeddingDim")])
-        else:
-            raise Exception("Undefined input ind for this layer type")
+        raise Exception("Undefined input ind for this layer type")
 
     def get_normal_output_shape(self, ind=0):
         ishape = self.get_normal_input_shape()
@@ -196,9 +195,8 @@ class Lookup(HWCustomOp):
             width_factor = ceil(self.get_outstream_width() / 16)
             depth_factor = ceil(self.get_nodeattr("NumEmbeddings") / 1024)
             return width_factor * depth_factor
-        else:
-            # TODO can we estimate BRAMs for the DMA engine?
-            return 0
+        # TODO can we estimate BRAMs for the DMA engine?
+        return 0
 
     def bram_efficiency_estimation(self):
         bram16_est = self.bram_estimation()

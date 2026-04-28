@@ -38,7 +38,6 @@ def res_estimation(model, fpgapart):
     visible in the results.
 
     Returns {node name : resource estimation}."""
-
     res_dict = {}
     for node in model.graph.node:
         if is_hls_node(node) or is_rtl_node(node):
@@ -56,7 +55,6 @@ def res_estimation_complete(model, fpgapart):
     visible in the results.
 
     Returns {node name : [resource estimation(s)]}."""
-
     res_dict = {}
     for node in model.graph.node:
         if is_hls_node(node) or is_rtl_node(node):

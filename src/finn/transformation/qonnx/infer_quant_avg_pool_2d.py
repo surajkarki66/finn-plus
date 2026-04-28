@@ -127,19 +127,17 @@ class AvgPoolAndTruncToQuantAvgPool(Transformation):
         if trunc_opset == 1:
             model = model.transform(AvgPoolAndTruncv1ToQuantAvgPool())
             return model, False
-        elif trunc_opset == 2:
+        if trunc_opset == 2:
             model = model.transform(AvgPoolAndTruncv2ToQuantAvgPool())
             return model, False
-        else:
-            raise NotImplementedError(
-                f"AvgPoolAndTruncToQuantAvgPool not implemented for "
-                f"Trunc opset version {trunc_opset}."
-            )
+        raise NotImplementedError(
+            f"AvgPoolAndTruncToQuantAvgPool not implemented for "
+            f"Trunc opset version {trunc_opset}."
+        )
 
 
 class AvgPoolAndTruncv1ToQuantAvgPool(Transformation):
-    """
-    Convert a section of nodes of the pattern:
+    """Convert a section of nodes of the pattern:
     AveragePool -> Mul (scalar) -> Trunc (v1)
     To the FINN op: Div -> QuantAvgPool2d -> Mul
     """

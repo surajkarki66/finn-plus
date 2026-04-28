@@ -57,14 +57,13 @@ def execute_onnx(model, input_dict, return_full_exec_context=False, start_node=N
     If they are set to particular ONNX nodes, only the subgraph between (and
     including) those nodes is executed.
     """
-
     # check if model has an execution mode set
     # if None, execute model node using the QONNX-provided execute_onnx impl
     # if set to "rtlsim" execute model using xsi
     model_exec_mode = model.get_metadata_prop("exec_mode")
     if (model_exec_mode is None) or (model_exec_mode == ""):
         return execute_onnx_base(model, input_dict, return_full_exec_context, start_node, end_node)
-    elif model_exec_mode == "rtlsim":
+    if model_exec_mode == "rtlsim":
         # check sanity of model and then use stitched IP for rtlsim
         if not model.check_all_tensor_shapes_specified():
             raise Exception("Found unspecified tensor shapes, try infer_shapes")
@@ -106,13 +105,12 @@ def execute_onnx(model, input_dict, return_full_exec_context=False, start_node=N
 
     if return_full_exec_context:
         return execution_context
-    else:
-        # provide outputs as dict
-        output_dict = dict()
-        for out_tensor in graph.output:
-            out_name = out_tensor.name
-            output_dict[out_name] = execution_context[out_name]
-        return output_dict
+    # provide outputs as dict
+    output_dict = dict()
+    for out_tensor in graph.output:
+        out_name = out_tensor.name
+        output_dict[out_name] = execution_context[out_name]
+    return output_dict
 
 
 def execute_onnx_and_make_model(model, input_dict):
@@ -120,7 +118,6 @@ def execute_onnx_and_make_model(model, input_dict):
     ModelWrapper where an initializer is provided for each tensor as taken from
     the execution. This new model is useful for debugging, since it contains
     all the intermediate activation values."""
-
     # retrieve the full execution context
     execution_context = execute_onnx(model, input_dict, True)
     new_model = copy.deepcopy(model)

@@ -126,16 +126,15 @@ class CheckSum_hls(HLSBackend, HWCustomOp):
             # same shape as input
             return self.get_normal_input_shape()
         # second output is scalar checksum output
-        elif ind == 1:
+        if ind == 1:
             return tuple([1])
-        else:
-            raise Exception("Undefined input ind for this layer type")
+        raise Exception("Undefined input ind for this layer type")
 
     def npy_to_dynamic_output(self, context):
         super().npy_to_dynamic_output(context)
         node = self.onnx_node
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
-        output_checksum = np.load("{}/output_1.npy".format(code_gen_dir))
+        output_checksum = np.load(f"{code_gen_dir}/output_1.npy")
         context[node.output[1]] = output_checksum
 
     def execute_node(self, context, graph):
@@ -149,9 +148,9 @@ class CheckSum_hls(HLSBackend, HWCustomOp):
         words_per_frame = self.get_nodeattr("words_per_frame")
         word_size = self.get_instream_width()
         my_defines = []
-        my_defines.append("#define WORDS_PER_FRAME {}".format(words_per_frame))
-        my_defines.append("#define ITEMS_PER_WORD {}".format(items_per_word))
-        my_defines.append("#define WORD_SIZE {}".format(word_size))
+        my_defines.append(f"#define WORDS_PER_FRAME {words_per_frame}")
+        my_defines.append(f"#define ITEMS_PER_WORD {items_per_word}")
+        my_defines.append(f"#define WORD_SIZE {word_size}")
         self.code_gen_dict["$DEFINES$"] = my_defines
 
     def read_npy_data(self):
@@ -179,10 +178,10 @@ class CheckSum_hls(HLSBackend, HWCustomOp):
     def strm_decl(self):
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> in0_V ("in0_V");'.format(self.get_instream_width())
+            f'hls::stream<ap_uint<{self.get_instream_width()}>> in0_V ("in0_V");'
         )
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> out0_V ("out0_V");'.format(self.get_outstream_width())
+            f'hls::stream<ap_uint<{self.get_outstream_width()}>> out0_V ("out0_V");'
         )
         self.code_gen_dict["$STREAMDECLARATIONS$"].append("ap_uint<32> chk;")
         # set drain = false for cppsim
@@ -226,10 +225,8 @@ class CheckSum_hls(HLSBackend, HWCustomOp):
 
     def blackboxfunction(self):
         self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-            """using T = ap_uint<WORD_SIZE>;\n void {}(hls::stream<T> &in0_V,
-            hls::stream<T> &out0_V, ap_uint<32> &chk, ap_uint<1> &drain)""".format(
-                self.onnx_node.name
-            )
+            f"""using T = ap_uint<WORD_SIZE>;\n void {self.onnx_node.name}(hls::stream<T> &in0_V,
+            hls::stream<T> &out0_V, ap_uint<32> &chk, ap_uint<1> &drain)"""
         ]
 
     def pragmas(self):

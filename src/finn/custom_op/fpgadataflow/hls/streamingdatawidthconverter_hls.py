@@ -69,10 +69,10 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
     def strm_decl(self):
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> in0_V ("in0_V");'.format(self.get_instream_width())
+            f'hls::stream<ap_uint<{self.get_instream_width()}>> in0_V ("in0_V");'
         )
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> out0_V ("out0_V");'.format(self.get_outstream_width())
+            f'hls::stream<ap_uint<{self.get_outstream_width()}>> out0_V ("out0_V");'
         )
 
     def docompute(self):
@@ -80,9 +80,7 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
         op = "StreamingDataWidthConverter_Batch"
         if self.needs_lcm():
             self.code_gen_dict["$DOCOMPUTE$"] = [
-                'hls::stream<ap_uint<{}>> intermediate ("intermediate");'.format(
-                    self.get_iowidth_lcm()
-                ),
+                f'hls::stream<ap_uint<{self.get_iowidth_lcm()}>> intermediate ("intermediate");',
                 "%s<InWidth, LCMWidth, NumInWords>(in0_V, intermediate, numReps);" % op,
                 "%s<LCMWidth, OutWidth, NumLCMToOut>(intermediate, out0_V, numReps);" % op,
             ]

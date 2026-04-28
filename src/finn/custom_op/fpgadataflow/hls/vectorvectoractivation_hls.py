@@ -139,10 +139,8 @@ class VVAU_hls(VVAU, HLSBackend):
             code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
         # create a npy file fore each input of the node (in_ind is input index)
@@ -167,7 +165,7 @@ class VVAU_hls(VVAU, HLSBackend):
                 # make copy before saving the array
                 reshaped_input = reshaped_input.copy()
                 np.save(
-                    os.path.join(code_gen_dir, "input_{}.npy".format(in_ind)),
+                    os.path.join(code_gen_dir, f"input_{in_ind}.npy"),
                     reshaped_input,
                 )
             elif in_ind > 2:
@@ -190,7 +188,7 @@ class VVAU_hls(VVAU, HLSBackend):
         elif mode == "rtlsim":
             sim = self.get_rtlsim()
             nbits = self.get_instream_width(0)
-            inp = npy_to_rtlsim_input("{}/input_0.npy".format(code_gen_dir), export_idt, nbits)
+            inp = npy_to_rtlsim_input(f"{code_gen_dir}/input_0.npy", export_idt, nbits)
             super().reset_rtlsim(sim)
 
             if mem_mode == "external" or mem_mode == "internal_decoupled":
@@ -200,7 +198,7 @@ class VVAU_hls(VVAU, HLSBackend):
                 # so use it as such for weight generation
                 if self.get_input_datatype(1) == DataType["BIPOLAR"]:
                     export_wdt = DataType["BINARY"]
-                wei = npy_to_rtlsim_input("{}/weights.npy".format(code_gen_dir), export_wdt, wnbits)
+                wei = npy_to_rtlsim_input(f"{code_gen_dir}/weights.npy", export_wdt, wnbits)
                 dim_h, dim_w = self.get_nodeattr("Dim")
                 num_w_reps = dim_h * dim_w
 
@@ -219,7 +217,7 @@ class VVAU_hls(VVAU, HLSBackend):
             odt = self.get_output_datatype()
             target_bits = odt.bitwidth()
             packed_bits = self.get_outstream_width()
-            out_npy_path = "{}/output_0.npy".format(code_gen_dir)
+            out_npy_path = f"{code_gen_dir}/output_0.npy"
             out_shape = self.get_folded_output_shape()
             rtlsim_output_to_npy(output, out_npy_path, odt, out_shape, packed_bits, target_bits)
 
@@ -230,10 +228,8 @@ class VVAU_hls(VVAU, HLSBackend):
             context[node.output[0]] = output
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
     def code_generation_ipgen(self, model, fpgapart, clk):
@@ -319,7 +315,7 @@ class VVAU_hls(VVAU, HLSBackend):
         ]
         if mem_mode == "internal_decoupled" or mem_mode == "external":
             wdt = self.get_input_datatype(1)
-            self.code_gen_dict["$DEFINES$"].append("#define WP1 {}\n".format(wdt.bitwidth()))
+            self.code_gen_dict["$DEFINES$"].append(f"#define WP1 {wdt.bitwidth()}\n")
 
     def read_npy_data(self):
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
@@ -371,14 +367,14 @@ class VVAU_hls(VVAU, HLSBackend):
         mem_mode = self.get_nodeattr("mem_mode")
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> in0_V ("in0_V");'.format(self.get_instream_width(0))
+            f'hls::stream<ap_uint<{self.get_instream_width(0)}>> in0_V ("in0_V");'
         )
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> out0_V ("out0_V");'.format(self.get_outstream_width())
+            f'hls::stream<ap_uint<{self.get_outstream_width()}>> out0_V ("out0_V");'
         )
         if mem_mode == "internal_decoupled" or mem_mode == "external":
             self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-                'hls::stream<ap_uint<{}>> in1_V ("in1_V");'.format(self.get_instream_width(1))
+                f'hls::stream<ap_uint<{self.get_instream_width(1)}>> in1_V ("in1_V");'
             )
 
     def docompute(self):
@@ -466,26 +462,17 @@ class VVAU_hls(VVAU, HLSBackend):
         mem_mode = self.get_nodeattr("mem_mode")
         if mem_mode == "internal_embedded":
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-                """void {}(hls::stream<ap_uint<{}>> &in0_V,
-                hls::stream<ap_uint<{}>> &out0_V
-                )""".format(
-                    self.onnx_node.name,
-                    self.get_instream_width(0),
-                    self.get_outstream_width(),
-                )
+                f"""void {self.onnx_node.name}(hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
+                hls::stream<ap_uint<{self.get_outstream_width()}>> &out0_V
+                )"""
             ]
         elif mem_mode == "internal_decoupled" or mem_mode == "external":
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-                """void {}(
-                    hls::stream<ap_uint<{}>> &in0_V,
-                    hls::stream<ap_uint<{}>> &in1_V,
-                    hls::stream<ap_uint<{}>> &out0_V
-                    )""".format(
-                    self.onnx_node.name,
-                    self.get_instream_width(0),
-                    self.get_instream_width(1),
-                    self.get_outstream_width(),
-                )
+                f"""void {self.onnx_node.name}(
+                    hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
+                    hls::stream<ap_uint<{self.get_instream_width(1)}>> &in1_V,
+                    hls::stream<ap_uint<{self.get_outstream_width()}>> &out0_V
+                    )"""
             ]
         else:
             raise Exception(
@@ -504,7 +491,7 @@ class VVAU_hls(VVAU, HLSBackend):
             # the weight tensor is ap_uint<ch*prec> [PE][WMEM]
             # partition for parallel access along the PE dimension (dim 1)
             self.code_gen_dict["$PRAGMAS$"].append(
-                ("#pragma HLS ARRAY_PARTITION variable=weights.m_weights " "complete dim=1")
+                "#pragma HLS ARRAY_PARTITION variable=weights.m_weights complete dim=1"
             )
         elif mem_mode == "internal_decoupled" or mem_mode == "external":
             self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS INTERFACE axis port=in1_V")
@@ -517,10 +504,10 @@ class VVAU_hls(VVAU, HLSBackend):
         if self.calc_tmem() != 0:
             # TODO find a better way of checking for no pregenerated thresholds
             self.code_gen_dict["$PRAGMAS$"].append(
-                ("#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds " "complete dim=1")
+                "#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds complete dim=1"
             )
             self.code_gen_dict["$PRAGMAS$"].append(
-                ("#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds " "complete dim=3")
+                "#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds complete dim=3"
             )
 
     def minimize_weight_bit_width(self, model):

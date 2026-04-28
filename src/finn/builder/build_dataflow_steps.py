@@ -1407,7 +1407,6 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
     """Measure performance + latency of stitched-IP model in rtlsim (xsi).
     Depends on the DataflowOutputType.STITCHED_IP output product.
     """
-
     if DataflowOutputType.RTLSIM_PERFORMANCE in cfg.generate_outputs and not is_mlo(model):
         assert (
             DataflowOutputType.STITCHED_IP in cfg.generate_outputs
@@ -1481,7 +1480,6 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
 def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig):
     """Create a driver that can be used to interface the generated accelerator.
     Use DataflowBuildConfig to select PYNQ Python or C++ driver."""
-
     driver_dir = os.path.join(cfg.output_dir, "driver")
     if DataflowOutputType.PYNQ_DRIVER in cfg.generate_outputs:
         # determine drivertype
@@ -1586,7 +1584,6 @@ def step_vivado_power_estimation(model: ModelWrapper, cfg: DataflowBuildConfig):
 def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
     """Synthesize a bitfile for the using the specified shell flow, using either
     Vivado or Vitis, to target the specified board."""
-
     if DataflowOutputType.BITFILE in cfg.generate_outputs:
         bitfile_dir = cfg.output_dir + "/bitfile"
         os.makedirs(bitfile_dir, exist_ok=True)
@@ -1668,7 +1665,6 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
 @register_build_dataflow_step()
 def step_deployment_package(model: ModelWrapper, cfg: DataflowBuildConfig):
     """Create a deployment package including the driver and bitfile."""
-
     if DataflowOutputType.DEPLOYMENT_PACKAGE in cfg.generate_outputs:
         deploy_dir = cfg.output_dir + "/deploy"
         bitfile_dir = cfg.output_dir + "/bitfile"
@@ -1696,7 +1692,6 @@ def step_deployment_package(model: ModelWrapper, cfg: DataflowBuildConfig):
 def step_loop_rolling(model, cfg):
     """Roll a repeating sequence of layers into a loop. PyTorch metadata node hierarchy
     is used to indicate the loop structure."""
-
     if cfg.mlo:
         if cfg.loop_body_range is not None:
             # set node metadata like loop rolling would expect

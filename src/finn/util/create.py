@@ -79,7 +79,6 @@ def hls_random_mlp_maker(layer_spec):
 
 def hls_mlp_maker(layer_spec):
     """Create an MLP of given specification using HLSCustomOp instances."""
-
     current_in_name = ""
     current_out_name = ""
     i = 0

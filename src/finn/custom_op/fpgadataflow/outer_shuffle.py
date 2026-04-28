@@ -54,9 +54,8 @@ class _NestSim:
                     fp_inc = self.W - self._fp_rewind
                 self.cnt = self.N - 2
                 return rp_inc, fp_inc, True
-            else:
-                self.cnt -= 1
-                return rp_inc, fp_inc, False
+            self.cnt -= 1
+            return rp_inc, fp_inc, False
         return rp_inc, fp_inc, False
 
 
@@ -107,7 +106,7 @@ class OuterShuffle(HWCustomOp):
         dt = model.get_tensor_datatype(node.input[0])
         if dt != self.get_input_datatype():
             warn_str = (
-                f"data_type changing for {node.name}: {str(self.get_input_datatype())} -> {str(dt)}"
+                f"data_type changing for {node.name}: {self.get_input_datatype()!s} -> {dt!s}"
             )
             log.warning(warn_str)
         self.set_nodeattr("data_type", dt.name)

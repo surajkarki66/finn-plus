@@ -53,7 +53,7 @@ class ReplaceVerilogRelPaths(Transformation):
                             for fname in files:
                                 if fname.endswith(".v"):
                                     fpath = os.path.join(dname, fname)
-                                    with open(fpath, "r") as f:
+                                    with open(fpath) as f:
                                         s = f.read()
                                     old = '$readmemh(".'
                                     new = '$readmemh("%s' % dname

@@ -36,7 +36,7 @@ from finn.util.data_packing import numpy_to_hls_code, pack_innermost_dim_as_hex_
 
 
 class Lookup_hls(Lookup, HLSBackend):
-    "Streaming elementwise HLS lookup, mapping indices to values."
+    """Streaming elementwise HLS lookup, mapping indices to values."""
 
     def __init__(self, onnx_node, **kwargs):
         super().__init__(onnx_node, **kwargs)
@@ -168,7 +168,7 @@ class Lookup_hls(Lookup, HLSBackend):
         embeddings = model.get_initializer(self.onnx_node.input[1])
         if mem_mode == "internal_embedded":
             code_gen_dir = path
-            weight_filename = "{}/embeddings.hpp".format(code_gen_dir)
+            weight_filename = f"{code_gen_dir}/embeddings.hpp"
             edt = DataType[self.get_nodeattr("EmbeddingType")]
             # obits = self.get_outstream_width()
             # packed_output_hls_type = "ap_uint<%d>" % obits
@@ -187,7 +187,7 @@ class Lookup_hls(Lookup, HLSBackend):
             ext_mem_width = self.get_nodeattr("ext_mem_width")
             assert edt.bitwidth() == 8, (
                 "Lookup with mem_mode=external "
-                + "only works with 8-bit embeddings but found "
+                 "only works with 8-bit embeddings but found "
                 + str(edt)
             )
             emb_dim = self.get_nodeattr("EmbeddingDim")
@@ -224,5 +224,4 @@ class Lookup_hls(Lookup, HLSBackend):
         ext_mem_width = self.get_nodeattr("ext_mem_width")
         if mem_mode == "external":
             return max(ext_mem_width, parent_max)
-        else:
-            return parent_max
+        return parent_max

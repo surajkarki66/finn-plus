@@ -11,7 +11,6 @@ from onnxscript.rewriter.pattern import (
     pattern_builder,
 )
 from qonnx.custom_op.registry import is_custom_op
-from typing import List, Optional
 
 
 class SubGraphView(ir.GraphView):
@@ -45,9 +44,7 @@ class SubGraphView(ir.GraphView):
         inputs = set()
         for node in nodes:
             for input in node.inputs:
-                if input.is_graph_input():
-                    inputs.add(input)
-                elif input.producer() not in nodes:
+                if input.is_graph_input() or input.producer() not in nodes:
                     inputs.add(input)
         return list(inputs)
 
@@ -99,26 +96,22 @@ class PytorchMetadataNode:
             and "pkg.torch.onnx.class_hierarchy" in self._node.metadata_props
         ):
             return True
-        else:
-            return False
+        return False
 
     def is_last_level(self, level):
         if len(self.instance_metadata) - 1 == level:
             return True
-        else:
-            return False
+        return False
 
     def get_instance_name(self, depth=0):
         if depth >= len(self.instance_metadata):
             return None
-        else:
-            return self.instance_metadata[depth]
+        return self.instance_metadata[depth]
 
     def get_class_name(self, depth=0):
         if depth >= len(self.instance_metadata):
             return None
-        else:
-            return self.class_metadata[depth]
+        return self.class_metadata[depth]
 
 
 class PytorchHierarchyNode:
@@ -153,7 +146,7 @@ class PytorchHierarchyNode:
         self.children = []
         self.nodes = []
 
-    def print_hierarchy(self, instance_hierarchy: Optional[List[str]] = None):
+    def print_hierarchy(self, instance_hierarchy: list[str] | None = None):
         if instance_hierarchy is None:
             instance_hierarchy = []
         if self.instance_name is not None:
@@ -174,7 +167,7 @@ class PytorchHierarchyNode:
 
     # Checks if the search hierarchy matches the instance hierarchy
     def hierarchy_matches(
-        self, search_hierarchy: List[str], instance_hierarchy: Optional[List[str]] = None
+        self, search_hierarchy: list[str], instance_hierarchy: list[str] | None = None
     ):
         if instance_hierarchy is None:
             instance_hierarchy = []
@@ -186,7 +179,7 @@ class PytorchHierarchyNode:
 
     # Return all nodes from the given name hierarchy on down
     def get_nodes(
-        self, search_hierarchy: List[str], instance_hierarchy: Optional[List[str]] = None
+        self, search_hierarchy: list[str], instance_hierarchy: list[str] | None = None
     ):
         if instance_hierarchy is None:
             instance_hierarchy = []
@@ -231,17 +224,16 @@ class PytorchHierarchyNode:
         if node.is_last_level(level):
             self.nodes.append(node)
             return True
-        else:
-            for child in self.children:
-                if child.instance_name == node.get_instance_name(level + 1):
-                    return child.add_node(node, level + 1)
+        for child in self.children:
+            if child.instance_name == node.get_instance_name(level + 1):
+                return child.add_node(node, level + 1)
 
-            # if no child matches the next level of the hierarchy, create a new child node
-            new_child = PytorchHierarchyNode()
-            new_child.instance_name = node.get_instance_name(level + 1)
-            new_child.module_type = node.get_class_name(level + 1)
-            self.children.append(new_child)
-            return new_child.add_node(node, level + 1)
+        # if no child matches the next level of the hierarchy, create a new child node
+        new_child = PytorchHierarchyNode()
+        new_child.instance_name = node.get_instance_name(level + 1)
+        new_child.module_type = node.get_class_name(level + 1)
+        self.children.append(new_child)
+        return new_child.add_node(node, level + 1)
 
 
 def direct_convert_ir_graph_to_pattern(graph):
@@ -410,23 +402,22 @@ def build_reshape_node(inp, reshape_shape):
 def tensor_type_to_finn_datatype_string(tensor_type):
     if tensor_type == ir.TensorType(_enums.DataType.FLOAT):
         return "FLOAT32"
-    elif tensor_type == ir.TensorType(_enums.DataType.INT8):
+    if tensor_type == ir.TensorType(_enums.DataType.INT8):
         return "INT8"
-    elif tensor_type == ir.TensorType(_enums.DataType.INT16):
+    if tensor_type == ir.TensorType(_enums.DataType.INT16):
         return "INT16"
-    elif tensor_type == ir.TensorType(_enums.DataType.INT32):
+    if tensor_type == ir.TensorType(_enums.DataType.INT32):
         return "INT32"
-    elif tensor_type == ir.TensorType(_enums.DataType.INT64):
+    if tensor_type == ir.TensorType(_enums.DataType.INT64):
         return "INT64"
-    elif tensor_type == ir.TensorType(_enums.DataType.UINT8):
+    if tensor_type == ir.TensorType(_enums.DataType.UINT8):
         return "UINT8"
-    elif tensor_type == ir.TensorType(_enums.DataType.UINT16):
+    if tensor_type == ir.TensorType(_enums.DataType.UINT16):
         return "UINT16"
-    elif tensor_type == ir.TensorType(_enums.DataType.UINT32):
+    if tensor_type == ir.TensorType(_enums.DataType.UINT32):
         return "UINT32"
-    elif tensor_type == ir.TensorType(_enums.DataType.UINT64):
+    if tensor_type == ir.TensorType(_enums.DataType.UINT64):
         return "UINT64"
-    elif tensor_type == ir.TensorType(_enums.DataType.BOOL):
+    if tensor_type == ir.TensorType(_enums.DataType.BOOL):
         return "BOOL"
-    else:
-        raise ValueError(f"Unsupported tensor type: {tensor_type}")
+    raise ValueError(f"Unsupported tensor type: {tensor_type}")

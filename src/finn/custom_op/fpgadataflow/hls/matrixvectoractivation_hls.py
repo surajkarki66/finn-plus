@@ -242,7 +242,7 @@ class MVAU_hls(MVAU, HLSBackend):
             or self.get_nodeattr("mlo_max_iter")
         ):
             wdt = self.get_input_datatype(1)
-            self.code_gen_dict["$DEFINES$"].append("#define WP1 {}\n".format(wdt.bitwidth()))
+            self.code_gen_dict["$DEFINES$"].append(f"#define WP1 {wdt.bitwidth()}\n")
 
     def read_npy_data(self):
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
@@ -300,10 +300,10 @@ class MVAU_hls(MVAU, HLSBackend):
         mem_mode = self.get_nodeattr("mem_mode")
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> in0_V ("in0_V");'.format(self.get_instream_width(0))
+            f'hls::stream<ap_uint<{self.get_instream_width(0)}>> in0_V ("in0_V");'
         )
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> out0_V ("out0_V");'.format(self.get_outstream_width())
+            f'hls::stream<ap_uint<{self.get_outstream_width()}>> out0_V ("out0_V");'
         )
 
         if (
@@ -315,7 +315,7 @@ class MVAU_hls(MVAU, HLSBackend):
             if self.get_nodeattr("dynamic_input"):
                 iwidth = iwidth * self.get_nodeattr("SIMD")
             self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-                'hls::stream<ap_uint<{}>> in1_V ("in1_V");'.format(iwidth)
+                f'hls::stream<ap_uint<{iwidth}>> in1_V ("in1_V");'
             )
 
     def docompute(self):
@@ -406,13 +406,9 @@ class MVAU_hls(MVAU, HLSBackend):
         mem_mode = self.get_nodeattr("mem_mode")
         if mem_mode == "internal_embedded":
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-                """void {}(hls::stream<ap_uint<{}>> &in0_V,
-                    hls::stream<ap_uint<{}>> &out0_V
-                    )""".format(
-                    self.onnx_node.name,
-                    self.get_instream_width(0),
-                    self.get_outstream_width(),
-                )
+                f"""void {self.onnx_node.name}(hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
+                    hls::stream<ap_uint<{self.get_outstream_width()}>> &out0_V
+                    )"""
             ]
         elif (
             mem_mode == "internal_decoupled"
@@ -423,16 +419,11 @@ class MVAU_hls(MVAU, HLSBackend):
             if self.get_nodeattr("dynamic_input"):
                 wwidth = wwidth * self.get_nodeattr("SIMD")
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-                """void {}(
-                    hls::stream<ap_uint<{}>> &in0_V,
-                    hls::stream<ap_uint<{}>> &in1_V,
-                    hls::stream<ap_uint<{}>> &out0_V
-                    )""".format(
-                    self.onnx_node.name,
-                    self.get_instream_width(0),
-                    wwidth,
-                    self.get_outstream_width(),
-                )
+                f"""void {self.onnx_node.name}(
+                    hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
+                    hls::stream<ap_uint<{wwidth}>> &in1_V,
+                    hls::stream<ap_uint<{self.get_outstream_width()}>> &out0_V
+                    )"""
             ]
 
         else:
@@ -453,7 +444,7 @@ class MVAU_hls(MVAU, HLSBackend):
             # the weight tensor is ap_uint<simd*prec> [PE][WMEM]
             # partition for parallel access along the PE dimension (dim 1)
             self.code_gen_dict["$PRAGMAS$"].append(
-                ("#pragma HLS ARRAY_PARTITION variable=weights.m_weights " "complete dim=1")
+                "#pragma HLS ARRAY_PARTITION variable=weights.m_weights complete dim=1"
             )
         elif (
             mem_mode == "internal_decoupled"
@@ -474,19 +465,19 @@ class MVAU_hls(MVAU, HLSBackend):
         if self.calc_tmem() != 0:
             # TODO find a better way of checking for no pregenerated thresholds
             self.code_gen_dict["$PRAGMAS$"].append(
-                ("#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds " "complete dim=1")
+                "#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds complete dim=1"
             )
             self.code_gen_dict["$PRAGMAS$"].append(
-                ("#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds " "complete dim=3")
+                "#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds complete dim=3"
             )
             # add resource pragma for thresholds if set
             if ram_style_thresholds == "distributed":
                 self.code_gen_dict["$PRAGMAS$"].append(
-                    ("#pragma HLS RESOURCE variable=threshs.m_thresholds " "core=ROM_2P_LUTRAM")
+                    "#pragma HLS RESOURCE variable=threshs.m_thresholds core=ROM_2P_LUTRAM"
                 )
             elif ram_style_thresholds == "block":
                 self.code_gen_dict["$PRAGMAS$"].append(
-                    ("#pragma HLS RESOURCE variable=threshs.m_thresholds " "core=ROM_2P_BRAM")
+                    "#pragma HLS RESOURCE variable=threshs.m_thresholds core=ROM_2P_BRAM"
                 )
             elif ram_style_thresholds == "auto":
                 # no pragma needed
@@ -520,10 +511,8 @@ class MVAU_hls(MVAU, HLSBackend):
             code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
         # create a npy file fore each input of the node (in_ind is input index)
@@ -556,7 +545,7 @@ class MVAU_hls(MVAU, HLSBackend):
                 if dynamic_input:
                     reshaped_input = context[inputs].reshape(-1, context[inputs].shape[-1])
                     self.make_weight_file(
-                        reshaped_input, "decoupled_npy", "{}/input_1.npy".format(code_gen_dir)
+                        reshaped_input, "decoupled_npy", f"{code_gen_dir}/input_1.npy"
                     )
 
         if mode == "cppsim":
@@ -575,7 +564,7 @@ class MVAU_hls(MVAU, HLSBackend):
         elif mode == "rtlsim":
             sim = self.get_rtlsim()
             nbits = self.get_instream_width(0)
-            inp = npy_to_rtlsim_input("{}/input_0.npy".format(code_gen_dir), export_idt, nbits)
+            inp = npy_to_rtlsim_input(f"{code_gen_dir}/input_0.npy", export_idt, nbits)
             self.reset_rtlsim(sim)
 
             if (
@@ -593,7 +582,7 @@ class MVAU_hls(MVAU, HLSBackend):
                 if self.get_input_datatype(1) == DataType["BIPOLAR"]:
                     export_wdt = DataType["BINARY"]
 
-                wei = npy_to_rtlsim_input("{}/input_1.npy".format(code_gen_dir), export_wdt, wnbits)
+                wei = npy_to_rtlsim_input(f"{code_gen_dir}/input_1.npy", export_wdt, wnbits)
                 num_w_reps = np.prod(self.get_nodeattr("numInputVectors"))
 
                 io_dict = {
@@ -612,7 +601,7 @@ class MVAU_hls(MVAU, HLSBackend):
             odt = self.get_output_datatype()
             target_bits = odt.bitwidth()
             packed_bits = self.get_outstream_width()
-            out_npy_path = "{}/output_0.npy".format(code_gen_dir)
+            out_npy_path = f"{code_gen_dir}/output_0.npy"
             out_shape = self.get_folded_output_shape()
             rtlsim_output_to_npy(output, out_npy_path, odt, out_shape, packed_bits, target_bits)
 
@@ -623,10 +612,8 @@ class MVAU_hls(MVAU, HLSBackend):
             context[node.output[0]] = output
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
     def minimize_weight_bit_width(self, model):

@@ -115,7 +115,7 @@ class DuplicateStreams_hls(DuplicateStreams, HLSBackend):
         condition = []
         n_outputs = self.get_nodeattr("NumOutputStreams")
         for i in range(n_outputs):
-            condition.append("out{}_V.empty()".format(i))
+            condition.append(f"out{i}_V.empty()")
         condition = " && ".join(condition)
         self.code_gen_dict["$TIMEOUT_CONDITION$"] = [condition]
 

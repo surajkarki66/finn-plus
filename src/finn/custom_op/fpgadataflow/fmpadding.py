@@ -63,7 +63,7 @@ class FMPadding(HWCustomOp):
         return my_attrs
 
     def get_padded_odim(self):
-        "Return the padded spatial size of the output."
+        """Return the padded spatial size of the output."""
         idim_h, idim_w = self.get_nodeattr("ImgDim")
         pad = self.get_nodeattr("Padding")
         pad_h = pad[0] + pad[2]

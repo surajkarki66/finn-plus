@@ -130,7 +130,7 @@ def step_resnet_tidy(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrap
 
 def step_resnet_streamline(
     model: ModelWrapper, cfg: DataflowBuildConfig
-) -> ModelWrapper:  # noqa: ARG001
+) -> ModelWrapper:
     """Streamline ResNet models."""
     transform = ComposedTransformation(
         [
@@ -153,7 +153,7 @@ def step_resnet_streamline(
 
 def step_resnet_convert_to_hw(
     model: ModelWrapper, cfg: DataflowBuildConfig
-) -> ModelWrapper:  # noqa: ARG001
+) -> ModelWrapper:
     """Convert ResNet models to hardware-specific operations."""
     # Convert Squeeze and Unsqueeze operators to hardware operations
     model = model.transform(InferDataLayouts())

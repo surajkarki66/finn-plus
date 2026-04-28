@@ -70,10 +70,8 @@ class FMPadding_Pixel_hls(FMPadding_Pixel, HLSBackend):
         stride_h, stride_w = self.get_nodeattr("Stride")
         hls_call = "FMPadding_Pixel_Nonsquare"
         self.code_gen_dict["$DOCOMPUTE$"] = [
-            """{}<OutputDim_x, OutputDim_y, Stride_x, Stride_y, NumChannels,
-            SIMD, {}> (in0_V, out0_V);""".format(
-                hls_call, in_t
-            )
+            f"""{hls_call}<OutputDim_x, OutputDim_y, Stride_x, Stride_y, NumChannels,
+            SIMD, {in_t}> (in0_V, out0_V);"""
         ]
 
     def blackboxfunction(self):

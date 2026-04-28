@@ -82,7 +82,7 @@ class GenerateInstrumentationIP(Transformation):
         ko = out_shape_folded[-1]
         # fill out instrumentation wrapper template
         with open(
-            os.path.join(get_settings().finn_custom_hls, "instrumentation.template.cpp"), "r"
+            os.path.join(get_settings().finn_custom_hls, "instrumentation.template.cpp")
         ) as f:
             instrwrp_cpp = f.read()
         instrwrp_cpp = instrwrp_cpp.replace("@PENDING@", str(pending))
@@ -172,7 +172,6 @@ class PrepareInstrumentationSim(Transformation):
         # fill in testbench template
         with open(
             os.path.join(get_settings().finn_custom_hls, "instrumentation_tb.template.sv"),
-            "r",
         ) as f:
             testbench_sv = f.read()
         with open(sim_output_dir + "/instrwrap_testbench.sv", "w") as f:
@@ -180,7 +179,6 @@ class PrepareInstrumentationSim(Transformation):
         # fill in testbench project creator template
         with open(
             os.path.join(get_settings().finn_custom_hls, "instrumentation_sim.template.tcl"),
-            "r",
         ) as f:
             testbench_tcl = f.read()
 

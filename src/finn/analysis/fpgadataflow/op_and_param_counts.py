@@ -47,7 +47,6 @@ def aggregate_dict_keys(res_dict):
 
 def op_and_param_counts(model):
     """Return per-node and aggregate op counts per inference."""
-
     ret_dict = {}
     for node in model.graph.node:
         if registry.is_custom_op(node.domain):

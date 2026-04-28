@@ -55,17 +55,16 @@ class ExternalizeParams(Transformation):
             extw_tensor_name_out = dma_extw.output[0]
             if extw_tensor_name in [x.name for x in model.graph.input]:
                 continue
-            else:
-                extw_vi = model.get_tensor_valueinfo(extw_tensor_name)
-                assert extw_vi is not None
-                model.graph.value_info.remove(extw_vi)
-                model.graph.input.append(extw_vi)
-                iodma_init = model.get_initializer(extw_vi.name)
-                assert iodma_init is not None
-                # remove output-side initializer to get correct dataflow partitioning
-                model.graph.initializer.remove(
-                    [x for x in model.graph.initializer if x.name == extw_tensor_name_out][0]
-                )
-                graph_modified = True
+            extw_vi = model.get_tensor_valueinfo(extw_tensor_name)
+            assert extw_vi is not None
+            model.graph.value_info.remove(extw_vi)
+            model.graph.input.append(extw_vi)
+            iodma_init = model.get_initializer(extw_vi.name)
+            assert iodma_init is not None
+            # remove output-side initializer to get correct dataflow partitioning
+            model.graph.initializer.remove(
+                [x for x in model.graph.initializer if x.name == extw_tensor_name_out][0]
+            )
+            graph_modified = True
 
         return (model, graph_modified)

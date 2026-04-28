@@ -61,14 +61,10 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
     def strm_decl(self):
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> in0_{} ("in0_{}");'.format(
-                self.get_instream_width(), self.hls_sname(), self.hls_sname()
-            )
+            f'hls::stream<ap_uint<{self.get_instream_width()}>> in0_{self.hls_sname()} ("in0_{self.hls_sname()}");'
         )
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-            'hls::stream<ap_uint<{}>> out0_{} ("out0_{}");'.format(
-                self.get_outstream_width(), self.hls_sname(), self.hls_sname()
-            )
+            f'hls::stream<ap_uint<{self.get_outstream_width()}>> out0_{self.hls_sname()} ("out0_{self.hls_sname()}");'
         )
 
     def docompute(self):
@@ -142,10 +138,8 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
             code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
         inp = context[node.input[0]]
@@ -173,14 +167,14 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
             sim = self.get_rtlsim()
             nbits = self.get_instream_width()
             rtlsim_inp = npy_to_rtlsim_input(
-                "{}/input_0.npy".format(code_gen_dir), export_idt, nbits
+                f"{code_gen_dir}/input_0.npy", export_idt, nbits
             )
             super().reset_rtlsim(sim)
             rtlsim_output = self.rtlsim(sim, rtlsim_inp)
             odt = export_idt
             target_bits = odt.bitwidth()
             packed_bits = self.get_outstream_width()
-            out_npy_path = "{}/output.npy".format(code_gen_dir)
+            out_npy_path = f"{code_gen_dir}/output.npy"
             out_shape = self.get_folded_output_shape()
             rtlsim_output_to_npy(
                 rtlsim_output, out_npy_path, odt, out_shape, packed_bits, target_bits
@@ -191,10 +185,8 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
             context[node.output[0]] = output
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to "rtlsim" """.format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to "rtlsim" """
             )
         # binary -> bipolar if needed
         if self.get_output_datatype() == DataType["BIPOLAR"]:

@@ -39,7 +39,6 @@ from finn.util.logging import log
 def _codegen_single_node(node, model, fpgapart, clk):
     """Calls C++ code generation for one node. Resulting code can be used
     to generate a Vivado IP block for the node."""
-
     op_type = node.op_type
     try:
         # lookup op_type in registry of CustomOps

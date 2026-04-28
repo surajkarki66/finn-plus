@@ -65,16 +65,13 @@ class CreateDataflowPartition(Transformation):
         def assign_partition_id(node):
             if node.op_type in ["GenericPartition", "StreamingDataflowPartition"]:
                 return -1
-            else:
-                backend = get_by_name(node.attribute, "backend")
-                if backend is not None and backend.s.decode("UTF-8") == "fpgadataflow":
-                    assigned_partition = get_by_name(node.attribute, "partition_id")
-                    if assigned_partition is not None:
-                        return assigned_partition.i
-                    else:
-                        return 0
-                else:
-                    return -1
+            backend = get_by_name(node.attribute, "backend")
+            if backend is not None and backend.s.decode("UTF-8") == "fpgadataflow":
+                assigned_partition = get_by_name(node.attribute, "partition_id")
+                if assigned_partition is not None:
+                    return assigned_partition.i
+                return 0
+            return -1
 
         # first, use the generic partitioning functionality to split up the graph
         parent_model = model.transform(

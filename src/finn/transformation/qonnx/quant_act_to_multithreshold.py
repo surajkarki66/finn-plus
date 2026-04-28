@@ -36,8 +36,7 @@ from finn.util.logging import log
 
 
 def default_filter_function_generator(max_multithreshold_bit_width=8):
-    """
-    This function generates the default filter function for the
+    """This function generates the default filter function for the
     ConvertQuantActToMultiThreshold transformation. Per default the returned
     function disables the conversion of Quant nodes which have a bit width above 8 bit.
 

@@ -72,16 +72,13 @@ class HLSBackend(HWCustomOp, ABC):
 
     def get_all_verilog_paths(self):
         """Return list of all folders containing Verilog code for this node."""
-
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         assert (
             code_gen_dir != ""
         ), """Node attribute "code_gen_dir_ipgen" is
         not set. Please run HLSSynthIP first."""
-        verilog_path = "{}/project_{}/sol1/impl/verilog/".format(code_gen_dir, self.onnx_node.name)
-        subcore_verilog_path = "{}/project_{}/sol1/impl/ip/hdl/ip/".format(
-            code_gen_dir, self.onnx_node.name
-        )
+        verilog_path = f"{code_gen_dir}/project_{self.onnx_node.name}/sol1/impl/verilog/"
+        subcore_verilog_path = f"{code_gen_dir}/project_{self.onnx_node.name}/sol1/impl/ip/hdl/ip/"
         # default impl only returns the HLS verilog codegen dir and subcore (impl/ip/hdl/ip) dir
         # if it exists
         ret = [verilog_path]
@@ -91,7 +88,6 @@ class HLSBackend(HWCustomOp, ABC):
 
     def get_all_verilog_filenames(self, abspath=False):
         """Return list of all Verilog files used for this node."""
-
         verilog_files = []
         verilog_paths = self.get_all_verilog_paths()
         for verilog_path in verilog_paths:
@@ -106,7 +102,6 @@ class HLSBackend(HWCustomOp, ABC):
     def prepare_rtlsim(self, behav=False):
         """Creates a xsi emulation library for the RTL code generated
         for this node, sets the rtlsim_so attribute to its path."""
-
         verilog_files = self.get_all_verilog_filenames(abspath=True)
         single_src_dir = make_build_dir("rtlsim_" + self.onnx_node.name + "_")
         trace_file = self.get_nodeattr("rtlsim_trace")
@@ -138,7 +133,7 @@ class HLSBackend(HWCustomOp, ABC):
             code_gen_line = "\n".join(self.code_gen_dict[key])
             template = template.replace(key, code_gen_line)
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
-        f = open(os.path.join(code_gen_dir, "top_{}.cpp".format(node.name)), "w")
+        f = open(os.path.join(code_gen_dir, f"top_{node.name}.cpp"), "w")
         f.write(template)
         f.close()
         self.code_gen_dict.clear()
@@ -151,7 +146,7 @@ class HLSBackend(HWCustomOp, ABC):
             )
 
         # generate tcl script for ip generation
-        self.code_gen_dict["$PROJECTNAME$"] = ["project_{}".format(node.name)]
+        self.code_gen_dict["$PROJECTNAME$"] = [f"project_{node.name}"]
         self.code_gen_dict["$HWSRCDIR$"] = [code_gen_dir]
         self.code_gen_dict["$FPGAPART$"] = [fpgapart]
         self.code_gen_dict["$TOPFXN$"] = [node.name]
@@ -170,14 +165,13 @@ class HLSBackend(HWCustomOp, ABC):
             code_gen_line = "\n".join(self.code_gen_dict[key])
             template = template.replace(key, code_gen_line)
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
-        f = open(os.path.join(code_gen_dir, "hls_syn_{}.tcl".format(node.name)), "w")
+        f = open(os.path.join(code_gen_dir, f"hls_syn_{node.name}.tcl"), "w")
         f.write(template)
         f.close()
         self.code_gen_dict.clear()
 
     def ipgen_default_directives(self):
         """Return list of default HLS synthesis directives."""
-
         default_directives = [
             "set_param hls.enable_hidden_option_error false",
             "config_compile -disable_unroll_code_size_check -pipeline_style flp",
@@ -216,7 +210,7 @@ class HLSBackend(HWCustomOp, ABC):
                 is_port_conflict = False
                 xcd_log_path = os.path.join(ipgen_path, "sol1", ".autopilot", "xcd.log")
                 if os.path.isfile(xcd_log_path):
-                    with open(xcd_log_path, "r") as xcd_log:
+                    with open(xcd_log_path) as xcd_log:
                         for line in xcd_log:
                             if "Address already in use" in line:
                                 is_port_conflict = True
@@ -264,7 +258,7 @@ class HLSBackend(HWCustomOp, ABC):
             code_gen_line = "\n".join(self.code_gen_dict[key])
             template = template.replace(key, code_gen_line)
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
-        f = open(os.path.join(code_gen_dir, "execute_{}.cpp".format(node.op_type)), "w")
+        f = open(os.path.join(code_gen_dir, f"execute_{node.op_type}.cpp"), "w")
         f.write(template)
         f.close()
         self.code_gen_dict.clear()
@@ -310,7 +304,7 @@ class HLSBackend(HWCustomOp, ABC):
         node = self.onnx_node
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
         for o, outp in enumerate(node.output):
-            output = np.load("{}/output_{}.npy".format(code_gen_dir, o))
+            output = np.load(f"{code_gen_dir}/output_{o}.npy")
             exp_shape = self.get_normal_output_shape(o)
             context[outp] = output.reshape(exp_shape)
 
@@ -347,10 +341,8 @@ compilation transformations?
             code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
         inputs = {}
         for i, inp in enumerate(node.input):
@@ -387,7 +379,7 @@ compilation transformations?
             np.save(os.path.join(code_gen_dir, "input_%s.npy" % i), reshaped_input)
             # The rtlsim will instead operate on a flattened int sequence from an "io_dict"
             rtlsim_inp = npy_to_rtlsim_input(
-                "{}/input_{}.npy".format(code_gen_dir, i), export_idt, nbits
+                f"{code_gen_dir}/input_{i}.npy", export_idt, nbits
             )
             inputs["in%s" % i] = rtlsim_inp
 
@@ -422,7 +414,7 @@ compilation transformations?
                 odt = self.get_output_datatype(o)
                 target_bits = odt.bitwidth()
                 packed_bits = self.get_outstream_width(o)
-                out_npy_path = "{}/output_{}.npy".format(code_gen_dir, o)
+                out_npy_path = f"{code_gen_dir}/output_{o}.npy"
                 out_shape = self.get_folded_output_shape(o)
                 rtlsim_output_to_npy(
                     rtlsim_output, out_npy_path, odt, out_shape, packed_bits, target_bits
@@ -439,10 +431,8 @@ compilation transformations?
 
         else:
             raise Exception(
-                """Invalid value for attribute exec_mode! Is currently set to: {}
-            has to be set to one of the following value ("cppsim", "rtlsim")""".format(
-                    mode
-                )
+                f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
+            has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
     @abstractmethod
@@ -450,7 +440,6 @@ compilation transformations?
         """Function to set the global includes for c++ code that has to be generated
         for cppsim or rtlsim, is member function of HLSBackend class but has to
         be filled by every node."""
-        pass
 
     @abstractmethod
     def defines(self, var):
@@ -461,7 +450,6 @@ compilation transformations?
         var: makes it possible to reuse the function for different c++ code generation.
         I.e. if set to "ipgen" in MatrixVectorActivation additional PRAGMA defines are
         added."""
-        pass
 
     def read_npy_data(self):
         """Generate commands for reading data from .npy file in C++.
@@ -521,16 +509,12 @@ compilation transformations?
             for i, inp in enumerate(node.input):
                 if self.get_instream_width(i):
                     self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-                        'hls::stream<ap_uint<{}>> in{}_V ("in{}_V");'.format(
-                            self.get_instream_width(i), i, i
-                        )
+                        f'hls::stream<ap_uint<{self.get_instream_width(i)}>> in{i}_V ("in{i}_V");'
                     )
             for o, outp in enumerate(node.output):
                 if self.get_outstream_width(o):
                     self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-                        'hls::stream<ap_uint<{}>> out{}_V ("out{}_V");'.format(
-                            self.get_outstream_width(o), o, o
-                        )
+                        f'hls::stream<ap_uint<{self.get_outstream_width(o)}>> out{o}_V ("out{o}_V");'
                     )
         else:
             for i, inp in enumerate(node.input):
@@ -542,9 +526,7 @@ compilation transformations?
                     elem_input_hls_type = dtype.get_hls_datatype_str()
 
                     self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-                        'hls::stream<hls::vector<{},{}>> in{}_V ("in{}_V");'.format(
-                            elem_input_hls_type, self.get_folded_input_shape(i)[-1], i, i
-                        )
+                        f'hls::stream<hls::vector<{elem_input_hls_type},{self.get_folded_input_shape(i)[-1]}>> in{i}_V ("in{i}_V");'
                     )
 
             for o, outp in enumerate(node.output):
@@ -556,18 +538,14 @@ compilation transformations?
                     elem_output_hls_type = dtype.get_hls_datatype_str()
 
                     self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-                        'hls::stream<hls::vector<{},{}>> out{}_V ("out{}_V");'.format(
-                            elem_output_hls_type, self.get_folded_output_shape(o)[-1], o, o
-                        )
+                        f'hls::stream<hls::vector<{elem_output_hls_type},{self.get_folded_output_shape(o)[-1]}>> out{o}_V ("out{o}_V");'
                     )
 
             if self.get_nodeattr("hls_style") == "freerunning":
                 for o, outp in enumerate(node.output):
                     if self.get_outstream_width(o):
                         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
-                            'hls::stream<hls::vector<{},{}>> strm{} ("strm{}");'.format(
-                                elem_output_hls_type, self.get_folded_output_shape(o)[-1], o, o
-                            )
+                            f'hls::stream<hls::vector<{elem_output_hls_type},{self.get_folded_output_shape(o)[-1]}>> strm{o} ("strm{o}");'
                         )
 
     @abstractmethod
@@ -575,7 +553,6 @@ compilation transformations?
         """Function to generate the commands for the computational part of the
         c++ code, is member function of HLSBackend class but has to be filled
         by every node."""
-        pass
 
     def dataoutstrm(self):
         """Generate commands for reading out data from C++ and converting to npy format.
@@ -639,7 +616,6 @@ compilation transformations?
         """Function to generate a blackbock function in c++ from which an IP block
         will be generated, is member function of HLSBackend class but has to be filled
         by every node."""
-        pass
 
     def pragmas(self):
         """Generate pragma commands in C++.

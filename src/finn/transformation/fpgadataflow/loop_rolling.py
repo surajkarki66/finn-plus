@@ -22,7 +22,7 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp, is_custom_op
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.fold_constants import FoldConstants
-from typing import TYPE_CHECKING, List, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 from finn.util import onnxscript_helpers as osh
 from finn.util.logging import log
@@ -32,19 +32,17 @@ if TYPE_CHECKING:
 
 
 def get_constant_from_value(value):
-    """
-    Get the constant value of a tensor.
+    """Get the constant value of a tensor.
     """
     # Handle input and/or inititalizer values
     if value.producer() is None:
         return value.const_value.numpy()
-    elif value.producer().op_type == "Constant":
+    if value.producer().op_type == "Constant":
         return value.producer().attributes["value"].value.numpy()
 
 
 def same_values(inputs):
-    """
-    Check if all inputs have the same constant value.
+    """Check if all inputs have the same constant value.
     """
     if not inputs:
         return False
@@ -74,16 +72,16 @@ def build_loop_replace_pattern(graph, LoopBody):
             for node in nodes:
                 if node.inputs[i].shape != g_shape:
                     log.warning(
-                        (
+
                             f"LoopRolling: Index {i} expected shape {g_shape}, "
                             f"got {node.inputs[i].shape}."
-                        )
+
                     )
                     raise Exception(
-                        (
+
                             "LoopRolling: all loop-body initializers of the same index "
                             "must have the same shape."
-                        )
+
                     )
 
             # Build Concat Node
@@ -219,7 +217,7 @@ def build_loop_replace_pattern(graph, LoopBody):
 
 
 class LoopExtraction(Transformation):
-    def __init__(self, hierarchy_list: List[List[str]]):
+    def __init__(self, hierarchy_list: list[list[str]]):
         super().__init__()
 
         assert isinstance(hierarchy_list, list), "Hierarchy list must be a list of strings"
@@ -231,7 +229,7 @@ class LoopExtraction(Transformation):
         self.hierarchy_list = hierarchy_list
         self.loop_body_template = None
 
-    def apply(self, model: ModelWrapper) -> Tuple[ModelWrapper, bool]:
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         # Apply the loop extraction transformation
         # Extract the Loop Body from ONNX metadata
         model_ir = onnxscript.ir.serde.deserialize_model(model.model)
@@ -472,7 +470,7 @@ class LoopRolling(Transformation):
         super().__init__()
         self.loop_body_template = loop_body_template
 
-    def apply(self, model: ModelWrapper) -> Tuple[ModelWrapper, bool]:
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         model_ir = onnxscript.ir.serde.deserialize_model(model.model)
         graph = model_ir.graph
         LoopBody = self.loop_body_template

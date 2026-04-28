@@ -169,7 +169,7 @@ class DependencyData(BaseModel):
 
     def get_fields(self, package_name: str, *field_names: str) -> tuple:
         """Return a tuple with all required fields from the data. If one of the fields does not
-        exist, raise an exception."""  # noqa
+        exist, raise an exception."""
         self.assert_unique_dependency_names()
         dep_data = self.get_dependency_data(package_name)
         if dep_data is None:
@@ -218,7 +218,7 @@ class _StatusTracker:
     def _generate_renderable(self) -> Table:
         """Generate a renderable for rich to display in a live context."""
         if self.non_interactive:
-            return
+            return None
         with self.datalock:
             table = Table(
                 title="Dependency Updates",
@@ -331,7 +331,7 @@ class DependencyUpdater:
 
     def _git_clone(self, url: str, commit: str, target: Path) -> bool:
         """Try to clone and checkout the git url to the given target directory. If something
-        went wrong return False, True otherwise."""  # noqa
+        went wrong return False, True otherwise."""
         clone_result = sp.run(
             shlex.split(f"git clone {url} {target.absolute()}"),
             timeout=self.git_timeout,
@@ -354,7 +354,7 @@ class DependencyUpdater:
 
     def _get_git_hash(self, package_name: str) -> str | None:
         """Return the hash of the given package_name dependency.
-        If there is no such package return None."""  # noqa
+        If there is no such package return None."""
         if package_name in self.deps.git_deps:
             target = self.dep_location / package_name
         elif package_name in self.deps.boardfile_deps:
@@ -605,7 +605,7 @@ class DependencyUpdater:
 
     def get_outdated_dependencies(self) -> list[str]:
         """Return a list of the names of all outdated packages. For Git dependencies this means
-        an outdated commit hash, for the others a different URL or target directory."""  # noqa
+        an outdated commit hash, for the others a different URL or target directory."""
         return list(
             map(
                 str,

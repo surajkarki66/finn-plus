@@ -799,8 +799,7 @@ class MakeMaxPoolNHWC(Transformation):
 
 
 class MakeScaleResizeNHWC(Transformation):
-    """
-    Converts the inputs and outputs for all scales Resize and Upsample nodes
+    """Converts the inputs and outputs for all scales Resize and Upsample nodes
     from NCHW to NHWC.
     """
 
@@ -1001,8 +1000,7 @@ def permute_shape(shape, perm):
 
 
 class MoveScalarLinearPastSplit(Transformation):
-    """
-    Move scalar Mul and Add nodes past channel split operation.
+    """Move scalar Mul and Add nodes past channel split operation.
     """
 
     def __init__(self):
@@ -1135,7 +1133,7 @@ class MoveMaxPoolPastMultiThreshold(Transformation):
                     T = model.get_initializer(consumer.input[1])
                     T_sorted = np.sort(T, axis=1)
                     assert (
-                        T == T_sorted
+                        T_sorted == T
                     ).all(), "MultiThreshold must have non-decreasing thresholds"
                     mt_inst = getCustomOp(consumer)
                     if mt_inst.get_nodeattr("out_scale") < 0:
@@ -1375,8 +1373,7 @@ class MoveTransposePastScalarMul(Transformation):
 
 
 class MoveIdenticalOpPastJoinOp(Transformation):
-    """
-    Move multiple identical operations on different branches past the common join node.
+    """Move multiple identical operations on different branches past the common join node.
     It assumes the shape to be preserved by the join op in the default move_node() method
     """
 
@@ -1386,8 +1383,7 @@ class MoveIdenticalOpPastJoinOp(Transformation):
         self.join_node_op = join_node_list
 
     def move_node(self, model, n, producers):
-        """
-        Should be overwritten for some operations
+        """Should be overwritten for some operations
 
         Returns:
             bool: whether moving the node was successful
@@ -1414,8 +1410,7 @@ class MoveIdenticalOpPastJoinOp(Transformation):
         return True
 
     def are_producers_identical(self, model, producers):
-        """
-        Checks only op_types
+        """Checks only op_types
         Should be overwritten for additional checks
         """
         op_types = [prod.op_type for prod in producers]
@@ -1516,8 +1511,7 @@ class MoveAddPastJoinAdd(MoveIdenticalOpPastJoinOp):
         return True
 
     def move_node(self, model, n, producers):
-        """
-        We use the base move_node method to move the first producer
+        """We use the base move_node method to move the first producer
         past the join node (and delete the rest)
         """
         add_inits = [model.get_initializer(producer.input[1]) for producer in producers]
@@ -1574,8 +1568,7 @@ class MoveTransposePastJoinConcat(MoveIdenticalOpPastJoinOp):
 
 
 class MoveAffinePastJoinConcat(MoveIdenticalOpPastJoinOp):
-    """
-    Applies to scalar linear or channelwise affine ops with the same parameter value
+    """Applies to scalar linear or channelwise affine ops with the same parameter value
     """
 
     def __init__(self, linear_ops=["Mul", "Add"]):

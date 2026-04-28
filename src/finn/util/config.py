@@ -28,7 +28,6 @@ def extract_model_config(model, subgraph_hier, attr_names_to_extract):
     Nodes in subgraphs are prefixed with their parent hierarchy using '_' as separator.
     For example, a node 'Conv_0' inside a subgraph of node 'IfNode_0' will be exported
     as 'IfNode_0_Conv_0' in the config."""
-
     cfg = dict()
     cfg["Defaults"] = dict()
     for n in model.graph.node:
@@ -70,7 +69,6 @@ def extract_model_config_to_json(model, json_filename, attr_names_to_extract):
     """Create a json file with layer name -> attribute mappings extracted from the
     model. The created json file can be later applied on a model with
     finn.transform.general.ApplyConfig."""
-
     with open(json_filename, "w") as f:
         json.dump(
             extract_model_config(
@@ -85,7 +83,7 @@ def extract_model_config_consolidate_shuffles(model, output_file, hw_attrs):
     """Export flow that takes into consideration how Shuffle operations have been decomposed"""
     extract_model_config_to_json(model, output_file, hw_attrs)
 
-    with open(output_file, "r") as f:
+    with open(output_file) as f:
         config = json.load(f)
 
     shuffle_configs = {}
