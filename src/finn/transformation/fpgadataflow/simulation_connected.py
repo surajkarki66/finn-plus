@@ -1,9 +1,7 @@
 """Node connected parallel simulations."""
 
-import glob
 import json
 import math
-import os
 import pandas as pd
 import time
 import traceback
@@ -12,7 +10,6 @@ from copy import deepcopy
 from enum import Enum
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
-from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from rich.console import Console
 from threading import Barrier
@@ -23,7 +20,7 @@ from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.transformation.fpgadataflow.set_fifo_depths import get_fifo_split_configs
 from finn.transformation.fpgadataflow.simulation import Simulation, SimulationType, store_fifo_data
 from finn.transformation.fpgadataflow.simulation_controller import SimulationController
-from finn.util.basic import make_build_dir
+from finn.util.basic import getHWCustomOp, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
 
@@ -110,20 +107,14 @@ class NodeConnectedSimulationController(SimulationController):
     def _cleanup_shm_resources(self) -> None:
         """Remove any existing shared memory segments and semaphores from /dev/shm."""
         try:
-            # Collect potential shared memory and semaphore names based on node names
-            shm_patterns = []
-            # Pattern for shared memory segments (e.g., /nodename_0, /nodename_1)
-            shm_patterns.append("/dev/shm/*")
-
             removed_count = 0
-            for pattern in shm_patterns:
-                for filepath in glob.glob(pattern):
-                    try:
-                        Path(filepath).unlink()
-                        removed_count += 1
-                    except (FileNotFoundError, PermissionError):  # noqa: PERF203
-                        # File might already be removed or we don't have permission
-                        pass
+            for filepath in Path("/dev/shm").glob("*"):
+                try:
+                    filepath.unlink()
+                    removed_count += 1
+                except (FileNotFoundError, PermissionError):  # noqa: PERF203
+                    # File might already be removed or we don't have permission
+                    pass
 
             if removed_count > 0:
                 log.info(f"Cleaned up {removed_count} existing shared memory resources")
@@ -192,7 +183,8 @@ class NodeConnectedSimulationController(SimulationController):
 
                 all_futures = list(futures)  # Keep track of all futures
                 while futures:
-                    done, futures = wait(futures, return_when=FIRST_COMPLETED)
+                    done, futures_s = wait(futures, return_when=FIRST_COMPLETED)
+                    futures = list(futures_s)  # Remaining futures that are still running
 
                     # Check if any completed task indicates we should stop
                     for future in done:
@@ -214,9 +206,9 @@ class NodeConnectedSimulationController(SimulationController):
                                 cycles_results[sim_name] = cycles
                                 samples_results[sim_name] = samps
                                 intervals_results[sim_name] = intervals
-                                fifo_cycles_until_first_valid_results[
-                                    sim_name
-                                ] = fifo_cycles_until_first_valid
+                                fifo_cycles_until_first_valid_results[sim_name] = (
+                                    fifo_cycles_until_first_valid
+                                )
                                 timeout_result = timeout_result or timeout
                         except Exception as e:  # noqa
                             self.console.log(f"Simulation failed: {e}")
@@ -251,9 +243,9 @@ class NodeConnectedSimulationController(SimulationController):
                             ) = result
                             # Only update if not already collected
                             if sim_name not in fifo_results:
-                                fifo_cycles_until_first_valid_results[
-                                    sim_name
-                                ] = fifo_cycles_until_first_valid
+                                fifo_cycles_until_first_valid_results[sim_name] = (
+                                    fifo_cycles_until_first_valid
+                                )
                                 fifo_depths[sim_name] = fifo_depth
                                 fifo_results[sim_name] = fifo_util
                                 cycles_results[sim_name] = cycles
@@ -358,9 +350,7 @@ class NodeConnectedSimulationController(SimulationController):
 
             try:
                 # Start the simulation process with socket communication
-                proc_idx = self._start_process(
-                    binary, process_index
-                )
+                proc_idx = self._start_process(binary, process_index)
 
                 # Send configuration commands
                 # Last node has no output FIFOs, so don't configure FIFO depths
@@ -511,6 +501,8 @@ class NodeConnectedSimulationController(SimulationController):
 
 
 class NodeConnectedSimulation(Simulation):
+    """Run node-connected simulations for all layers in parallel."""
+
     def __init__(
         self,
         model: ModelWrapper,
@@ -521,6 +513,7 @@ class NodeConnectedSimulation(Simulation):
         workers: int | None = None,
         max_qsrl_depth: int = 256,
     ) -> None:
+        """Initialize node-connected simulation."""
         super().__init__(model, simulation_type, fpgapart, clk_ns, functional_sim, workers)
         self.max_qsrl_depth = max_qsrl_depth
 
@@ -670,7 +663,7 @@ class RunLayerParallelSimulation(Transformation):  # noqa
             ):
                 diffs: list[tuple[int, int]] = []  # (index, diff)
                 for i in range(len(model.graph.node)):
-                    hw: HWCustomOp = getCustomOp(model.graph.node[i])
+                    hw: HWCustomOp = getHWCustomOp(model.graph.node[i])
                     in_width = max(
                         [hw.get_instream_width(j) for j in range(len(model.graph.node[i].input))]
                     )
@@ -757,7 +750,7 @@ class RunLayerParallelSimulation(Transformation):  # noqa
         bit_widths = []
         for node_idx in range(len(fifo_depths)):
             bit_widths.append([])
-            hw_node = getCustomOp(model.graph.node[node_idx])
+            hw_node = getHWCustomOp(model.graph.node[node_idx])
             if isinstance(hw_node, HWCustomOp):
                 for fifo_idx in range(len(fifo_depths[node_idx])):
                     bit_widths[node_idx].append(hw_node.get_outstream_width(fifo_idx))
