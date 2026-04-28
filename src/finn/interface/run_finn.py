@@ -412,7 +412,12 @@ def run_setup_wizard(settings: FINNSettings) -> None:
     console.rule()
 
 
-def prepare_finn(settings: FINNSettings, accept_defaults: bool, batch: bool = False) -> None:
+def prepare_finn(
+    settings: FINNSettings,
+    accept_defaults: bool,
+    batch: bool = False,
+    create_build_dir: bool = True,
+) -> None:
     """Prepare FINN to run."""
     if not settings.settingsfile_exists() and not accept_defaults:
         run_setup_wizard(settings)
@@ -433,7 +438,7 @@ def prepare_finn(settings: FINNSettings, accept_defaults: bool, batch: bool = Fa
         os.environ["PYTHONPATH"] = ""
 
     # Create FINN_BUILD_DIR if it doesnt exist yet
-    if not settings.finn_build_dir.exists():
+    if not settings.finn_build_dir.exists() and create_build_dir:
         settings.finn_build_dir.mkdir()
 
     # Update / Install all dependencies
@@ -498,6 +503,8 @@ def prepare_finn(settings: FINNSettings, accept_defaults: bool, batch: bool = Fa
         )
         os.environ["XILINX_LOCAL_USER_DATA"] = "no"
 
+    # TODO: these are deprecated and mostly intended as fallback
+    # e.g., still used in templates.py
     os.environ["FINN_RTLLIB"] = resolve_module_path("finn-rtllib")
     os.environ["FINN_CUSTOM_HLS"] = resolve_module_path("custom_hls")
     os.environ["FINN_NOTEBOOKS"] = resolve_module_path("notebooks")
@@ -1046,7 +1053,7 @@ def update(
         so = Path(finnxsi) / "xsi.so"
         if so.exists():
             so.unlink()
-    prepare_finn(settings, accept_defaults or batch, batch)
+    prepare_finn(settings, accept_defaults or batch, batch, create_build_dir=False)
 
 
 @click.command("edit", help="Edit the dependency definition file.")
@@ -1109,7 +1116,7 @@ def _command_get_settings() -> FINNSettings:
     settings = FINNSettings.init(
         auto_set_environment_vars=True, automatic_dependency_updates=False, flow_config=Path()
     )
-    prepare_finn(settings, True)
+    prepare_finn(settings, True, create_build_dir=False)
     if not settings.settingsfile_exists():
         warning("Could not resolve settings file.")
         sys.exit(1)
@@ -1153,7 +1160,7 @@ def config_create() -> None:
 def finn_check() -> None:
     """Start FINN and close it after loading the environment."""
     settings = FINNSettings.init(auto_set_environment_vars=False, flow_config=Path())
-    prepare_finn(settings, True)
+    prepare_finn(settings, True, create_build_dir=False)
     Console().print("[bold green]FINN is ready![/bold green]")
 
 
