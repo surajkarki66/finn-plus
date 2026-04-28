@@ -97,9 +97,7 @@ class SimulationController:
 
         # Start C++ process - redirect stdout/stderr to files
         cwd = binary.parent
-        proc = subprocess.Popen(
-            cmd, stdout=stdout_file, stderr=stderr_file, text=True, cwd=cwd
-        )
+        proc = subprocess.Popen(cmd, stdout=stdout_file, stderr=stderr_file, text=True, cwd=cwd)
 
         # Check if process started successfully
         time.sleep(0.2)  # Give process time to fail if there's an immediate error
