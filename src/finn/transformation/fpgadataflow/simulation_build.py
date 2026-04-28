@@ -856,14 +856,19 @@ class SimulationBuilder:
             else:
                 synth_workers = max(1, cpus_alloc)
 
-            synth_workers = min(synth_workers, len(self.model.graph.node))
+            synth_workers = min(
+                synth_workers,
+                len(self.model.graph.node),
+                int(os.environ.get("NUM_DEFAULT_WORKERS", len(self.model.graph.node))),
+            )
             log.info(
                 "[BuildSimulation] SLURM job detected, using "
                 f"{synth_workers} workers based on allocation."
             )
         else:
-            synth_workers = max(
-                1, cast("int", (psutil.virtual_memory().free / 1024 / 1024 / 1024) // 10)
+            synth_workers = min(
+                max(1, cast("int", (psutil.virtual_memory().free / 1024 / 1024 / 1024) // 10)),
+                int(os.environ.get("NUM_DEFAULT_WORKERS", len(self.model.graph.node))),
             )  # 10GB per synthesis
             if not functional_sim:
                 # When not having to do synthesis, the build is not memory bottlenecked and
