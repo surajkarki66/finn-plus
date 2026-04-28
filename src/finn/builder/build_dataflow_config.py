@@ -265,6 +265,9 @@ class PartitioningConfiguration:
     # Defaults to 1, in order not to crash local computers with OOM errors
     parallel_synthesis_workers: int = 1
 
+    # Whether the IODMA kernels should be separate or part of the compute kernel SDP.
+    separate_iodmas: bool = True
+
     # Since the Multi-FPGA flow contains a large number of extra steps (+ information), it benefits
     # from a verbosity setting that is independent of the general FINN one.
     verbosity: MFVerbosity = MFVerbosity.MEDIUM

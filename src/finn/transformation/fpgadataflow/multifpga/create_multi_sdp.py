@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import yaml
-from pathlib import Path
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveUniqueNodeNames
@@ -16,10 +15,11 @@ from finn.transformation.fpgadataflow.multifpga.utils import (
     get_submodel,
     set_device_id,
 )
-from finn.util.basic import make_build_dir
+from finn.util.exception import FINNMultiFPGAUserError
 from finn.util.logging import log
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from qonnx.core.modelwrapper import ModelWrapper
 
 
@@ -31,36 +31,77 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
     IMPORTANT: Currently this assumes that every branch is split and joined on the same device.
     """
 
-    def __init__(self, verbosity: MFVerbosity) -> None:  # noqa
+    def __init__(  # noqa
+        self, separate_iodmas: bool, dataflow_partition_directory: Path, verbosity: MFVerbosity
+    ) -> None:
+        """Create one SDP per all consecutive layers.
+
+        Arguments:
+        ---------
+            `separate_iodmas`: If true, IODMA nodes (if detected) receive their own partition
+                ID / SDP. Their device ID stays unchanged.
+
+            `dataflow_partition_directory`: Directory in which to store logs and kernel partitions.
+
+            `verbosity`: How verbose the transform should be.
+        """
         super().__init__()
         self.verbosity = verbosity
+        self.separate_iodmas = separate_iodmas
+        self.cdfp_dir = dataflow_partition_directory
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
+        for node in model.graph.node:
+            # Check that all nodes have an device ID
+            if get_device_id(node) is None:
+                raise FINNMultiFPGAUserError(
+                    f"Cannot create StreamingDataflowParititions "
+                    f"for Multi-FPGA without an assigned device "
+                    f"ID. (Node: {node.name}). Did you forget "
+                    f"to run partitioning first?"
+                )
+            # Check that we have no SDPs yet
+            if node.op_type in ["StreamingDataflowPartition", "GenericPartition"]:
+                raise FINNMultiFPGAUserError(
+                    f"Cannot create SDPs in graph: Node "
+                    f"{node.name} is already a dataflow partition."
+                )
+
+        # Prepare everything
         current_device = get_device_id(model.graph.node[0])
         current_max = 0
         mapping = {}
+
+        # Go through every node
         for node in model.graph.node:
-            assert node.op_type not in ["StreamingDataflowPartition", "GenericPartition"]
+            if current_max not in mapping:
+                mapping[current_max] = []
+            mapping[current_max].append({"device": current_device, "node": node.name})
+
+            # Consider IODMAs
+            if "IODMA" in node.op_type and self.separate_iodmas:
+                getCustomOp(node).set_nodeattr("partition_id", current_max)
+                current_max += 1
+                continue  # without changing the device number
+
+            # Get the new device number to check whether it changed
             device = get_device_id(node)
-            assert device is not None, f"Node {node.name} of type {node.op_type} does not have"
-            "a device_id attribute"
+
             # TODO: Setting partition_id and calling CreateDataflowPartitions might not be
             # the best way to do it. Maybe change at some point
             if device != current_device:
                 current_device = device
                 current_max += 1
+
+            # Set the partition ID
             getCustomOp(node).set_nodeattr("partition_id", current_max)
-            if current_max not in mapping:
-                mapping[current_max] = []
-            mapping[current_max].append({"device": current_device, "node": node.name})
 
         if self.verbosity.value > MFVerbosity.NONE.value:
             log.info(f"Creating a total of {current_max} StreamingDataflowPartitions...")
 
         # Write partition ID <-> Device+Node name mapping into a human readable file for
         # debugging
-        cdfp_dir = Path(make_build_dir("dataflow_multifpga_partition"))
-        sdp_logfile = cdfp_dir / "partition_id_mapping.yaml"
+        sdp_logfile = self.cdfp_dir / "partition_id_mapping.yaml"
         with sdp_logfile.open("w+") as f:
             yaml.dump(mapping, f, yaml.Dumper)
 
@@ -68,7 +109,7 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
             log.info(f"Storing SDP mapping at: {sdp_logfile}")
 
         # Create the SDFPs
-        model = model.transform(CreateDataflowPartition(str(cdfp_dir)))
+        model = model.transform(CreateDataflowPartition(str(self.cdfp_dir)))
         model = model.transform(GiveUniqueNodeNames())
 
         # Set the SDP's device_id

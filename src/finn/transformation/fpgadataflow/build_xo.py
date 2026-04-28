@@ -32,8 +32,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from qonnx.core.modelwrapper import ModelWrapper
-from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import (
     GiveReadableTensorNames,
@@ -47,7 +45,6 @@ from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
 from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
-from finn.transformation.fpgadataflow.insert_iodma import InsertIODMA
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import launch_process_helper
@@ -58,6 +55,7 @@ from finn.util.vivado import check_vitis_envvars
 
 if TYPE_CHECKING:
     from onnx import NodeProto
+    from qonnx.core.modelwrapper import ModelWrapper
 
 
 class CreateVitisXO(Transformation):
@@ -186,14 +184,11 @@ class BuildAllXOs(Transformation):
     successors or predecessors.
     """
 
-    def __init__(
-        self, fpga_part: str, synth_clk_period_ns: float, iodma_intf_max_width: int
-    ) -> None:
+    def __init__(self, fpga_part: str, synth_clk_period_ns: float) -> None:
         """Build all XOs."""
         super().__init__()
         self.fpga_part = fpga_part
         self.synth_clk_period_ns = synth_clk_period_ns
-        self.iodma_intf_max_width = iodma_intf_max_width
 
     def get_input_nodes(self, model: ModelWrapper) -> list[tuple[NodeProto, int]]:
         """Return a list of all input nodes (no predecessors) and their indices in the graph."""
@@ -251,51 +246,6 @@ class BuildAllXOs(Transformation):
         # Every node must be an SDP node at this point.
         self.check_all_sdp_nodes(model)
         self.check_graph_is_line(model)
-
-        # Insert IODMAs
-        log.info("Inserting IODMAs into input and output nodes...")
-        iodma_transforms = [
-            GiveUniqueNodeNames(),
-            SpecializeLayers(self.fpga_part),
-            PrepareIP(self.fpga_part, self.synth_clk_period_ns),
-            HLSSynthIP(),
-        ]
-
-        # TODO: Internal vs external IODMAs!
-
-        # Prepare input SDPs
-        for node, index in self.get_input_nodes(model):
-            log.info(f"Preparing IDMA for node {node.name} (index: {index})")
-            sdp, sdp_path = get_submodel(node)
-            sdp = sdp.transform(
-                InsertIODMA(
-                    max_intfwidth=self.iodma_intf_max_width, insert_input=True, insert_output=False
-                )
-            )
-            for transform in iodma_transforms:
-                sdp = sdp.transform(transform)
-            sdp.save(sdp_path)
-
-        # Prepare output SDPs
-        for node, index in self.get_output_nodes(model):
-            log.info(f"Preparing ODMA for node {node.name} (index: {index})")
-            sdp_path = getCustomOp(node).get_nodeattr("model")
-            if sdp_path is None:
-                raise FINNInternalError(f"Node {node.name} is an SDP node without an submodel.")
-            sdp_path = Path(str(sdp_path))
-            if not sdp_path.exists():
-                raise FINNInternalError(
-                    f"No submodel found for SDP node {node.name} " f"at {sdp_path}."
-                )
-            sdp = ModelWrapper(str(sdp_path))
-            sdp = sdp.transform(
-                InsertIODMA(
-                    max_intfwidth=self.iodma_intf_max_width, insert_input=False, insert_output=True
-                )
-            )
-            for transform in iodma_transforms:
-                sdp = sdp.transform(transform)
-            sdp.save(sdp_path)
 
         # Do all other necessary steps on all SDPs
         for sdp_node in model.graph.node:

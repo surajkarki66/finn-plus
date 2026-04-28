@@ -58,6 +58,7 @@ from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
 from qonnx.util.basic import get_by_name
 from qonnx.util.cleanup import cleanup_model
 from shutil import copy, move
+from typing import cast
 
 import finn.transformation.fpgadataflow.convert_to_hw_layers as to_hw
 import finn.transformation.streamline.absorb as absorb
@@ -71,8 +72,6 @@ from finn.analysis.fpgadataflow.unsupported_layers import unsupported_layers
 from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     DataflowOutputType,
-    MFCommunicationKernel,
-    MFVerbosity,
     ShellFlowType,
     VerificationStepType,
 )
@@ -88,9 +87,11 @@ from finn.transformation.fpgadataflow.derive_characteristic import (
     DeriveCharacteristic,
     DeriveFIFOSizes,
 )
+from finn.transformation.fpgadataflow.floorplan import Floorplan
 from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
+from finn.transformation.fpgadataflow.insert_iodma import InsertIODMA
 from finn.transformation.fpgadataflow.insert_tlastmarker import InsertTLastMarker
 from finn.transformation.fpgadataflow.loop_rolling import LoopExtraction, LoopRolling
 from finn.transformation.fpgadataflow.make_driver import (
@@ -102,7 +103,9 @@ from finn.transformation.fpgadataflow.make_zynq_proj import ZynqBuild
 from finn.transformation.fpgadataflow.minimize_accumulator_width import MinimizeAccumulatorWidth
 from finn.transformation.fpgadataflow.minimize_weight_bit_width import MinimizeWeightBitWidth
 from finn.transformation.fpgadataflow.multifpga.assign_metadata import AssignNetworkMetadata
-from finn.transformation.fpgadataflow.multifpga.communication_kernels import PrepareAuroraFlow
+from finn.transformation.fpgadataflow.multifpga.communication_kernels import (
+    PrepareCommunicationKernels,
+)
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
@@ -140,12 +143,7 @@ from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.basic import get_liveness_threshold_cycles, get_rtlsim_trace_depth
 from finn.util.config import extract_model_config_consolidate_shuffles, extract_model_config_to_json
-from finn.util.exception import (
-    FINNConfigurationError,
-    FINNMultiFPGAConfigError,
-    FINNMultiFPGAUserError,
-    FINNUserError,
-)
+from finn.util.exception import FINNMultiFPGAUserError, FINNUserError
 from finn.util.execution import execute_parent
 from finn.util.logging import log
 from finn.util.mlo_sim import is_mlo, mlo_prehook_func_factory
@@ -1245,173 +1243,6 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
     return model
 
 
-def step_partition_for_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Assign the device_id parameter to all nodes in the graph. If we are not in a Multi-FPGA case
-    (model attribute is_multifpga) this step does nothing.
-
-    First step to be run for Multi-FPGA. Followed by:
-        step_create_multifpga_sdp
-        step_generate_network_metadata
-        step_prepare_communication_kernels
-    """
-    if cfg.partitioning_configuration is None or cfg.partitioning_configuration.num_fpgas == 1:
-        raise FINNConfigurationError(
-            "Tried partitioning a single FPGA model. Setting is_multipga=False. "
-            "If this was on purpose, make sure a partitioning config is given, "
-            "and that it has more target devices than 1!"
-        )
-    model.set_metadata_prop("is_multifpga", "True")
-    if cfg.board is None:
-        raise FINNMultiFPGAUserError(
-            "DataflowBuildConfig parameter 'board' is missing "
-            "but required for Multi-FPGA builds!"
-        )
-
-    if cfg.partitioning_configuration.partitioning is not None:
-        log.info("Loading pre-existing partitioning...")
-        model = model.transform(ApplyPartitioning(cfg.partitioning_configuration.partitioning))
-    else:
-        model = model.transform(
-            PartitionForMultiFPGA(
-                partitioning_strategy=cfg.partitioning_configuration.partition_strategy,
-                num_fpgas=cfg.partitioning_configuration.num_fpgas,
-                topology=cfg.partitioning_configuration.topology,
-                communication_kernel=cfg.partitioning_configuration.communication_kernel,
-                considered_resources=cfg.partitioning_configuration.considered_resources,
-                max_utilization=cfg.partitioning_configuration.max_utilization,
-                ideal_utilization=cfg.partitioning_configuration.ideal_utilization,
-                ports_per_device=cfg.partitioning_configuration.ports_per_device,
-                fpga_part=cfg._resolve_fpga_part(),
-                board=cfg.board,
-                timeout=cfg.partitioning_configuration.partition_solver_timeout,
-                output_dir=Path(cfg.output_dir),
-                verbosity=cfg.partitioning_configuration.verbosity,
-            )
-        )
-    return model
-
-
-def step_create_multifpga_sdp(model: ModelWrapper, _: DataflowBuildConfig) -> ModelWrapper:
-    """Create StreamingDataflowPartitions from the graph based on the device ids that were
-    assigned by step_partition_for_multifpga.
-
-    Should be run after: step_partition_for_multifpga.
-    Should be run before: step_generate_network_metadata and step_prepare_communication_kernels.
-    """
-    if model.get_metadata_prop("is_multifpga") in [None, "False"]:
-        return model
-    model = model.transform(CreateMultiFPGAStreamingDataflowPartition())
-    return model
-
-
-def step_generate_network_metadata(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Create network metadata for this flow.
-
-    Should be run after: step_partition_for_multifpga and step_create_multifpga_sdp.
-    Should be run before: step_prepare_communication_kernels."""
-    if cfg.partitioning_configuration is None:
-        raise FINNUserError("MultiFPGA enabled, but no partitioning configuration given!")
-
-    # Create the metadata
-    log.debug("Creating metadata.")
-    model = model.transform(
-        AssignNetworkMetadata(
-            cfg.partitioning_configuration.communication_kernel,
-            cfg.partitioning_configuration.topology,
-            cfg.partitioning_configuration.verbosity,
-        )
-    )
-    return model
-
-
-def step_prepare_communication_kernels(
-    model: ModelWrapper, cfg: DataflowBuildConfig
-) -> ModelWrapper:
-    """Package and prepare the communication kernels for Multi-FPGA.
-
-    Should be run after: step_partition_for_multifpga, step_create_multifpga_sdp
-        and step_generate_network_metadata.
-    Should be run before: step_prepare_synthesis.
-    """
-    if cfg.partitioning_configuration is None:
-        raise FINNUserError("MultiFPGA enabled, but no partitioning configuration given!")
-    # Package kernels
-    match cfg.partitioning_configuration.communication_kernel:
-        case MFCommunicationKernel.AURORA:
-            model = model.transform(
-                PrepareAuroraFlow(
-                    cfg._resolve_vitis_platform(),
-                    cfg._resolve_fpga_part(),
-                    cfg.partitioning_configuration,
-                )
-            )
-        case _:
-            kernelname = cfg.partitioning_configuration.communication_kernel.name
-            raise FINNMultiFPGAUserError(
-                f"Could not prepare kernels of "
-                f"type: {kernelname}, since no "
-                f"preparation transformation for this "
-                f"kind of kernel exists yet."
-            )
-    return model
-
-
-def step_make_multifpga(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Convenience step that performs all Multi-FPGA requiring steps at once.
-    Requires: Resource estimates, all nodes are HW ops. If no partitioning configuration
-    was found, nothing is done (and a warning is emitted).
-
-    Output if successful: A graph of StreamingDataflowPartition nodes, each with a device_id,
-    a partition_id and stored paths to network config and packaged communication kernels.
-    Only requires building of XOs and linking afterwards.
-    """
-    # Check if multi-fpga can be done
-    if cfg.partitioning_configuration is None:
-        log.warning(
-            "No partitioning configuration was given in the DataflowBuildConfig. "
-            "Multi-FPGA steps will be skipped."
-        )
-        return model
-
-    if cfg.partitioning_configuration.num_fpgas == 0:
-        raise FINNMultiFPGAConfigError(
-            "Multi-FPGA configuration has set num_fpgas = 0. " "Cannot execute the Multi-FPGA flow."
-        )
-
-    # Run all Multi-FPGA steps in order
-    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
-        log.info(
-            "[bold orange1]Multi-FPGA[/bold orange1]: Partitioning the neural "
-            "network ONNX graph to onto multiple devices...",
-            extra={"markup": True},
-        )
-    model = step_partition_for_multifpga(model, cfg)
-
-    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
-        log.info(
-            "[bold orange1]Multi-FPGA[/bold orange1]: Separating partitioned network sections into "
-            "device-specific StreamingDataflowPartitions...",
-            extra={"markup": True},
-        )
-    model = step_create_multifpga_sdp(model, cfg)
-
-    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
-        log.info(
-            "[bold orange1]Multi-FPGA[/bold orange1]: Generating network metadata "
-            "based on the given communication kernel types and topology...",
-            extra={"markup": True},
-        )
-    model = step_generate_network_metadata(model, cfg)
-
-    if cfg.partitioning_configuration.verbosity.value > MFVerbosity.LOW.value:
-        log.info(
-            "[bold orange1]Multi-FPGA[/bold orange1]: Preparing network kernels...",
-            extra={"markup": True},
-        )
-    model = step_prepare_communication_kernels(model, cfg)
-    return model
-
-
 def verify_mlo(model: ModelWrapper, cfg: DataflowBuildConfig, step: str):
     finn_loop = model.get_nodes_by_op_type("FINNLoop")
     # TODO: allow for multiple FINNLoops
@@ -1668,25 +1499,80 @@ def step_out_of_context_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig)
 
 
 def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Prepare synthesis. For Vitis this means packaging the IP cores as XO files."""
+    """Prepare synthesis. For Zynq this currently does nothing.
+    This does everything required for Multi-FPGA.
+
+    For Alveo:
+        - Insert IODMAs
+        - Partition / Floorplan
+        - Create SDPs (IODMAs separate or not)
+        - Metadata creation (Only Multi-FPGA)
+        - Communication kernel preparation (Only Multi-FPGA)
+        - BuildAllXOs
+
+    Afterwards, only writing the linking configuration and running synthesis is left.
+    """
+    if cfg.partitioning_configuration is not None and cfg.board is None:
+        raise FINNMultiFPGAUserError(
+            "Cannot do Multi-FPGA without " "'board' being specified in the config!"
+        )
+    # Commonly used config variables
+    output_dir = Path(cfg.output_dir)
+    part = cfg._resolve_fpga_part()
+    platform = cfg._resolve_vitis_platform()
+    clk_ns = cfg.synth_clk_period_ns
+
+    # Differentiate preparation by flow type
     match cfg.shell_flow_type:
         case ShellFlowType.VITIS_ALVEO:
-            for node in model.graph.node:
-                if node.op_type != "StreamingDataflowPartition":
-                    raise FINNConfigurationError(
-                        f"Cannot build XO file: {node.name} is not a StreamingDataflowPartition!"
+            # Insert IODMAs
+            model = model.transform(InsertIODMA(max_intfwidth=cfg.vitis_iodma_intf_max_width))
+            model = model.transform(GiveUniqueNodeNames())
+            model = model.transform(GiveReadableTensorNames())
+            model = model.transform(InsertDWC())
+            model = model.transform(GiveUniqueNodeNames())
+            model = model.transform(GiveReadableTensorNames())
+            model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
+            model = model.transform(GiveUniqueNodeNames())
+            model = model.transform(GiveReadableTensorNames())
+            model = model.transform(PrepareIP(part, clk_ns))
+            model = model.transform(HLSSynthIP())
+            model = model.transform(GiveUniqueNodeNames())
+            model = model.transform(GiveReadableTensorNames())
+
+            # Partitioning / Floorplan
+            sdp_partition_dir = Path(cfg.output_dir) / "intermediate_models" / "kernel_partitions"
+            if cfg.partitioning_configuration is None:
+                # Single FPGA
+                model = model.transform(Floorplan(cfg.vitis_floorplan_file))
+                model = model.transform(CreateDataflowPartition(str(sdp_partition_dir)))
+                model = model.transform(GiveUniqueNodeNames())
+                model = model.transform(GiveReadableTensorNames())
+            else:
+                # Multi FPGA
+                pc = cfg.partitioning_configuration
+                if pc.partitioning is not None:
+                    model = model.transform(ApplyPartitioning(pc.partitioning))
+                else:
+                    model = model.transform(
+                        PartitionForMultiFPGA(pc, part, cast("str", cfg.board), output_dir)
                     )
-            model = model.transform(
-                BuildAllXOs(
-                    cfg._resolve_fpga_part(),
-                    cfg.synth_clk_period_ns,
-                    cfg.vitis_iodma_intf_max_width,
-                )
-            )
+                    model = model.transform(
+                        CreateMultiFPGAStreamingDataflowPartition(
+                            pc.separate_iodmas, sdp_partition_dir, pc.verbosity
+                        )
+                    )
+                    model = model.transform(
+                        AssignNetworkMetadata(pc.communication_kernel, pc.topology, pc.verbosity)
+                    )
+                    model = model.transform(PrepareCommunicationKernels(platform, part, pc))
+
+            # Create / package XOs for all SDPs
+            model = model.transform(BuildAllXOs(part, clk_ns))
 
         case ShellFlowType.VIVADO_ZYNQ:
             log.warning(
-                "Currently there is nothing to be done to prepare " "Zynq flow synthesis runs."
+                "Currently there is nothing to be done to prepare Zynq flow synthesis runs."
             )
 
         case _:
@@ -1873,11 +1759,6 @@ build_dataflow_step_lookup = {
     "step_hw_ipgen": step_hw_ipgen,
     "step_insert_dwc": step_insert_dwc,
     "step_set_fifo_depths": step_set_fifo_depths,
-    "step_partition_for_multifpga": step_partition_for_multifpga,
-    "step_create_multifpga_sdp": step_create_multifpga_sdp,
-    "step_generate_network_metadata": step_generate_network_metadata,
-    "step_prepare_communication_kernels": step_prepare_communication_kernels,
-    "step_make_multifpga": step_make_multifpga,
     "step_create_stitched_ip": step_create_stitched_ip,
     "step_measure_rtlsim_performance": step_measure_rtlsim_performance,
     "step_make_driver": step_make_driver,

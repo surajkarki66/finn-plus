@@ -19,6 +19,7 @@ from finn.builder.build_dataflow_config import (
     MFCommunicationKernel,
     MFTopology,
     MFVerbosity,
+    PartitioningConfiguration,
     PartitioningStrategy,
 )
 from finn.transformation.fpgadataflow.multifpga.utils import (
@@ -643,45 +644,36 @@ class PartitionForMultiFPGA(Transformation):
 
     def __init__(  # noqa
         self,
-        partitioning_strategy: PartitioningStrategy,
-        num_fpgas: int,
-        topology: MFTopology,
-        communication_kernel: MFCommunicationKernel,
-        considered_resources: list[str],
-        max_utilization: float,
-        ideal_utilization: float,
-        ports_per_device: int,
+        partitioning_configuration: PartitioningConfiguration,
         fpga_part: str,
         board: str,
-        timeout: int,
         output_dir: Path,
-        verbosity: MFVerbosity,
     ) -> None:
-        self.verbosity = verbosity
+        self.verbosity = partitioning_configuration.verbosity
         self.board = board
-        self.topology = topology
+        self.topology = partitioning_configuration.topology
         self.output_dir = output_dir
         self.part = fpga_part
-        self.num_fpgas = num_fpgas
-        self.considered_resources = considered_resources
-        self.max_utilization = max_utilization
-        self.ideal_utilization = ideal_utilization
-        self.ports_per_device = ports_per_device
-        self.communication_kernel = communication_kernel
-        self.partitioning_strategy = partitioning_strategy
-        self.timeout = timeout
+        self.num_fpgas = partitioning_configuration.num_fpgas
+        self.considered_resources = partitioning_configuration.considered_resources
+        self.max_utilization = partitioning_configuration.max_utilization
+        self.ideal_utilization = partitioning_configuration.ideal_utilization
+        self.ports_per_device = partitioning_configuration.ports_per_device
+        self.communication_kernel = partitioning_configuration.communication_kernel
+        self.partitioning_strategy = partitioning_configuration.partition_strategy
+        self.timeout = partitioning_configuration.partition_solver_timeout
 
         # Select the partitioner class based on the communication kernel
         partitioners = {MFCommunicationKernel.AURORA: AuroraPartitioner}
         try:
-            self.partitioner_type = partitioners[communication_kernel]
+            self.partitioner_type = partitioners[self.communication_kernel]
         except KeyError as ke:
             raise FINNMultiFPGAConfigError(
                 f"There is currently no partitioner implementation "
                 f"for usage with the communication kernel "
-                f"{communication_kernel.name}"
+                f"{self.communication_kernel.name}"
             ) from ke
-        if verbosity.value > MFVerbosity.LOW.value:
+        if self.verbosity.value > MFVerbosity.LOW.value:
             log.info(
                 f"Based on the communication kernel, "
                 f'partitioner "{self.partitioner_type.__name__}" was chosen!'
@@ -695,11 +687,11 @@ class PartitionForMultiFPGA(Transformation):
             )
 
         # Set the target device count
-        if num_fpgas < 0:
+        if self.num_fpgas < 0:
             self.devices = self.estimate_required_fpgas()
             raise NotImplementedError()
         else:  # noqa
-            self.devices = num_fpgas
+            self.devices = self.num_fpgas
 
     def estimate_required_fpgas(self) -> int:
         """Use resource utilization to estimate how many FPGAs will be needed to
