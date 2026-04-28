@@ -9,6 +9,7 @@ from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveUniqueNodeNames
 from typing import TYPE_CHECKING
 
+from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
 from finn.transformation.fpgadataflow.multifpga.utils import (
     get_device_id,
@@ -16,6 +17,7 @@ from finn.transformation.fpgadataflow.multifpga.utils import (
     set_device_id,
 )
 from finn.util.basic import make_build_dir
+from finn.util.logging import log
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
@@ -29,8 +31,9 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
     IMPORTANT: Currently this assumes that every branch is split and joined on the same device.
     """
 
-    def __init__(self) -> None:  # noqa
+    def __init__(self, verbosity: MFVerbosity) -> None:  # noqa
         super().__init__()
+        self.verbosity = verbosity
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         current_device = get_device_id(model.graph.node[0])
@@ -51,11 +54,18 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
                 mapping[current_max] = []
             mapping[current_max].append({"device": current_device, "node": node.name})
 
+        if self.verbosity.value > MFVerbosity.NONE.value:
+            log.info(f"Creating a total of {current_max} StreamingDataflowPartitions...")
+
         # Write partition ID <-> Device+Node name mapping into a human readable file for
         # debugging
         cdfp_dir = Path(make_build_dir("dataflow_multifpga_partition"))
-        with (cdfp_dir / "partition_id_mapping.yaml").open("w+") as f:
+        sdp_logfile = cdfp_dir / "partition_id_mapping.yaml"
+        with sdp_logfile.open("w+") as f:
             yaml.dump(mapping, f, yaml.Dumper)
+
+        if self.verbosity.value > MFVerbosity.LOW.value:
+            log.info(f"Storing SDP mapping at: {sdp_logfile}")
 
         # Create the SDFPs
         model = model.transform(CreateDataflowPartition(str(cdfp_dir)))

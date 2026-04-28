@@ -95,6 +95,8 @@ class PrepareAuroraFlow(Transformation):
         dev_index: list[tuple[int, int]] = []
         with ThreadPoolExecutor(max_workers=get_settings().num_default_workers) as tpe:
             for device, index in metadata.get_unprepared_aurora_kernels():
+                if self.verbosity.value > MFVerbosity.LOW.value:
+                    log.info(f"Packaging AuroraFlow core number {index} for device {device}.")
                 futures.append(
                     tpe.submit(
                         self.package_single,

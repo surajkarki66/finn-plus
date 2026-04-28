@@ -29,7 +29,12 @@ from finn.transformation.fpgadataflow.multifpga.utils import (
     set_device_id,
 )
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError, FINNMultiFPGAUserError
+from finn.util.exception import (
+    FINNInternalError,
+    FINNMultiFPGAConfigError,
+    FINNMultiFPGAError,
+    FINNMultiFPGAUserError,
+)
 from finn.util.logging import LogDisabledConsole, log
 from finn.util.platforms import platforms
 
@@ -70,6 +75,7 @@ class Partitioner(ABC):
         network_ports_per_device: int = 2,
         max_utilization: float | None = None,
         ideal_utilization: float | None = None,
+        index_node_name_map: dict[int, str] | None = None,
     ) -> None:
         # MIP member variables first
         self.status: mip.OptimizationStatus | None
@@ -84,6 +90,13 @@ class Partitioner(ABC):
             self.model = Model(solver_name=mip.CBC)
 
         # Details about the partitioning
+        self.index_node_map = index_node_name_map
+        if self.index_node_map is not None:
+            for i in range(nodes):
+                if i not in self.index_node_map.keys():
+                    raise FINNInternalError(
+                        f"Cannot use index-node map, since " f"name of node index {i} is missing!"
+                    )
         self.strategy = strategy
         self.max_utilization = max_utilization
         self.topology = topology
@@ -132,7 +145,7 @@ class Partitioner(ABC):
         this method, so that any class inheriting from the base can have a uniform result type.
         This type should map node-names to devices.
         The method should also error, if it is called before a solution was found.
-        """
+        """  # noqa
 
     def solve(
         self,
@@ -193,6 +206,7 @@ class AuroraPartitioner(Partitioner):  # noqa
         limit_nodes_per_device: int | None = None,
         max_utilization: float | None = None,
         ideal_utilization: float | None = None,
+        index_node_name_map: dict[int, str] | None = None,
     ) -> None:
         super().__init__(
             strategy,
@@ -208,6 +222,7 @@ class AuroraPartitioner(Partitioner):  # noqa
             network_ports_per_device,
             max_utilization,
             ideal_utilization,
+            index_node_name_map,
         )
         self.verbosity = verbosity
         if self.model is None or type(self.model) is not Model:
@@ -547,9 +562,14 @@ class AuroraPartitioner(Partitioner):  # noqa
         """Create a uniform result mapping from the internal model. Refer to baseclass docstring
         for more information.
         """
+        if self.index_node_map is None:
+            raise FINNInternalError(
+                "Cannot create result mapping, because no "
+                "Index-Nodename mapping was passed to the partitioner object."
+            )
         mapping = {}
         for i in range(self.node_count):
-            mapping[i] = self.chosen_device[i].x
+            mapping[self.index_node_map[i]] = int(self.chosen_device[i].x)  # type: ignore
         return mapping
 
     def _get_resource_use_relative(self) -> dict[int, dict[str, Any]]:
@@ -582,7 +602,7 @@ class ApplyPartitioning(Transformation):
             mapping = Path(mapping)  # type: ignore
             if not mapping.exists():
                 raise FINNMultiFPGAUserError(
-                    f"Cannot read partitioning from " f"{mapping}. No such file exists."
+                    f"Cannot read partitioning from {mapping}. No such file exists."
                 )
             with mapping.open("r") as f:
                 self.mapping = yaml.load(f, yaml.Loader)
@@ -591,6 +611,7 @@ class ApplyPartitioning(Transformation):
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         """Assign the device ids to the nodes."""
+        done = 0
         for nodename, device in self.mapping.items():
             node = model.get_node_from_name(nodename)
             if node is None:
@@ -601,6 +622,13 @@ class ApplyPartitioning(Transformation):
                     f"Is your partitioning config outdated?"
                 )
             set_device_id(node, device)
+            done += 1
+        if done != len(model.graph.node):
+            raise FINNInternalError(
+                f"Something went wrong when partitioning. "
+                f"Some nodes did not receive a device ID. Set "
+                f"device IDs: {done} / Total expected: {len(model.graph.node)}"
+            )
         return model, False
 
 
@@ -813,6 +841,7 @@ class PartitionForMultiFPGA(Transformation):
             max_utilization=self.max_utilization,
             ideal_utilization=self.ideal_utilization,
             network_ports_per_device=self.ports_per_device,
+            index_node_name_map={i: model.graph.node[i].name for i in range(len(model.graph.node))},
         )
 
         # Temporary dir to store information regarding the partitioning
