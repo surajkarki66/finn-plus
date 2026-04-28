@@ -457,8 +457,13 @@ class CreateStitchedIP(Transformation):
                     "cannot connect AXI interfaces."
                 )
             ip_dir_value = node_inst.get_nodeattr("ip_path")
-            if type(ip_dir_value) is not str or ip_dir_value == "":
+            if type(ip_dir_value) is not str:
                 raise FINNInternalError(f"ip_path has the wrong type in node {node.name}.")
+            if ip_dir_value == "":
+                raise FINNInternalError(
+                    f"ip_path is not set correctly in node {node.name}. "
+                    "Try running PrepareIP and HLSSynthIP first."
+                )
             if not Path(ip_dir_value).is_dir():
                 raise FINNInternalError(
                     f"IP generation directory doesn't exist in node {node.name}."
@@ -518,7 +523,7 @@ class CreateStitchedIP(Transformation):
         if len(model.graph.node) <= 3:
             build_dir_prefix = "".join([node.name + "_" for node in model.graph.node])
         vivado_stitch_proj_dir = make_build_dir(prefix=build_dir_prefix)
-        model.set_metadata_prop("vivado_stitch_proj", vivado_stitch_proj_dir)
+        model.set_metadata_prop("vivado_stitch_proj", str(vivado_stitch_proj_dir))
         # start building the tcl script
         tcl = []
 

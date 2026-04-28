@@ -9,6 +9,7 @@
 # All other copyright is held by AMD and is provided under BSD-3-Clause license.
 #
 ###################################################################################
+# ruff: noqa: SLF001
 
 import copy
 import numpy as np
@@ -21,10 +22,13 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp, is_custom_op
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.fold_constants import FoldConstants
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple, cast
 
 from finn.util import onnxscript_helpers as osh
 from finn.util.logging import log
+
+if TYPE_CHECKING:
+    from finn.custom_op.fpgadataflow.rtl.finn_loop import FINNLoop
 
 
 def get_constant_from_value(value):
@@ -362,8 +366,8 @@ def validate_loop_io_tensor_pair(tensor_a, tensor_b):
         tensor_a.meta["quant_parameter_tensor_names"]["finn_datatype"],
         tensor_b.meta["quant_parameter_tensor_names"]["finn_datatype"],
     ), f"""FINNLoop body activation input/output finn_datatype mismatch
-       {tensor_a.meta['quant_parameter_tensor_names']['finn_datatype']} !=
-       {tensor_b.meta['quant_parameter_tensor_names']['finn_datatype']}"""
+       {tensor_a.meta["quant_parameter_tensor_names"]["finn_datatype"]} !=
+       {tensor_b.meta["quant_parameter_tensor_names"]["finn_datatype"]}"""
 
 
 def validate_loop_io_tensors(loop_node: ir.Node):
@@ -536,11 +540,13 @@ class LoopRolling(Transformation):
         # Indexable inputs will have different constant or none producers
         # Constant values broadcast to all nodes will have the same producer
         # Skip the (all) Activation inputs (have been swapped to beginning of the list)
+        parameter_names_inputs: set[str] = set()
         for index in range(activations, len(nodes[0].inputs)):
             inputs = []
             for node in nodes:
                 cinput = node.inputs[index]
                 inputs.append(cinput)
+            parameter_names_inputs.add(inputs[0].name)
 
             if osh.same(inputs) or same_values(inputs):
                 # Constant with Respect to Loop
@@ -578,7 +584,12 @@ class LoopRolling(Transformation):
         # This must be done after serialization so we can work with protobuf nodes
 
         for loop_node in model_wrapper.get_nodes_by_op_type("FINNLoop"):
-            loop_body = getCustomOp(loop_node).get_nodeattr("body")
+            loop_body = cast(
+                "ModelWrapper", cast("FINNLoop", getCustomOp(loop_node)).get_nodeattr("body")
+            )
+            loop_body.set_metadata_prop(
+                "mlo_input_parameter_names", str(list(parameter_names_inputs))
+            )
             for node in loop_body.graph.node:
                 if not is_custom_op(node.domain):
                     continue

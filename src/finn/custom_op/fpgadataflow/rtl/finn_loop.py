@@ -29,9 +29,11 @@
 import copy
 import math
 import numpy as np
+import numpy.typing as npt
 import os
 import shutil
 import subprocess
+from onnx import GraphProto
 from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
@@ -48,6 +50,7 @@ from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
 from finn.util.basic import make_build_dir
 from finn.util.create import adjacency_list
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
+from finn.util.exception import FINNInternalError
 from finn.util.mlo_sim import mlo_prehook_func_factory
 from finn.util.settings import get_settings
 
@@ -76,7 +79,7 @@ def collect_ip_dirs(model, ipstitch_path):
     return ip_dirs
 
 
-class FINNLoop(HWCustomOp, RTLBackend):
+class FINNLoop(RTLBackend, HWCustomOp):
     """Class that corresponds to the meta/container node FINN loop
     which is a placeholder for a group of fpgadataflow nodes that have been separated
     out into a FINN-ONNX model of its own and are meant to be executed in a loop."""
@@ -97,7 +100,9 @@ class FINNLoop(HWCustomOp, RTLBackend):
         my_attrs.update(RTLBackend.get_nodeattr_types(self))
         return my_attrs
 
-    def get_nodeattr(self, name):
+    def get_nodeattr(
+        self, name
+    ) -> ModelWrapper | int | float | str | bool | npt.NDArray | list[str | int | float]:
         """Get a node attribute by name. Data is stored inside the ONNX node's
         AttributeProto container. Attribute must be part of get_nodeattr_types.
         Default value is returned if attribute is not set."""
@@ -126,7 +131,17 @@ class FINNLoop(HWCustomOp, RTLBackend):
         except KeyError:
             raise AttributeError("Op has no such attribute: " + name)
 
-    def set_nodeattr(self, name, value):
+    def set_nodeattr(
+        self,
+        name,
+        value: ModelWrapper
+        | GraphProto
+        | float
+        | str
+        | bool
+        | npt.NDArray
+        | list[str | int | float],
+    ):
         """Set a node attribute by name. Data is stored inside the ONNX node's
         AttributeProto container. Attribute must be part of get_nodeattr_types."""
         try:
@@ -136,6 +151,12 @@ class FINNLoop(HWCustomOp, RTLBackend):
                 # dtype indicates which ONNX Attribute member to use
                 # g : graph
                 if dtype == "g":
+                    if isinstance(value, ModelWrapper):
+                        value = value.model.graph
+                    if not isinstance(value, GraphProto):
+                        raise FINNInternalError(
+                            "Value for graph attribute must be a GraphProto or ModelWrapper"
+                        )
                     attr.g.CopyFrom(value)
                 else:
                     super().set_nodeattr(name, value)
@@ -708,14 +729,16 @@ class FINNLoop(HWCustomOp, RTLBackend):
 
         adj_list = adjacency_list(
             loop_body,
-            lambda node: node.op_type == "Thresholding_rtl"
-            or (
-                node.op_type == "MVAU_rtl"
-                and any(attr.name == "mlo_max_iter" and attr.i > 0 for attr in node.attribute)
-            )
-            or (
-                node.op_type.startswith("Elementwise")
-                and any(attr.name == "mlo_max_iter" and attr.i > 0 for attr in node.attribute)
+            lambda node: (
+                node.op_type == "Thresholding_rtl"
+                or (
+                    node.op_type == "MVAU_rtl"
+                    and any(attr.name == "mlo_max_iter" and attr.i > 0 for attr in node.attribute)
+                )
+                or (
+                    node.op_type.startswith("Elementwise")
+                    and any(attr.name == "mlo_max_iter" and attr.i > 0 for attr in node.attribute)
+                )
             ),
         )
 

@@ -56,7 +56,7 @@ from enum import Enum
 from mashumaro.mixins.json import DataClassJSONMixin
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path, PosixPath, PurePath
-from typing import Any, List, Literal, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 from finn.util.basic import alveo_default_platform, part_map
 from finn.util.exception import FINNConfigurationError
@@ -221,7 +221,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     """
 
     class Config(mashumaro.config.BaseConfig):
-        """Config for (de)serialization of the dataflow builder class."""  # noqa
+        """Config for (de)serialization of the dataflow builder class."""
 
         forbid_extra_keys = True
 
@@ -276,7 +276,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
             )
         if dfbc.folding_config_file is not None and not dfbc.folding_config_file.exists():
             raise FINNConfigurationError(
-                f"No folding config file could be found " f"at {dfbc.folding_config_file}."
+                f"No folding config file could be found at {dfbc.folding_config_file}."
             )
 
         return dfbc
@@ -591,13 +591,13 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     #: A List of strings that specify the PyTorch metadata hierarchy to
     #: be used for the loop body hierarchy. Each item in the list should
     #: be a string that represents a level in the hierarchy.
-    loop_body_hierarchy: Optional[List[List[str]]] = None
+    loop_body_hierarchy: Optional[list[list[str]]] = None
 
     #: A list of a start and an end node to mark the loop body subgraph
     #: For this node range, the PyTorch metadata hierarchy will be simulated
     #: TODO: this argument will be replaced or extended when there is a way
     #: to preserve node metadata from the PyTorch model (e.g. from dynamo exporter)
-    loop_body_range: Optional[List[Any]] = None
+    loop_body_range: Optional[list[Any]] = None
 
     #: (Only relevant if CPP_DRIVER output product is enabled) Selects C++ driver version.
     #: If set to "latest", newest version will be used.

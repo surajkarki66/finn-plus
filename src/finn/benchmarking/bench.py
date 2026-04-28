@@ -107,7 +107,7 @@ def start_bench_run(config_name):
             else:
                 config_path = os.path.join("ci", "cfg", config_name + ".yml")
         print("Job launched with SLURM ID: %d" % (job_id))
-    except KeyError as e:
+    except KeyError:
         # Launched without SLURM, assume test run on local machine
         job_id = 0
         experiment_dir = "bench_output/" + time.strftime("%d_%H_%M")

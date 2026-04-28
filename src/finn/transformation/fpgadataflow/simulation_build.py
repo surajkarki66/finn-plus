@@ -1,5 +1,6 @@
 """Build FINN Simulations."""
 
+import contextlib
 import finn_xsi.adapter as finnxsi
 import numpy as np
 import onnx
@@ -16,11 +17,10 @@ from enum import Enum
 from onnx import NodeProto, TensorProto, ValueInfoProto
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
-from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames
 from qonnx.transformation.infer_shapes import InferShapes
-from qonnx.util.basic import get_by_name
+from qonnx.util.basic import gen_finn_dt_tensor, get_by_name
 from subprocess import CalledProcessError
 from typing import TYPE_CHECKING, Any, cast
 
@@ -30,16 +30,12 @@ from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
-from finn.util.basic import launch_process_helper, make_build_dir
+from finn.util.basic import getHWCustomOp, launch_process_helper, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-
-# TODO: Fix that BuildSimulation has to return binaries for either SimulationType
-# TODO: Just store the directory instead - since we build all targets anyways
 
 
 class SimulationType(str, Enum):
@@ -61,6 +57,127 @@ class SimulationBuilder:
         self.fpgapart = fpgapart
         self.clk_ns = clk_ns
 
+    def _create_existing_initializer_input(
+        self,
+        inp_name: str,
+        target_node: NodeProto,
+    ) -> tuple[TensorProto, ValueInfoProto]:
+        """Create tensor/valueinfo for an input that already has an initializer."""
+        init_ret = self.model.get_initializer(inp_name, return_dtype=True)
+        info = self.model.get_tensor_valueinfo(inp_name)
+        if init_ret is None or info is None:
+            raise FINNInternalError(
+                f"Failed to get initializer for {inp_name} while isolating node {target_node.name}."
+            )
+        vals, dtype = cast("tuple[np.ndarray, int]", init_ret)
+        init_tensor = onnx.helper.make_tensor(info.name, dtype, vals.shape, vals)
+        val_info = onnx.helper.make_tensor_value_info(info.name, dtype, vals.shape)
+        return init_tensor, val_info
+
+    def _create_mlo_dummy_initializer_input(
+        self,
+        inp_name: str,
+        target_node: NodeProto,
+    ) -> tuple[TensorProto, ValueInfoProto]:
+        """Create dummy initializer tensor/valueinfo for an MLO parameter input."""
+        info = self.model.get_tensor_valueinfo(inp_name)
+        if info is None:
+            raise FINNInternalError(
+                f"Failed to get value info for {inp_name} while isolating node {target_node.name}."
+            )
+
+        dtype = info.type.tensor_type.elem_type
+        if dtype == TensorProto.UNDEFINED:
+            dtype = TensorProto.FLOAT
+        tdt = self.model.get_tensor_datatype(inp_name)
+        tshape = self.model.get_tensor_shape(inp_name)
+        if tshape is None:
+            raise FINNInternalError(
+                f"Failed to get shape for {inp_name} while isolating node {target_node.name}."
+            )
+        vals = gen_finn_dt_tensor(tdt, tuple(tshape))
+        vals = np.sort(vals)
+
+        init_tensor = onnx.helper.make_tensor(info.name, dtype, vals.shape, vals)
+        val_info = onnx.helper.make_tensor_value_info(info.name, dtype, vals.shape)
+        return init_tensor, val_info
+
+    def _create_dynamic_input_with_dummy(
+        self,
+        inp_name: str,
+        input_index: int,
+        target_node: NodeProto,
+        target_op: HWCustomOp,
+    ) -> tuple[ValueInfoProto, ValueInfoProto, NodeProto]:
+        """Create graph input and dummy node for a non-initializer input."""
+        info = self.model.get_tensor_valueinfo(inp_name)
+        if info is None:
+            raise FINNInternalError(
+                f"Failed to get value info for {inp_name} while isolating node {target_node.name}."
+            )
+
+        new_input_info = onnx.helper.make_tensor_value_info(
+            info.name,
+            TensorProto.FLOAT,
+            cast("Sequence[int]", target_op.get_normal_input_shape(input_index)),
+        )
+        new_input_dummy_info = onnx.helper.make_tensor_value_info(
+            info.name + "_dummy",
+            TensorProto.FLOAT,
+            cast("Sequence[int]", target_op.get_normal_input_shape(input_index)),
+        )
+
+        dummy_node = onnx.helper.make_node(
+            "RemoveDataPath_rtl",
+            inputs=[new_input_info.name],
+            outputs=[new_input_dummy_info.name],
+            domain="finn.custom_op.fpgadataflow.rtl",
+            backend="fpgadataflow",
+            folded_shape=target_op.get_folded_input_shape(input_index),
+            normal_shape=target_op.get_normal_input_shape(input_index),
+            dataType=target_op.get_input_datatype(input_index).name,
+            name=target_node.name + f"_input_dummy_{input_index}",
+        )
+        return new_input_info, new_input_dummy_info, dummy_node
+
+    def _create_output_with_dummy(
+        self,
+        out_name: str,
+        output_index: int,
+        target_node: NodeProto,
+        target_op: HWCustomOp,
+    ) -> tuple[ValueInfoProto, ValueInfoProto, NodeProto]:
+        """Create graph output and dummy node for an output tensor."""
+        info = self.model.get_tensor_valueinfo(out_name)
+        if info is None:
+            raise FINNInternalError(
+                f"Failed to get value info for {out_name} while isolating node {target_node.name}."
+            )
+
+        new_output_info = onnx.helper.make_tensor_value_info(
+            info.name,
+            TensorProto.FLOAT,
+            cast("Sequence[int]", target_op.get_normal_output_shape(output_index)),
+        )
+        new_output_dummy_info = onnx.helper.make_tensor_value_info(
+            info.name + "_dummy",
+            TensorProto.FLOAT,
+            cast("Sequence[int]", target_op.get_normal_output_shape(output_index)),
+        )
+
+        dummy_node = onnx.helper.make_node(
+            "RemoveDataPath_rtl",
+            inputs=[new_output_dummy_info.name],
+            outputs=[new_output_info.name],
+            domain="finn.custom_op.fpgadataflow.rtl",
+            backend="fpgadataflow",
+            folded_shape=target_op.get_folded_output_shape(output_index),
+            normal_shape=target_op.get_normal_output_shape(output_index),
+            dataType=target_op.get_output_datatype(output_index).name,
+            name=target_node.name + f"_output_dummy_{output_index}",
+        )
+        return new_output_info, new_output_dummy_info, dummy_node
+
     def _isolated_node_model(self, by_node: int | str | NodeProto) -> ModelWrapper:
         """Return a modelwrapper that has only the specified node.
 
@@ -81,10 +198,17 @@ class SimulationBuilder:
                 )
             index = by_node
         elif type(by_node) is str:
-            node_name = self.model.get_node_from_name(by_node)
-            if node_name is None:
+            node_obj = self.model.get_node_from_name(by_node)
+            if node_obj is None:
                 raise FINNInternalError(f"Cannot isolate node {by_node}. No such node found.")
-            index = [n.name for n in self.model.graph.node].index(cast("str", node_name))
+            try:
+                index = next(
+                    i for i, node in enumerate(self.model.graph.node) if node.name == by_node
+                )
+            except Exception as e:
+                raise FINNInternalError(
+                    f"Cannot isolate node {by_node}. No such node found."
+                ) from e
         elif type(by_node) is NodeProto:
             try:
                 index = self.model.graph.node.index(by_node)
@@ -97,11 +221,31 @@ class SimulationBuilder:
                 f"(NodeProto)."
             )
 
-        target_op = getCustomOp(self.model.graph.node[index])
-        if not isinstance(target_op, HWCustomOp):
-            raise FINNInternalError(
-                f"Node {target_op.name} is not a HWCustomOp, cannot isolate for simulation."
-            )
+        target_node = self.model.graph.node[index]
+        target_op = getHWCustomOp(target_node)
+
+        is_mlo_node = False
+        mlo_flag = self.model.get_metadata_prop("is_mlo")
+        if mlo_flag is not None and mlo_flag == "1":
+            is_mlo_node = True
+        mlo_parameter_input_names = []
+        if is_mlo_node:
+            if mlo_parameter_input_names is None:
+                raise FINNInternalError(
+                    f"Node {target_node.name} is an MLO node, but no "
+                    f"mlo_input_parameter_names metadata found in the model."
+                )
+            mlo_param = self.model.get_metadata_prop("mlo_input_parameter_names")
+            mlo_parameter_input_names = literal_eval(mlo_param) if mlo_param is not None else None
+            if (
+                mlo_parameter_input_names is None
+                or not isinstance(mlo_parameter_input_names, list)
+                or not all(isinstance(name, str) for name in mlo_parameter_input_names)
+            ):
+                raise FINNInternalError(
+                    f"mlo_input_parameter_names metadata is not a"
+                    f"list of strings: {mlo_parameter_input_names}"
+                )
 
         initializers: list[TensorProto] = []
         value_info_protos: list[ValueInfoProto] = []
@@ -111,8 +255,8 @@ class SimulationBuilder:
         outputs_node: list[ValueInfoProto] = []
         nodes_graph: list[NodeProto] = []
 
-        preds_list: list | None = self.model.find_direct_predecessors(self.model.graph.node[index])
-        succs_list: list | None = self.model.find_direct_successors(self.model.graph.node[index])
+        preds_list: list | None = self.model.find_direct_predecessors(target_node)
+        succs_list: list | None = self.model.find_direct_successors(target_node)
 
         num_preds = len(preds_list) if preds_list is not None else 0
         num_succs = len(succs_list) if succs_list is not None else 0
@@ -123,137 +267,99 @@ class SimulationBuilder:
         # Set correct input/output count for input and output nodes, since they have no pred/succ.
         if num_preds == 0:
             inputs = self.model.graph.input
-            ret = get_by_name(
-                inputs, self.model.graph.node[index].input[0]
-            )  # Check that node is graph input
-            if ret is not None:
-                num_preds = 1
-                input_node = True
+            for i in range(len(target_node.input)):
+                ret = get_by_name(inputs, target_node.input[i])  # Check that node is graph input
+                if ret is not None and (
+                    not is_mlo_node or target_node.input[i] not in mlo_parameter_input_names
+                ):
+                    num_preds += 1
+                    input_node = True
         if num_succs == 0:
             outputs = self.model.graph.output
-            ret = get_by_name(
-                outputs, self.model.graph.node[index].output[0]
-            )  # Check that node is graph output
-            if ret is not None:
-                num_succs = 1
-                output_node = True
+            for i in range(len(target_node.output)):
+                ret = get_by_name(outputs, target_node.output[i])  # Check that node is graph output
+                if ret is not None:
+                    num_succs += 1
+                    output_node = True
 
-        num_inputs = len(self.model.graph.node[index].input)
-        num_outputs = len(self.model.graph.node[index].output)
+        num_inputs = len(target_node.input)
+        num_outputs = len(target_node.output)
 
         if num_outputs != num_succs:
             raise FINNInternalError(
-                f"Node {self.model.graph.node[index].name} has {num_outputs} outputs but "
+                f"Node {target_node.name} has {num_outputs} outputs but "
                 f"{num_succs} successor nodes. This is not supported for isolation."
             )
 
-        initializer_inputs_list = [
-            self.model.graph.node[index].input[i]
-            for i in range(num_inputs)
-            if self.model.get_initializer(self.model.graph.node[index].input[i]) is not None
-        ]
-
-        # Handle initializers of nodes
-        initializer_inputs = []
-        for init in initializer_inputs_list:
-            ret = self.model.get_initializer(init, return_dtype=True)
-            info = self.model.get_tensor_valueinfo(init)
-            if ret is None or info is None:
-                raise FINNInternalError(
-                    f"Failed to get initializer for {init} "
-                    f"while isolating node {self.model.graph.node[index].name}."
-                )
-            vals, dtype = cast("tuple[np.ndarray, int]", ret)
-            initializers.append(onnx.helper.make_tensor(info.name, dtype, vals.shape, vals))
-            val_info = onnx.helper.make_tensor_value_info(info.name, dtype, vals.shape)
-            value_info_protos.append(val_info)
-            initializer_inputs.append(val_info)
-
+        # Process each input exactly once: either keep as initializer input or isolate via dummy
         pred_count = 0
+        converted_initializer_input_indices: list[int] = []
         for i in range(num_inputs):
-            if self.model.graph.node[index].input[i] in initializer_inputs_list:
-                continue  # This input is handled as an initializer, skip
+            inp_name = target_node.input[i]
+            is_mlo_parameter_input = is_mlo_node and inp_name in mlo_parameter_input_names
+            init_vals_only = self.model.get_initializer(inp_name)
+            if init_vals_only is not None or is_mlo_parameter_input:
+                if init_vals_only is not None:
+                    init_tensor, val_info = self._create_existing_initializer_input(
+                        inp_name,
+                        target_node,
+                    )
+                else:
+                    init_tensor, val_info = self._create_mlo_dummy_initializer_input(
+                        inp_name,
+                        target_node,
+                    )
+                initializers.append(init_tensor)
+                value_info_protos.append(val_info)
+                inputs_node.append(val_info)
+                converted_initializer_input_indices.append(i)
+                continue
+
             pred_count += 1
-            info = self.model.get_tensor_valueinfo(self.model.graph.node[index].input[i])
-            if info is None:
-                raise FINNInternalError(
-                    f"Failed to get value info for {self.model.graph.node[index].input[i]} "
-                    f"while isolating node {self.model.graph.node[index].name}."
-                )
-            # Setup new input tensors
-            new_input_info = onnx.helper.make_tensor_value_info(
-                info.name,
-                TensorProto.FLOAT,
-                cast("Sequence[int]", target_op.get_normal_input_shape(i)),
+            (
+                new_input_info,
+                new_input_dummy_info,
+                dummy_node,
+            ) = self._create_dynamic_input_with_dummy(
+                inp_name,
+                i,
+                target_node,
+                target_op,
             )
-            new_input_dummy_info = onnx.helper.make_tensor_value_info(
-                info.name + "_dummy",
-                TensorProto.FLOAT,
-                cast("Sequence[int]", target_op.get_normal_input_shape(i)),
-            )
-            # value_info_protos.append(new_input_info)
             value_info_protos.append(new_input_dummy_info)
             inputs_graph.append(new_input_info)
             inputs_node.append(new_input_dummy_info)
-
-            # Create new dummy node to remove data path for input i
-            dummy_node = onnx.helper.make_node(
-                "RemoveDataPath_rtl",
-                inputs=[new_input_info.name],
-                outputs=[new_input_dummy_info.name],
-                domain="finn.custom_op.fpgadataflow.rtl",
-                backend="fpgadataflow",
-                folded_shape=target_op.get_folded_input_shape(i),
-                normal_shape=target_op.get_normal_input_shape(i),
-                dataType=target_op.get_input_datatype(i).name,
-                name=self.model.graph.node[index].name + f"_input_dummy_{i}",
-            )
-
             nodes_graph.append(dummy_node)
-        inputs_node.extend(initializer_inputs)
+
         if pred_count != num_preds:
             raise FINNInternalError(
-                f"Node {self.model.graph.node[index].name} has {num_preds} pred. nodes but only "
+                f"Node {target_node.name} has {num_preds} pred. nodes but "
                 f"{pred_count} inputs have been handled."
             )
-        for i in range(num_succs):
-            info = self.model.get_tensor_valueinfo(self.model.graph.node[index].output[i])
-            if info is None:
-                raise FINNInternalError(
-                    f"Failed to get value info for {self.model.graph.node[index].output[i]} "
-                    f"while isolating node {self.model.graph.node[index].name}."
-                )
-            # Setup new input tensors
-            new_output_info = onnx.helper.make_tensor_value_info(
-                info.name,
-                TensorProto.FLOAT,
-                cast("Sequence[int]", target_op.get_normal_output_shape(i)),
+
+        # Process each output exactly once and isolate via dummy
+        succ_count = 0
+        for i in range(num_outputs):
+            out_name = target_node.output[i]
+            new_output_info, new_output_dummy_info, dummy_node = self._create_output_with_dummy(
+                out_name,
+                i,
+                target_node,
+                target_op,
             )
-            new_output_dummy_info = onnx.helper.make_tensor_value_info(
-                info.name + "_dummy",
-                TensorProto.FLOAT,
-                cast("Sequence[int]", target_op.get_normal_output_shape(i)),
-            )
-            # value_info_protos.append(new_output_info)
+            succ_count += 1
             value_info_protos.append(new_output_dummy_info)
             outputs_graph.append(new_output_info)
             outputs_node.append(new_output_dummy_info)
-
-            # Create new dummy node to remove data path for output i
-            dummy_node = onnx.helper.make_node(
-                "RemoveDataPath_rtl",
-                inputs=[new_output_dummy_info.name],
-                outputs=[new_output_info.name],
-                domain="finn.custom_op.fpgadataflow.rtl",
-                backend="fpgadataflow",
-                folded_shape=target_op.get_folded_output_shape(i),
-                normal_shape=target_op.get_normal_output_shape(i),
-                dataType=target_op.get_output_datatype(i).name,
-                name=self.model.graph.node[index].name + f"_output_dummy_{i}",
-            )
-
             nodes_graph.append(dummy_node)
 
+        if succ_count != num_succs:
+            raise FINNInternalError(
+                f"Node {target_node.name} has {num_succs} succ. nodes but only "
+                f"{succ_count} outputs have been handled."
+            )
+
+        # Copy the target node and create a new model with the target node and dummy nodes
         target_op_attrs = target_op.get_nodeattr_types()
         params = {}
         for attr in target_op_attrs.keys():
@@ -265,19 +371,47 @@ class SimulationBuilder:
             ):  # Empty value, skip
                 continue
             params[attr] = target_op.get_nodeattr(attr)
+
+        params_changed = False
+        if len(converted_initializer_input_indices) > 0:
+            if target_node.op_type.startswith("Elementwise"):
+                if 0 in converted_initializer_input_indices:
+                    params["lhs_style"] = "const"
+                    params_changed = True
+                if 1 in converted_initializer_input_indices:
+                    params["rhs_style"] = "const"
+                    params_changed = True
+            if target_node.op_type.startswith("MVAU"):
+                params["mem_mode"] = "internal_decoupled"
+                params_changed = True
+        if "mlo_max_iter" in params:
+            del params["mlo_max_iter"]
+            params_changed = True
+        if params_changed:
+            params["code_gen_dir_ipgen"] = ""
+            params["ipgen_path"] = ""
+            params["ip_path"] = ""
+
+        # Add support for hierachical models. FINN returns ModelWrapper,
+        # but onnx needs GraphProto for subgraphs.
+        # We need to convert any ModelWrapper parameters to GraphProto.
+        for i in params.keys():
+            if isinstance(params[i], ModelWrapper):
+                params[i] = params[i].model.graph
+
         new_node = onnx.helper.make_node(
-            self.model.graph.node[index].op_type,
+            target_node.op_type,
             inputs=[inp.name for inp in inputs_node],
             outputs=[outp.name for outp in outputs_node],
-            domain=self.model.graph.node[index].domain,
-            name=self.model.graph.node[index].name,
+            domain=target_node.domain,
+            name=target_node.name,
             **params,
         )
         nodes_graph.append(new_node)
 
         graph = onnx.helper.make_graph(
             nodes_graph,
-            f"isolated_node_graph_{self.model.graph.node[index].name}",
+            f"isolated_node_graph_{target_node.name}",
             inputs_graph,
             outputs_graph,
             initializer=initializers,
@@ -292,7 +426,7 @@ class SimulationBuilder:
         node_model.set_metadata_prop("input_node", str(input_node).lower())
         node_model.set_metadata_prop("output_node", str(output_node).lower())
 
-        # node_model.save(f"isolated_node_model_{self.model.graph.node[index].name}.onnx")
+        node_model.save(f"isolated_node_{target_node.name}.onnx")
 
         return node_model
 
@@ -312,14 +446,14 @@ class SimulationBuilder:
             first_node = model.find_consumer(iname)
             assert first_node is not None, "Failed to find consumer for " + iname
             top_ind = list(first_node.input).index(iname)
-            ishape_folded = getCustomOp(first_node).get_folded_input_shape(ind=top_ind)
+            ishape_folded = getHWCustomOp(first_node).get_folded_input_shape(ind=top_ind)
             instream_iters.append(int(np.prod(ishape_folded[:-1])))
         for top_out in model.graph.output:
             oname = top_out.name
             last_node = model.find_producer(oname)
             assert last_node is not None, "Failed to find producer for " + oname
             top_ind = list(last_node.output).index(oname)
-            oshape_folded = getCustomOp(last_node).get_folded_output_shape(ind=top_ind)
+            oshape_folded = getHWCustomOp(last_node).get_folded_output_shape(ind=top_ind)
             outstream_iters.append(int(np.prod(oshape_folded[:-1])))
 
         interface_names = model.get_metadata_prop("vivado_stitch_ifnames")
@@ -618,6 +752,7 @@ class SimulationBuilder:
             nodemodel = self._isolated_node_model(node_index)
             nodemodel = nodemodel.transform(InferShapes())
             nodemodel = nodemodel.transform(PrepareIP(self.fpgapart, self.clk_ns))
+            nodemodel = nodemodel.transform(HLSSynthIP(self.fpgapart))
             nodemodel = nodemodel.transform(
                 CreateStitchedIP(self.fpgapart, self.clk_ns, functional_simulation=functional_sim)
             )
@@ -665,10 +800,10 @@ class SimulationBuilder:
         synth_workers = max(
             1, cast("int", (psutil.virtual_memory().free / 1024 / 1024 / 1024) // 10)
         )  # 10GB per synthesis
-        if not functional_sim:
-            # When not having to do synthesis, the build is not memory bottlenecked and
-            # can be executed as parallel as possible
-            synth_workers = int(os.environ.get("NUM_DEFAULT_WORKERS", len(self.model.graph.node)))
+        # When not having to do synthesis, the build is not memory bottlenecked and
+        # can be executed as parallel as possible
+        num_workers = int(os.environ.get("NUM_DEFAULT_WORKERS", len(self.model.graph.node)))
+        synth_workers = num_workers if not functional_sim else min(synth_workers, num_workers)
 
         # Build (stitched IP, cmake, make) all sims in parallel and return paths to
         # the compiled executables
@@ -760,7 +895,9 @@ class BuildSimulation(Transformation):
             log.info("[BuildSimulation] Starting model preparation.")
             self._prepare_model()
             self.builder = SimulationBuilder(self.model, self.fpgapart, self.clk_ns)
-            sys.stdout = sys.stdout.console  # type: ignore
+            with contextlib.suppress(AttributeError):
+                sys.stdout = sys.stdout.console  # type: ignore
+
             self.binaries = self.builder.build_simulation(
                 with_live_display=False,
                 functional_sim=self.functional_sim,
@@ -782,7 +919,7 @@ class BuildSimulation(Transformation):
                     raise FINNUserError(f"Failed compilation in {binary}: {result.stderr}")
 
             # Since we dont need a rebuild, sim_binaries contains the paths to the binaries
-            sim_binaries = [Path(p) for p in sim_binaries]
+            sim_binaries = [Path(p) for p in cast("list[str]", sim_binaries)]
             total = len(sim_binaries)
 
             # Prepare compiling the binaries again
@@ -824,7 +961,10 @@ class BuildSimulation(Transformation):
         self.model = self.model.transform(SpecializeLayers(self.fpgapart))
         log.info("[BuildSimulation] Assigning unique and readable node and tensor names...")
         self.model = self.model.transform(GiveUniqueNodeNames())
+        old_input_names = [i.name for i in self.model.graph.input]
         self.model = self.model.transform(GiveReadableTensorNames())
+        for old_name, node in zip(old_input_names, self.model.graph.input, strict=True):
+            self.model.rename_tensor(node.name, old_name)
         log.info("[BuildSimulation] Preparing IPs...")
         self.model = self.model.transform(PrepareIP(self.fpgapart, self.clk_ns))
         log.info("[BuildSimulation] Synthesizing IPs...")
