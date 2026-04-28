@@ -35,7 +35,6 @@ from generated IPs in a FINN dataflow graph.
 
 import json
 import multiprocessing as mp
-import os
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -125,10 +124,12 @@ class CreateStitchedIP(Transformation):
         self.fpgapart = fpgapart
         self.clk_ns = clk_ns
         self.ip_name = ip_name
+        self.is_mlo = False
         self.vitis = vitis
         self.signature = signature
         self.functional_simulation = functional_simulation
         self.has_aximm = False
+        self.aximm_idx = 0
         self.has_m_axis = False
         self.m_axis_idx = 0
         self.has_s_axis = False
@@ -214,10 +215,11 @@ class CreateStitchedIP(Transformation):
                         f"[get_bd_pins {inst_name}/{clock2x_intf_name}]"
                     )
 
-    def connect_axi(self, node: "NodeProto") -> None:
+    def connect_axi(self, node: "NodeProto", model: "ModelWrapper") -> None:
         """Connect AXI-Lite and AXI-MM interfaces for a node."""
         inst_name = node.name
         node_inst = getCustomOp(node)
+        inputs = [inp.name for inp in model.graph.input]
         if not isinstance(node_inst, HWCustomOp):
             raise FINNInternalError(
                 f"Node {node.name} is not an HWCustomOp, cannot connect AXI interfaces."
@@ -226,29 +228,82 @@ class CreateStitchedIP(Transformation):
         aximm_intf_name = node_inst.get_verilog_top_module_intf_names()["aximm"]
 
         if len(axilite_intf_name) != 0:
-            self.connect_cmds.append(
-                f"make_bd_intf_pins_external [get_bd_intf_pins {inst_name}/{axilite_intf_name[0]}]"
+            self.connect_cmds.extend(
+                [
+                    f"make_bd_intf_pins_external "
+                    f"[get_bd_intf_pins {inst_name}/{axilite_intf_name[0]}]"
+                ]
             )
             ext_if_name = f"{axilite_intf_name[0]}_{len(self.intf_names['axilite'])}"
             self.intf_names["axilite"].append(ext_if_name)
 
-        if len(aximm_intf_name) != 0:
-            ext_if_name = f"m_axi_gmem{len(self.intf_names['aximm'])}"
-            seg_name = f"{inst_name}/Data_m_axi_gmem/SEG_{ext_if_name}_Reg"
+        if not node_inst.get_nodeattr("mlo_max_iter"):
+            if node.op_type == "FINNLoop":
+                for mm_intf_name in aximm_intf_name:
+                    self.connect_cmds.extend(
+                        [
+                            f"make_bd_intf_pins_external "
+                            f"[get_bd_intf_pins {inst_name}/{mm_intf_name[0]}]",
+                            f"set_property name {mm_intf_name[0]} "
+                            f"[get_bd_intf_ports {mm_intf_name[0]}_0]",
+                            "assign_bd_address",
+                        ]
+                    )
 
-            self.connect_cmds.extend(
-                [
-                    f"make_bd_intf_pins_external "
-                    f"[get_bd_intf_pins {inst_name}/{aximm_intf_name[0][0]}]",
-                    f"set_property name {ext_if_name} [get_bd_intf_ports m_axi_gmem_0]",
-                    "assign_bd_address",
-                    f"set_property offset 0 [get_bd_addr_segs {{{seg_name}}}]",
-                    f"set_property range 4G [get_bd_addr_segs {{{seg_name}}}]",
-                ]
-            )
+                    if mm_intf_name[0] == "m_axi_hbm":
+                        seg_name = f"{inst_name}/{mm_intf_name[0]}/SEG_{mm_intf_name[0]}_Reg"
+                    else:
+                        seg_name = f"{inst_name}/{mm_intf_name[0]}/SEG_{mm_intf_name[0]}_Reg"
+                    # TODO should propagate this information from the node instead of 256M
+                    self.connect_cmds.extend(
+                        [
+                            f"set_property offset 0 [get_bd_addr_segs {{{seg_name}}}]",
+                            f"set_property range 256M [get_bd_addr_segs {{{seg_name}}}]",
+                        ]
+                    )
+                    self.intf_names["aximm"].append((mm_intf_name[0], mm_intf_name[1]))
+                    self.has_aximm = True
+                    self.aximm_idx += 1
 
-            self.intf_names["aximm"] = [(ext_if_name, aximm_intf_name[0][1])]
-            self.has_aximm = True
+            elif len(aximm_intf_name) != 0:
+                ext_if_name = f"m_axi_gmem{self.aximm_idx}"
+                seg_name = f"{inst_name}/Data_m_axi_gmem/SEG_{ext_if_name}_Reg"
+                # TODO should propagate this information from the node instead of 4G
+                self.connect_cmds.extend(
+                    [
+                        f"make_bd_intf_pins_external "
+                        f"[get_bd_intf_pins {inst_name}/{aximm_intf_name[0][0]}]"
+                        f"set_property name {ext_if_name} [get_bd_intf_ports m_axi_gmem_0]",
+                        "assign_bd_address",
+                        f"set_property offset 0 [get_bd_addr_segs {{{seg_name}}}]",
+                        f"set_property range 4G [get_bd_addr_segs {{{seg_name}}}]",
+                    ]
+                )
+                self.intf_names["aximm"].append((ext_if_name, aximm_intf_name[0][1]))
+                self.has_aximm = True
+                self.aximm_idx += 1
+        else:
+            self.is_mlo = True
+            for mm_intf_name in aximm_intf_name:
+                # ext_if_name = "m_axi_gmem%d" % (self.aximm_idx)
+                # ext_if_name = f"m_axi_{inst_name}"
+                idx = inputs.index(node.input[1])
+                ext_if_name = f"m_axi_MVAU_id_{idx}"
+                seg_name = f"{inst_name}/{inst_name}_fetch_weights/axi_mm/SEG_{ext_if_name}_Reg"
+                # TODO should propagate this information from the node instead of 256M
+                self.connect_cmds.extend(
+                    [
+                        f"make_bd_intf_pins_external "
+                        f"[get_bd_intf_pins {inst_name}/{mm_intf_name[0]}]",
+                        f"set_property name {ext_if_name} [get_bd_intf_ports axi_mm_0]",
+                        "assign_bd_address",
+                        f"set_property offset 0 [get_bd_addr_segs {{{seg_name}}}]",
+                        f"set_property range 256M [get_bd_addr_segs {{{seg_name}}}]",
+                    ]
+                )
+                self.intf_names["aximm"].append((ext_if_name, mm_intf_name[1]))
+                self.has_aximm = True
+                self.aximm_idx += 1
 
     def connect_m_axis_external(self, node: "NodeProto", idx: int | None = None) -> None:
         """Make AXI Stream master interface(s) external."""
@@ -262,7 +317,7 @@ class CreateStitchedIP(Transformation):
 
         # make output axis external
         for i in range(len(output_intf_names)):
-            if idx is not None and idx != i:
+            if idx is not None and idx != i and node.op_type != "FINNLoop":
                 continue
             output_intf_name = output_intf_names[i][0]
 
@@ -290,7 +345,7 @@ class CreateStitchedIP(Transformation):
 
         # make input axis external
         for i in range(len(input_intf_names)):
-            if idx is not None and idx != i:
+            if idx is not None and idx != i and node.op_type != "FINNLoop":
                 continue
             input_intf_name = input_intf_names[i][0]
 
@@ -402,8 +457,13 @@ class CreateStitchedIP(Transformation):
                     "cannot connect AXI interfaces."
                 )
             ip_dir_value = node_inst.get_nodeattr("ip_path")
-            if type(ip_dir_value) is not str or ip_dir_value == "":
+            if type(ip_dir_value) is not str:
                 raise FINNInternalError(f"ip_path has the wrong type in node {node.name}.")
+            if ip_dir_value == "":
+                raise FINNInternalError(
+                    f"ip_path is not set correctly in node {node.name}. "
+                    "Try running PrepareIP and HLSSynthIP first."
+                )
             if not Path(ip_dir_value).is_dir():
                 raise FINNInternalError(
                     f"IP generation directory doesn't exist in node {node.name}."
@@ -412,7 +472,7 @@ class CreateStitchedIP(Transformation):
             self.create_cmds += node_inst.code_generation_ipi()
             self.connect_clk_rst(node)
             self.connect_ap_none_external(node)
-            self.connect_axi(node)
+            self.connect_axi(node, model)
             for i in range(len(node.input)):
                 if not is_external_input(model, node, i):
                     producer = model.find_producer(node.input[i])
@@ -459,14 +519,18 @@ class CreateStitchedIP(Transformation):
 
         # create a temporary folder for the project
         prjname = "finn_vivado_stitch_proj"
-        vivado_stitch_proj_dir = make_build_dir(prefix="vivado_stitch_proj_")
-        model.set_metadata_prop("vivado_stitch_proj", vivado_stitch_proj_dir)
+        build_dir_prefix = "vivado_stitch_proj_"
+        if len(model.graph.node) <= 3:
+            build_dir_prefix = "".join([node.name + "_" for node in model.graph.node])
+        vivado_stitch_proj_dir = make_build_dir(prefix=build_dir_prefix)
+        model.set_metadata_prop("vivado_stitch_proj", str(vivado_stitch_proj_dir))
         # start building the tcl script
         tcl = []
 
         # Project setup
         ip_dirs_str = " ".join(ip_dirs)
-        block_name = self.ip_name
+        # create block design and instantiate all layers
+        block_name = self.ip_name + "_mlo" if self.is_mlo else self.ip_name
 
         tcl.extend(
             [
@@ -491,7 +555,7 @@ class CreateStitchedIP(Transformation):
                 f"set_property CONFIG.FREQ_HZ {round(2 * fclk_hz)} [get_bd_ports /ap_clk2x]"
             )
 
-        clock_config.extend(["validate_bd_design", "save_bd_design"])
+        clock_config.extend(["save_bd_design", "validate_bd_design", "save_bd_design"])
 
         tcl.extend(clock_config)
 
@@ -549,7 +613,13 @@ class CreateStitchedIP(Transformation):
                     f"write_xdc {block_name}.xdc",
                     f"report_utilization -hierarchical -hierarchical_depth 5 "
                     f"-file {block_name}_partition_util.rpt",
+                    f"report_utilization -hierarchical -hierarchical_depth 5 "
+                    f"-file {block_name}_partition_util.xml -format xml",
                 ]
+            )
+            model.set_metadata_prop(
+                "vivado_synth_rpt",
+                f"{vivado_stitch_proj_dir}/{block_name}_partition_util.xml",
             )
         # Export block design itself as an IP core
         block_vendor = "xilinx_finn"
@@ -631,7 +701,7 @@ class CreateStitchedIP(Transformation):
             )
         # add a rudimentary driver mdd to get correct ranges in xparameters.h later on
         min_driver = get_templates_folder() / "ipcore_driver"
-        copytree(min_driver, vivado_stitch_proj_dir + "/data")
+        copytree(min_driver, cast("str", vivado_stitch_proj_dir) + "/data")
 
         #####
         # Core Cleanup Operations
@@ -710,15 +780,15 @@ close $ofile
 """
         )
 
-        # Export list of used Verilog files (for rtlsim later on)
+        # export list of used Verilog files (for rtlsim later on)
         v_file_list = f"{vivado_stitch_proj_dir}/all_verilog_srcs.txt"
         tcl.extend(
             [
                 "set all_v_files [get_files -filter {USED_IN_SYNTHESIS == 1 "
                 "&& (FILE_TYPE == Verilog || FILE_TYPE == SystemVerilog "
-                '|| FILE_TYPE =="Verilog Header")}]',
+                '|| FILE_TYPE =="Verilog Header" || FILE_TYPE == XCI)}]',
                 f"set fp [open {v_file_list} w]",
-                "foreach vf $all_v_files {puts $fp $vf}",
+                "foreach f $all_v_files {puts $fp $f}",
                 "close $fp",
             ]
         )
@@ -762,5 +832,26 @@ close $ofile
                         under {wrapper_filename} or {wrapper_filename_alt}.
                     Please check logs under the parent directory."""
                 )
+
+        # reset all class variables
+        self.is_mlo = False
+        self.has_aximm = False
+        self.aximm_idx = 0
+        self.has_m_axis = False
+        self.m_axis_idx = 0
+        self.has_s_axis = False
+        self.s_axis_idx = 0
+        self.clock_reset_are_external = False
+        self.clock2x_is_external = False
+        self.create_cmds = []
+        self.connect_cmds = []
+        self.intf_names = {
+            "clk": [],
+            "rst": [],
+            "s_axis": [],
+            "m_axis": [],
+            "aximm": [],
+            "axilite": [],
+        }
 
         return (model, False)

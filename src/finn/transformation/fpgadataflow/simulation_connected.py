@@ -214,9 +214,9 @@ class NodeConnectedSimulationController(SimulationController):
                                 cycles_results[sim_name] = cycles
                                 samples_results[sim_name] = samps
                                 intervals_results[sim_name] = intervals
-                                fifo_cycles_until_first_valid_results[sim_name] = (
-                                    fifo_cycles_until_first_valid
-                                )
+                                fifo_cycles_until_first_valid_results[
+                                    sim_name
+                                ] = fifo_cycles_until_first_valid
                                 timeout_result = timeout_result or timeout
                         except Exception as e:  # noqa
                             self.console.log(f"Simulation failed: {e}")
@@ -251,9 +251,9 @@ class NodeConnectedSimulationController(SimulationController):
                             ) = result
                             # Only update if not already collected
                             if sim_name not in fifo_results:
-                                fifo_cycles_until_first_valid_results[sim_name] = (
-                                    fifo_cycles_until_first_valid
-                                )
+                                fifo_cycles_until_first_valid_results[
+                                    sim_name
+                                ] = fifo_cycles_until_first_valid
                                 fifo_depths[sim_name] = fifo_depth
                                 fifo_results[sim_name] = fifo_util
                                 cycles_results[sim_name] = cycles

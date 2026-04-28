@@ -43,8 +43,8 @@ if TYPE_CHECKING:
     from onnx import GraphProto
     from qonnx.core.modelwrapper import ModelWrapper
 
-from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn import xsi
+from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.util.basic import make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
 from finn.util.exception import FINNInternalError

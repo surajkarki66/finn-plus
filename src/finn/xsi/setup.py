@@ -147,7 +147,13 @@ def build_xsi(force: bool = False, verbose: bool = True) -> bool:
     include_dirs, compiler, compile_args = get_build_paths()
 
     # Source files
-    source_files = ["xsi_bind.cpp", "src/Port.cpp", "src/Design.cpp", "src/Kernel.cpp", "src/SharedLibrary.cpp"]
+    source_files = [
+        "xsi_bind.cpp",
+        "src/Port.cpp",
+        "src/Design.cpp",
+        "src/Kernel.cpp",
+        "src/SharedLibrary.cpp",
+    ]
 
     # Build command
     cmd = [compiler] + compile_args

@@ -44,8 +44,8 @@ from finn.util.basic import (
     make_build_dir,
 )
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
-from finn.util.logging import log
 from finn.util.exception import FINNConfigurationError, FINNError, FINNInternalError, FINNUserError
+from finn.util.logging import log
 
 finnxsi = xsi if xsi.is_available() else None
 
@@ -150,7 +150,7 @@ def rtlsim_exec_cppxsi(
     Example with dummy_data = False:
         execution_context = {
             "<tensor_name>" : <np.ndarray>
-        }
+        }.
 
     If timeout_cycles is not None, the default value from get_liveness_threshold_cycles
     will be used.
@@ -220,11 +220,6 @@ def rtlsim_exec_cppxsi(
         if not fifosim_config_fname.exists():
             raise FINNInternalError("The finn_xsi directory could not be found. Stopping here.")
 
-    # prepare the C++ sim driver template
-    finnxsi_dir = os.environ["FINN_XSI"]
-    with fifosim_config_fname.open() as f:
-        fifsom_config_template = f.read()
-
     instream_iters = []
     outstream_iters = []
     for top_inp in model.graph.input:
@@ -245,7 +240,7 @@ def rtlsim_exec_cppxsi(
         outstream_iters.append(np.prod(oshape_folded[:-1]))
 
     # retrieve the number of inputs from execution_context
-    n_inferences = execution_context[model.graph.input[0].name]
+    n_inferences = execution_context[model.get_first_global_in()]
     ifnames = model.get_metadata_prop("vivado_stitch_ifnames")
     assert not (
         ifnames is None
@@ -401,7 +396,6 @@ def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None)
     finnxsi.reset_rtlsim(sim)
     if pre_hook is not None:
         pre_hook(sim)
-        finnxsi.reset_rtlsim(sim)
     n_cycles = finnxsi.rtlsim_multi_io(
         sim,
         io_dict,

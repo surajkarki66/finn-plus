@@ -35,7 +35,6 @@ def set_console(console: Console) -> None:
     _RICH_CONSOLE = console
 
 
-
 class LogDisabledConsole:
     """Use to get a console to use for Rich formatting without logging enabled."""
 

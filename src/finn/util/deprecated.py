@@ -1,6 +1,5 @@
 """Implements a decorator to mark functions as deprecated."""
 import functools
-import warnings
 from collections.abc import Callable
 from typing import ParamSpec, TypeVar
 from finn.util.logging import log

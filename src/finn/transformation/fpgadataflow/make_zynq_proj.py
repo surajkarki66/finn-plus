@@ -31,6 +31,7 @@
 import json
 import math
 import os
+from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
@@ -55,7 +56,7 @@ from finn.util.basic import (
     pynq_native_port_width,
     pynq_part_map,
 )
-from finn.util.exception import FINNError, FINNUserError
+from finn.util.exception import FINNError, FINNSynthesisError
 from finn.util.settings import get_settings
 
 from . import templates
@@ -131,7 +132,7 @@ class MakeZYNQProject(Transformation):
 
         if self.enable_finn_switch:
             # TODO: Add ‑copy_to
-            module_dir = os.environ["FINN_RTLLIB"] + "/finn_switch/hdl/switch.v"
+            module_dir = os.path.join(get_settings().finn_rtllib, "finn_switch", "hdl", "switch.v")
             config.append(
                 "add_files -copy_to [get_property DIRECTORY [current_project]] -norecurse %s"
                 % module_dir
@@ -176,7 +177,7 @@ class MakeZYNQProject(Transformation):
 
         if self.live_fifo_sizing:
             # instantiate virtual FIFO controller
-            rtl_path = os.environ["FINN_RTLLIB"]
+            rtl_path = get_settings().finn_rtllib
             files = [
                 os.path.join(rtl_path, "axi/hdl/axilite.sv"),
                 os.path.join(rtl_path, "fifo_virtual/hdl/fifo_gauge_pkg.sv"),
@@ -574,14 +575,16 @@ class MakeZYNQProject(Transformation):
         try:
             launch_process_helper(bash_command, print_stdout=False)
         except CalledProcessError as e:
-            raise FINNUserError(
-                f"Synthesis failed. Check " f"{vivado_pynq_proj_dir} for details."
+            raise FINNSynthesisError(
+                f"Synthesis failed. Check {vivado_pynq_proj_dir} for details.",
+                Path(vivado_pynq_proj_dir) / "vivado.log",
             ) from e
 
         bitfile_name = vivado_pynq_proj_dir + "/finn_zynq_link.runs/impl_1/top_wrapper.bit"
         if not os.path.isfile(bitfile_name):
-            raise FINNError(
-                "Synthesis failed, no bitfile found. Check logs under %s" % vivado_pynq_proj_dir
+            raise FINNSynthesisError(
+                "Synthesis failed, no bitfile found. Check logs under %s" % vivado_pynq_proj_dir,
+                Path(vivado_pynq_proj_dir) / "vivado.log",
             )
         deploy_bitfile_name = vivado_pynq_proj_dir + "/resizer.bit"
         copy(bitfile_name, deploy_bitfile_name)
@@ -596,8 +599,9 @@ class MakeZYNQProject(Transformation):
             if os.path.isfile(hwh_name_cand):
                 hwh_name = hwh_name_cand
         if not os.path.isfile(hwh_name):
-            raise Exception(
-                "Synthesis failed, no bitfile found. Check logs under %s" % vivado_pynq_proj_dir
+            raise FINNSynthesisError(
+                "Synthesis failed, no bitfile found. Check logs under %s" % vivado_pynq_proj_dir,
+                Path(vivado_pynq_proj_dir) / "vivado.log",
             )
         deploy_hwh_name = vivado_pynq_proj_dir + "/resizer.hwh"
         copy(hwh_name, deploy_hwh_name)

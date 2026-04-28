@@ -147,7 +147,7 @@ class SingleNodeSimulation : public Simulation<IStreamsSize, OStreamsSize, Loggi
                 this->fifo[i].setInputValid(this->ostreams[i].getOutputValid(), stoken);
                 // Interface FIFO <-> SHM
                 this->fifo[i].setOutputReady(toConsumerInterface[i].receive_request(stoken).data, stoken);
-                
+
                 // Toggle FIFO clock
                 ret |= this->fifo[i].toggleClock();
                 bool fifoValid = this->fifo[i].getOutputValid();
