@@ -49,12 +49,11 @@ from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import launch_process_helper
 from finn.util.exception import FINNError, FINNInternalError, FINNUserError
-from finn.util.fpgadataflow import get_submodel
+from finn.util.fpgadataflow import check_all_sdp_nodes, check_graph_is_line, get_submodel
 from finn.util.logging import log
 from finn.util.vivado import check_vitis_envvars
 
 if TYPE_CHECKING:
-    from onnx import NodeProto
     from qonnx.core.modelwrapper import ModelWrapper
 
 
@@ -190,62 +189,14 @@ class BuildAllXOs(Transformation):
         self.fpga_part = fpga_part
         self.synth_clk_period_ns = synth_clk_period_ns
 
-    def get_input_nodes(self, model: ModelWrapper) -> list[tuple[NodeProto, int]]:
-        """Return a list of all input nodes (no predecessors) and their indices in the graph."""
-        res = []
-        for i, node in enumerate(model.graph.node):
-            pre = model.find_direct_predecessors(node)
-            if pre is None:
-                res.append((node, i))
-        return res
-
-    def get_output_nodes(self, model: ModelWrapper) -> list[tuple[NodeProto, int]]:
-        """Return a list of all input nodes (no successors) and their indices in the graph."""
-        res = []
-        for i, node in enumerate(model.graph.node):
-            suc = model.find_direct_successors(node)
-            if suc is None:
-                res.append((node, i))
-        return res
-
-    def check_all_sdp_nodes(self, model: ModelWrapper) -> None:
-        """Verify that all nodes are SDP nodes."""
-        for node in model.graph.node:
-            if node.op_type != "StreamingDataflowPartition":
-                raise FINNUserError(
-                    f"Node {node.name} is not a StreamingDataflowPartition. "
-                    f"Make sure to run step_create_dataflow_partition (or "
-                    f"its Multi-FPGA equivalent) before."
-                )
-
-    def check_graph_is_line(self, model: ModelWrapper) -> None:
-        """Verify that the graph has no multiple predecessors or successors between IOs."""
-        # TODO: Run check through onnx-passes' networkx utils.
-        io_nodes = [node for node, _ in self.get_input_nodes(model) + self.get_output_nodes(model)]
-        for node in model.graph.node:
-            if node in io_nodes:
-                continue
-            if model.is_fork_node(node):
-                raise FINNUserError(
-                    f"Badly formed graph: Node {node.name} is a fork node, "
-                    f"but not an IO node. Forks in SDP graphs cannot "
-                    f"be synthesized."
-                )
-            if model.is_join_node(node):
-                raise FINNUserError(
-                    f"Badly formed graph: Node {node.name} is a join node, "
-                    f"but not an IO node. Joins in SDP graphs cannot "
-                    f"be synthesized."
-                )
-
-    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         check_vitis_envvars()
 
         # Confirm that the graph is only a line with (multiple) input and output nodes.
         # Every other graph at this point is invalid.
         # Every node must be an SDP node at this point.
-        self.check_all_sdp_nodes(model)
-        self.check_graph_is_line(model)
+        check_all_sdp_nodes(model)
+        check_graph_is_line(model)
 
         # Do all other necessary steps on all SDPs
         for i, sdp_node in enumerate(model.graph.node):

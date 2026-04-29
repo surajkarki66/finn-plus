@@ -7,16 +7,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path
+from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from finn.builder.build_dataflow_config import FpgaMemoryType, VitisOptStrategy
 from finn.templates import get_jinja_environment
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNVitisLinkConfigError
+from finn.util.fpgadataflow import (
+    check_all_sdp_nodes,
+    check_graph_is_line,
+    get_submodel,
+    get_vitis_xo,
+)
 from finn.util.logging import log
 
 if TYPE_CHECKING:
+    from onnx import NodeProto
     from qonnx.core.modelwrapper import ModelWrapper
 
 
@@ -186,7 +195,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
     def add_sp(self, cu_port_name: str, mem_type: str) -> None:
         """Add an SP assignment."""
-        known_sp_names = ["DDR", "HBM", "PLRAM"]
+        known_sp_names = ["DDR", "HBM", "PLRAM", "HOST"]
         if mem_type not in known_sp_names:
             log.warning(
                 f"Adding system port connection {cu_port_name}:{mem_type}. "
@@ -356,12 +365,27 @@ class BuildBasicVitisLinkConfig(Transformation):
     `VitsLinkConfiguration.store_to_model` for more information.
 
     When done, the config is ready to link (for Single-FPGA).
+
+    To find the path of the final config, one can load the config from the model,
+    then check the `config_path` and `run_script_path` fields of the `VitisLinkConfiguration`.
     """
 
-    def __init__(self) -> None:  # noqa
+    def __init__(
+        self,
+        platform: str,
+        mem_type: FpgaMemoryType,
+        vitis_opt_strategy: VitisOptStrategy,
+        optimization_level: str,
+        f_mhz: int,
+    ) -> None:  # noqa
         super().__init__()
+        self.platform = platform
+        self.fpga_memory_type = mem_type
+        self.optimization_level = optimization_level
+        self.vitis_opt_strategy = vitis_opt_strategy
+        self.f_mhz = f_mhz
 
-    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         configs: dict[int, VitisLinkConfiguration] = {}
         config_storage: Path = Path(make_build_dir("vitis_link_configs"))
 
@@ -391,13 +415,106 @@ class BuildBasicVitisLinkConfig(Transformation):
                 f"Stopping."
             )
 
+        # Set up all configs
+        is_multifpga = False
         if number_of_device_ids == 0:
             # Single FPGA
-            raise NotImplementedError()
+            configs[0] = VitisLinkConfiguration(
+                config_path=Path(make_build_dir("vitis_single_link_")) / "config.txt",
+                platform=self.platform,
+                optimization_level=self.optimization_level,
+                f_mhz=self.f_mhz,
+            )
         else:
             # Multi-FPGA
-            raise NotImplementedError()
+            is_multifpga = True
+            for node in model.graph.node:
+                device = get_device_id(node)
+                assert device is not None
+                if device not in configs:
+                    configs[device] = VitisLinkConfiguration(
+                        config_path=Path(make_build_dir(f"vitis_multi_link_device_{device}"))
+                        / "config.txt",
+                        platform=self.platform,
+                        optimization_level=self.optimization_level,
+                        f_mhz=self.f_mhz,
+                    )
 
-        # TODO: Remove. Only temporary
-        print(configs)
-        print(config_storage)
+        # Already add optimization strategies for all devices
+        for device in configs.keys():
+            if self.vitis_opt_strategy == VitisOptStrategy.PERFORMANCE_BEST:
+                configs[device].add_vivado_line(
+                    "prop=run.impl_1.STEPS.OPT_DESIGN.ARGS.DIRECTIVE=ExploreWithRemap\n"
+                    "prop=run.impl_1.STEPS.PLACE_DESIGN.ARGS.DIRECTIVE=Explore\n"
+                    "prop=run.impl_1.STEPS.PHYS_OPT_DESIGN.IS_ENABLED=true\n"
+                    "prop=run.impl_1.STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE=Explore\n"
+                    "prop=run.impl_1.STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE=Explore\n"
+                )
+
+        # Some temporary variables needed to construct the configs
+        current_device: int
+        cu_names: dict[NodeProto, str] = {}
+
+        # Loop through all SDPs
+        check_all_sdp_nodes(model)
+        check_graph_is_line(model)
+        for node in model.graph.node:
+            current_device = cast("int", get_device_id(node)) if is_multifpga else 0
+            submodel, _ = get_submodel(node)
+            predecessors = model.find_direct_predecessors(node)
+            successors = model.find_direct_successors(node)
+            is_input = predecessors is not None and len(predecessors) == 1
+            is_output = successors is not None and len(successors) == 1
+            node_slr = getCustomOp(node).get_nodeattr("slr")
+
+            # Add the SDPs XO file
+            configs[current_device].add_xo(get_vitis_xo(node))
+
+            # Instantiate the kernel
+            if len(submodel.graph.node) == 1 and "IODMA" in submodel.graph.node[0].name:
+                if is_input:
+                    configs[current_device].add_cu(node.name, "idma")
+                    cu_names[node.name] = "idma"
+                if is_output:
+                    configs[current_device].add_cu(node.name, "odma")
+                    cu_names[node.name] = "odma"
+            else:
+                configs[current_device].add_cu(node.name, node.name)
+                cu_names[node.name] = node.name
+
+            # Add connection between kernels. For this we need a predecessor and be either
+            # Single-FPGA or Multi-FPGA and on the same device
+            if predecessors is not None and (
+                not is_multifpga or get_device_id(predecessors[0]) == current_device
+            ):
+                predecessor_cu = cu_names[predecessors[0]] + ".m_axis"
+                this_cu = cu_names[node.name] + ".s_axis"
+                configs[current_device].add_sc(predecessor_cu, this_cu)
+
+            # Add system ports
+            mem_type: str
+            mem_idx: int
+            if self.fpga_memory_type == FpgaMemoryType.HOST_MEM:
+                mem_type = "HOST"
+                mem_idx = 0
+            else:
+                match self.platform.lower():
+                    case "u50" | "u280" | "u55c":
+                        mem_type = "HBM"
+                        mem_idx = 0
+                    case "u250":
+                        mem_type = "DDR"
+                        mem_idx = 0 if node_slr == -1 else cast("int", node_slr)
+                    case _:
+                        mem_type = "DDR"
+                        mem_idx = 1
+            configs[current_device].add_sp(
+                cu_names[node.name] + ".m_axi_gmem0", f"{mem_type}[{mem_idx}]"
+            )
+
+        # Store everything, generate scripts and return
+        model = VitisLinkConfiguration.store_to_model(config_storage, configs, model)
+        for config in configs.values():
+            config.generate_config()
+            config.generate_run_script()
+        return model, False

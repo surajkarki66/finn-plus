@@ -32,7 +32,7 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp, is_custom_op
 from qonnx.util.basic import get_by_name
 
-from finn.util.exception import FINNInternalError
+from finn.util.exception import FINNInternalError, FINNUserError
 
 
 def is_fpgadataflow_node(node):
@@ -95,3 +95,72 @@ def get_submodel(node: NodeProto) -> tuple[ModelWrapper, Path]:
             f"Cannot open model of SDP node {node.name}: " f"No file found at path: {p}"
         )
     return ModelWrapper(str(p)), p
+
+
+def get_input_nodes(model: ModelWrapper) -> list[tuple[NodeProto, int]]:
+    """Return a list of all input nodes (no predecessors) and their indices in the graph."""
+    res = []
+    for i, node in enumerate(model.graph.node):
+        pre = model.find_direct_predecessors(node)
+        if pre is None:
+            res.append((node, i))
+    return res
+
+
+def get_output_nodes(model: ModelWrapper) -> list[tuple[NodeProto, int]]:
+    """Return a list of all input nodes (no successors) and their indices in the graph."""
+    res = []
+    for i, node in enumerate(model.graph.node):
+        suc = model.find_direct_successors(node)
+        if suc is None:
+            res.append((node, i))
+    return res
+
+
+def check_all_sdp_nodes(model: ModelWrapper) -> None:
+    """Verify that all nodes are SDP nodes."""
+    for node in model.graph.node:
+        if node.op_type != "StreamingDataflowPartition":
+            raise FINNUserError(
+                f"Node {node.name} is not a StreamingDataflowPartition. "
+                f"Make sure to run step_create_dataflow_partition (or "
+                f"its Multi-FPGA equivalent) before."
+            )
+
+
+def check_graph_is_line(model: ModelWrapper) -> None:
+    """Verify that the graph has no multiple predecessors or successors between IOs."""
+    # TODO: Run check through onnx-passes' networkx utils.
+    io_nodes = [node for node, _ in get_input_nodes(model) + get_output_nodes(model)]
+    for node in model.graph.node:
+        if node in io_nodes:
+            continue
+        if model.is_fork_node(node):
+            raise FINNUserError(
+                f"Badly formed graph: Node {node.name} is a fork node, "
+                f"but not an IO node. Forks in SDP graphs cannot "
+                f"be synthesized."
+            )
+        if model.is_join_node(node):
+            raise FINNUserError(
+                f"Badly formed graph: Node {node.name} is a join node, "
+                f"but not an IO node. Joins in SDP graphs cannot "
+                f"be synthesized."
+            )
+
+
+def get_vitis_xo(node: NodeProto) -> Path:
+    """Get the path to the XO file of the submodel of the given node. Raises an error if the
+    path does not point to an existing file or the metadata prop does not exist.
+    The path to the xo must not necessarily point to an existing file.
+    """
+    try:
+        sm_path = Path(str(getCustomOp(node).get_nodeattr("model")))
+    except AttributeError as e:
+        raise FINNUserError(f"Node {node.name} has no sub-model/graph!") from e
+    if not sm_path.exists():
+        raise FINNUserError(f"No file found for submodel/graph of node {node.name} at {sm_path}!")
+    xo = ModelWrapper(str(sm_path)).get_metadata_prop("vitis_xo")
+    if xo is None:
+        raise FINNUserError(f"Submodel/graph of node {node.name} has no vitis_xo metadata!")
+    return Path(xo)
