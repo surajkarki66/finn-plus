@@ -67,7 +67,6 @@ from finn.core.onnx_exec import execute_onnx
 from finn.core.throughput_test import throughput_test_rtlsim
 from finn.transformation.fpgadataflow.alveo_build import (
     PrepareForLinking,
-    SlashLink,
     VitisLink,
     VitisOptStrategy,
 )
@@ -833,8 +832,6 @@ class TestEnd2End:
             link_transformation = VitisLink(
                 build_data["vitis_platform"], target_clk_ns, strategy=VitisOptStrategy.BUILD_SPEED
             )
-        elif build_data["toolchain"] == "slash-vrt":
-            link_transformation = SlashLink()
         model = model.transform(link_transformation)
         model.save(get_checkpoint_name(board, topology, wbits, abits, "linking"))
 
@@ -856,8 +853,6 @@ class TestEnd2End:
         model = load_test_checkpoint_or_skip(prev_chkpt_name)
         if build_data["toolchain"] == "vitis-xrt" and topology == "tfc":
             model = model.transform(MakeCPPDriver("vitis-xrt", version="latest"))
-        elif build_data["toolchain"] == "slash-vrt":
-            model = model.transform(MakeCPPDriver("slash-vrt", version="f-vrt-port"))
         elif build_data["toolchain"] == "pynq":
             model = model.transform(MakePYNQDriver("zynq-iodma"))
         else:
