@@ -4,13 +4,20 @@ transformations / steps to edit the same configuration.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path
+from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.transformation.base import Transformation
 
+from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
+from finn.util.basic import make_build_dir
 from finn.util.exception import FINNConfigurationError, FINNMultiFPGAError, FINNVitisLinkConfigError
 from finn.util.logging import log
 
 
-class VitisLinkConfiguration:
+@dataclass
+class VitisLinkConfiguration(DataClassYAMLMixin):
     """Manages XO files, CU instantiations, stream connections,
     port connections, Vivado props, etc.
     It can output a linking configuration to pass to v++ and
@@ -56,6 +63,77 @@ class VitisLinkConfiguration:
         else:
             self.run_script_path = config_path.parent / "run_link.sh"
         self.run_script_path.parent.mkdir(exist_ok=True, parents=True)
+
+    def store(self, p: Path) -> None:
+        """Store the config as a YAML file, so that it can be loaded
+        by other transformations again.
+        """
+        p.write_text(str(self.to_yaml()))
+
+    @staticmethod
+    def load(p: Path) -> VitisLinkConfiguration:
+        """Load a VitisLinkConfiguration from the given YAML file."""
+        return VitisLinkConfiguration.from_yaml(p.read_text())
+
+    @staticmethod
+    def load_from_model(model: ModelWrapper) -> dict[int, VitisLinkConfiguration]:
+        """Load all VitisLinkConfigurations from a modelwrapper. The path to this
+        directory should be stored in the "vitis_link_configs" metadata prop.
+        The function expects the configs to be stored in directories
+            `link_configs/0/config.yaml`
+        where 0 is the device ID and link_configs the stored path.
+
+        Returns
+        -------
+            dict[int, VitisLinkConfiguration]: Maps device-IDs to their respective
+                linking configurations.
+        """
+        storage_path = model.get_metadata_prop("vitis_link_configs")
+        if storage_path is None:
+            raise FINNVitisLinkConfigError(
+                "Cannot load VitisLinkConfig from model, "
+                "since the metadata prop "
+                "'vitis_link_configs' was not found!"
+            )
+        storage_path = Path(storage_path)
+        if not storage_path.exists():
+            raise FINNVitisLinkConfigError(
+                f"Cannot load VitisLinkConfigs from " f"invalid path: {storage_path}"
+            )
+
+        configs = {}
+        for device_path in storage_path.iterdir():
+            configs[int(str(device_path))] = VitisLinkConfiguration.load(
+                storage_path / device_path / "config.yaml"
+            )
+        return configs
+
+    @staticmethod
+    def store_to_model(  # noqa
+        path: Path, configs: dict[int, VitisLinkConfiguration], model: ModelWrapper
+    ) -> ModelWrapper:
+        """Store all VitisLinkConfigurations into a modelwrapper. The path to this
+        directory will be stored in the "vitis_link_configs" metadata prop.
+        The function stores the configs in directories
+            `link_configs/0/config.yaml`
+        where 0 is the device ID and link_configs the stored path.
+
+        Arguments:
+        ---------
+            `path`: Path to a directory in which the configs are stored. This path may contain no
+                other files or directories.
+            `configs`: The configuration objects to store.
+            `model`: The model to update when the configs are stored.
+
+        Returns:
+        -------
+            ModelWrapper: The modified modelwrapper with the updated metadata prop.
+        """
+        path.mkdir(exist_ok=True, parents=True)
+        model.set_metadata_prop("vitis_link_configs", str(path.absolute()))
+        for device, config in configs.items():
+            config.store(path / Path(str(device)) / "config.yaml")
+        return model
 
     def add_cu(self, kernel_name: str, cu_name: str) -> None:
         """Add a compute unit (instance of a kernel)."""
@@ -267,5 +345,61 @@ class VitisLinkConfiguration:
 
         if not self.run_script_path.exists():
             raise FINNConfigurationError(
-                f"Failed to create config run script " f"at {self.run_script_path}"
+                f"Failed to create config run script at {self.run_script_path}"
             )
+
+
+class BuildBasicVitisLinkConfig(Transformation):
+    """Build basic configs for an SDP-only graph. If multiple devices are used, generate a config
+    per device. The directory with all configurations is stored in the metadata
+    prop `vitis_link_configs`. If a config already exists, emits an error and does nothing.
+
+    Refer to `VitisLinkConfiguration.load_from_model` and
+    `VitsLinkConfiguration.store_to_model` for more information.
+
+    When done, the config is ready to link (for Single-FPGA).
+    """
+
+    def __init__(self) -> None:  # noqa
+        super().__init__()
+
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+        configs: dict[int, VitisLinkConfiguration] = {}
+        config_storage: Path = Path(make_build_dir("vitis_link_configs"))
+
+        # Check that we are the first to edit link configs
+        vitis_link_configs = model.get_metadata_prop("vitis_link_configs")
+        if vitis_link_configs is not None:
+            log.error(
+                f"Detected existing linking configurations in {vitis_link_configs}."
+                "BuildBasicVitisLinkConfig should be the first "
+                "transformation to create the initial configuration. "
+                "No changes will be made."
+            )
+            return model, False
+
+        # Differentiate Multi- and Single-FPGA cases
+        number_of_device_ids = 0
+        for node in model.graph.node:
+            if get_device_id(node) is not None:
+                number_of_device_ids += 1
+
+        if number_of_device_ids != 0 and number_of_device_ids < len(model.graph.node):
+            raise FINNVitisLinkConfigError(
+                f"{number_of_device_ids} / "
+                f"{len(model.graph.node)} nodes in the graph "
+                f"have an associated device ID. Either all nodes "
+                f"have an ID (Multi-FPGA) or none (Single-FPGA). "
+                f"Stopping."
+            )
+
+        if number_of_device_ids == 0:
+            # Single FPGA
+            raise NotImplementedError()
+        else:
+            # Multi-FPGA
+            raise NotImplementedError()
+
+        # TODO: Remove. Only temporary
+        print(configs)
+        print(config_storage)
