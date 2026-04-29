@@ -7,13 +7,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path
-from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
+from typing import TYPE_CHECKING
 
+from finn.templates import get_jinja_environment
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNConfigurationError, FINNMultiFPGAError, FINNVitisLinkConfigError
+from finn.util.exception import FINNVitisLinkConfigError
 from finn.util.logging import log
+
+if TYPE_CHECKING:
+    from qonnx.core.modelwrapper import ModelWrapper
 
 
 @dataclass
@@ -51,7 +55,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         self.sp: dict[str, str] = {}
         self.xo: list[Path] = []
         self.connects: list[tuple[str, str]] = []
-        self.vivado_section: str = "[vivado]\n"
+        self.vivado_section: str = ""
         self.connectivity_section: str = ""
         self.platform: str = platform
         self.optimization_level: str = optimization_level
@@ -98,7 +102,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         storage_path = Path(storage_path)
         if not storage_path.exists():
             raise FINNVitisLinkConfigError(
-                f"Cannot load VitisLinkConfigs from " f"invalid path: {storage_path}"
+                f"Cannot load VitisLinkConfigs from invalid path: {storage_path}"
             )
 
         configs = {}
@@ -289,6 +293,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         """Write the complete config. Raises an error if the
         config is invalid.
         """
+        # Checking for errors
         errors = self.get_config_validation_errors()
         if errors is not None:
             for err in errors:
@@ -300,53 +305,46 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
             raise FINNVitisLinkConfigError(
                 f"Multiple configuration errors occurred. First one is: {errors[0]}"
             )
-        with self.config_path.open("w+") as f:
-            f.write("[connectivity]\n")
-            for kernel_name, cu_name in self.nk:
-                f.write(f"nk={kernel_name}:1:{cu_name}\n")
 
-            # origin_cu and target_cu already require the ports already being in the str
-            for origin_cu in self.sc.keys():
-                for target_cu in self.sc[origin_cu]:
-                    f.write(f"sc={origin_cu}:{target_cu}\n")
-
-            for sp_cu, sp_mem in self.sp.items():
-                f.write(f"sp={sp_cu}:{sp_mem}\n")
-
-            for a, b in self.connects:
-                f.write(f"connect={a}:{b}\n")
-
-            if self.connectivity_section != "":
-                f.write(self.connectivity_section + "\n")
-
-            f.write(self.vivado_section)
-
-        if not self.config_path.exists():
-            raise FINNMultiFPGAError(f"Failed to create vitis config at {self.config_path}.")
+        # Template rendering
+        env = get_jinja_environment()
+        template = env.get_template("vitis_link/link_config.txt.jinja")
+        rendered = template.render(
+            nk=self.nk,
+            sc=self.sc,
+            sp=self.sp,
+            connects=self.connects,
+            connectivity_extras=self.connectivity_section,
+            vivado_extras=self.vivado_section,
+        )
+        self.config_path.write_text(rendered)
 
     def generate_run_script(self) -> None:
         """Generate a shell script to start v++ with the correct parameters.
         Produces the shell script next to the path of the config file
         unless a path is specified.
         """
+        # Accumulate all xos
         xo_string = " ".join([str(xo) for xo in self.xo])
+
+        # Check that a config for this link script exists
         if not self.config_path.exists():
             log.error(
                 f"Writing compilation / v++ script for non-existing configuration "
                 f"in {self.config_path.absolute()}. Continuing in case this is on purpose."
             )
-        with self.run_script_path.open("w+") as f:
-            f.write("#!/bin/bash\n")
-            f.write(
-                f"v++ --target hw --platform {self.platform} --link {xo_string} "
-                f"--config {self.config_path.absolute()} --optimize {self.optimization_level} "
-                f"--report_level estimate --save-temps --kernel_frequency {self.f_mhz}"
-            )
 
-        if not self.run_script_path.exists():
-            raise FINNConfigurationError(
-                f"Failed to create config run script at {self.run_script_path}"
-            )
+        # Rendering the template
+        env = get_jinja_environment()
+        template = env.get_template("vitis_link/run_link.sh.jinja")
+        rendered = template.render(
+            platform=self.platform,
+            xos=xo_string,
+            config=self.config_path.absolute(),
+            optimization=self.optimization_level,
+            f_mhz=self.f_mhz,
+        )
+        self.run_script_path.write_text(rendered)
 
 
 class BuildBasicVitisLinkConfig(Transformation):
