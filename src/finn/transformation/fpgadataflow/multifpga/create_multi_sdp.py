@@ -71,6 +71,7 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
         current_device = get_device_id(model.graph.node[0])
         current_max = 0 if not self.separate_iodmas else 1
         mapping = {}
+        total = 0
 
         # Go through every node
         for node in model.graph.node:
@@ -82,10 +83,12 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
                 if model.find_direct_predecessors(node) is None:
                     getCustomOp(node).set_nodeattr("partition_id", 0)
                     mapping[0] = [{"device": get_device_id(node), "node": node.name}]
+                    total += 1
                 if model.find_direct_successors(node) is None:
                     last_id = len(model.graph.node) + 1
                     getCustomOp(node).set_nodeattr("partition_id", last_id)
                     mapping[last_id] = [{"device": get_device_id(node), "node": node.name}]
+                    total += 1
                 continue  # without changing the device number
 
             # Save for logging purposes
@@ -102,9 +105,10 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
 
             # Set the partition ID
             getCustomOp(node).set_nodeattr("partition_id", current_max)
+            total += 1
 
         if self.verbosity.value > MFVerbosity.NONE.value:
-            log.info(f"Creating a total of {current_max} StreamingDataflowPartitions...")
+            log.info(f"Creating a total of {total} StreamingDataflowPartitions...")
 
         # Write partition ID <-> Device+Node name mapping into a human readable file for
         # debugging

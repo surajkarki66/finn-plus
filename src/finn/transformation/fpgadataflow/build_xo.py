@@ -248,8 +248,8 @@ class BuildAllXOs(Transformation):
         self.check_graph_is_line(model)
 
         # Do all other necessary steps on all SDPs
-        for sdp_node in model.graph.node:
-            log.info(f"Creating XO for SDP: {sdp_node.name}")
+        for i, sdp_node in enumerate(model.graph.node):
+            log.info(f"Creating XO for SDP: {sdp_node.name} ({i}/{len(model.graph.node)})")
             submodel_transforms = [
                 InsertDWC(),
                 GiveUniqueNodeNames(),

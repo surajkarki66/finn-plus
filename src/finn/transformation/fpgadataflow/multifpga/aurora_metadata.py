@@ -63,7 +63,8 @@ class AuroraNetworkMetadata(NetworkMetadata, DataClassYAMLMixin):
         p = model.get_metadata_prop("network_metadata")
         if p is None:
             raise FINNInternalError(
-                "Cannot load metadata from model, " "since no 'network_metadata' prop was set."
+                "Cannot load metadata from model, since no 'network_metadata' prop was set. "
+                "Did you forget to run the 'AssignMetadata' transformation before this?"
             )
         p = Path(p)
         if not p.exists():

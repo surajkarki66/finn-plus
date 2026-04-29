@@ -1550,6 +1550,9 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
                 model = model.transform(GiveReadableTensorNames())
             else:
                 # Multi FPGA
+                log.info(
+                    "Detected a Multi-FPGA configuration. " "Running Multi-FPGA specific steps..."
+                )
                 pc = cfg.partitioning_configuration
                 if pc.partitioning is not None:
                     model = model.transform(ApplyPartitioning(pc.partitioning))
