@@ -194,11 +194,10 @@ def test_elementwise_rtl_stitched_ip(op_type, pe):
     """
     lhs_dtype = "FLOAT32"
     rhs_dtype = "FLOAT32"
-    out_dtype = "FLOAT32"
     lhs_shape = [32, 64]
     rhs_shape = [64]  # Broadcast constant
 
-    model = create_elementwise_model(op_type, lhs_dtype, rhs_dtype, out_dtype, lhs_shape, rhs_shape)
+    model = create_elementwise_model(op_type, lhs_dtype, rhs_dtype, lhs_shape, rhs_shape)
 
     lhs_data = gen_finn_dt_tensor(DataType[lhs_dtype], lhs_shape)
     rhs_data = gen_finn_dt_tensor(DataType[rhs_dtype], rhs_shape)
@@ -217,6 +216,7 @@ def test_elementwise_rtl_stitched_ip(op_type, pe):
     model = model.transform(InferDataTypes())
     model = model.transform(InferShapes())
     model = model.transform(SpecializeLayers(VERSAL_PART))
+    model = model.transform(MinimizeAccumulatorWidth())
 
     assert model.graph.node[0].op_type == f"{op_type}_rtl"
 
@@ -262,7 +262,9 @@ def test_elementwise_rtl_backend_selection(
     lhs_shape = [1, 4]
     rhs_shape = [1, 4]
 
-    model = create_elementwise_model(op_type, lhs_dtype, rhs_dtype, out_dtype, lhs_shape, rhs_shape)
+    model = create_elementwise_model(
+        op_type, lhs_dtype, rhs_dtype, lhs_shape, rhs_shape, out_dtype=out_dtype
+    )
 
     rhs_data = gen_finn_dt_tensor(DataType[rhs_dtype], rhs_shape)
     model.set_initializer("in_y", rhs_data)
