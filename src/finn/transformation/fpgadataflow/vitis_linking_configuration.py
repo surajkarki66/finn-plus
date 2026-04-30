@@ -15,7 +15,7 @@ from finn.builder.build_dataflow_config import FpgaMemoryType, VitisOptStrategy
 from finn.templates import get_jinja_environment
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNInternalError, FINNVitisLinkConfigError
+from finn.util.exception import FINNInternalError, FINNUserError, FINNVitisLinkConfigError
 from finn.util.fpgadataflow import (
     check_all_sdp_nodes,
     check_graph_is_line,
@@ -373,6 +373,7 @@ class BuildBasicVitisLinkConfig(Transformation):
     def __init__(
         self,
         platform: str,
+        board: str,
         mem_type: FpgaMemoryType,
         vitis_opt_strategy: VitisOptStrategy,
         optimization_level: str,
@@ -380,6 +381,7 @@ class BuildBasicVitisLinkConfig(Transformation):
     ) -> None:  # noqa
         super().__init__()
         self.platform = platform
+        self.board = board
         self.fpga_memory_type = mem_type
         self.optimization_level = optimization_level
         self.vitis_opt_strategy = vitis_opt_strategy
@@ -463,8 +465,8 @@ class BuildBasicVitisLinkConfig(Transformation):
             submodel, _ = get_submodel(node)
             predecessors = model.find_direct_predecessors(node)
             successors = model.find_direct_successors(node)
-            is_input = predecessors is not None and len(predecessors) == 1
-            is_output = successors is not None and len(successors) == 1
+            is_input = predecessors is None and successors is not None
+            is_output = successors is None and predecessors is not None
             node_slr = getCustomOp(node).get_nodeattr("slr")
 
             # Add the SDPs XO file
@@ -498,7 +500,7 @@ class BuildBasicVitisLinkConfig(Transformation):
                 mem_type = "HOST"
                 mem_idx = 0
             else:
-                match self.platform.lower():
+                match self.board.lower():
                     case "u50" | "u280" | "u55c":
                         mem_type = "HBM"
                         mem_idx = 0
@@ -506,8 +508,9 @@ class BuildBasicVitisLinkConfig(Transformation):
                         mem_type = "DDR"
                         mem_idx = 0 if node_slr == -1 else cast("int", node_slr)
                     case _:
-                        mem_type = "DDR"
-                        mem_idx = 1
+                        raise FINNUserError(
+                            f"Cannot do system-port placement for " f"unknown board {self.board}"
+                        )
             if cu_names[node.name] in ["idma", "odma"]:
                 configs[current_device].add_sp(
                     cu_names[node.name] + ".m_axi_gmem0", f"{mem_type}[{mem_idx}]"

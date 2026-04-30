@@ -124,7 +124,7 @@ class AddAuroraToLinkConfig(Transformation):
                     configs[device].add_sc(f"{aurora_cu}.rx_axis", node.name + ".s_axis_0")
 
                     # Check if we need a dummy kernel for the unused TX direction
-                    if rx_kernel_pair is None:
+                    if tx_kernel_pair is None:
                         configs[device].add_xo(tx_dummy)
                         dummy_cu = f"vdk_{dummy_per_device[device]}"
                         configs[device].add_cu("tx_dummy_kernel", dummy_cu)

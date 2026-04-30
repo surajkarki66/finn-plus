@@ -121,9 +121,11 @@ class VitisBuild(Transformation):
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         log.info("Building Vitis linking configuration...")
+        assert self.cfg.board is not None
         model = model.transform(
             BuildBasicVitisLinkConfig(
                 platform=self.cfg._resolve_vitis_platform(),  # noqa
+                board=self.cfg.board,
                 mem_type=self.cfg.fpga_memory,
                 vitis_opt_strategy=self.cfg.vitis_opt_strategy,
                 optimization_level=self.cfg.vitis_opt_strategy.value,
@@ -136,9 +138,7 @@ class VitisBuild(Transformation):
             log.info("Modifying linking configuration for Multi-FPGA...")
             match self.cfg.partitioning_configuration.communication_kernel:
                 case MFCommunicationKernel.AURORA:
-                    model = model.transform(
-                        AddAuroraToLinkConfig(board=cast("str", self.cfg.board))
-                    )
+                    model = model.transform(AddAuroraToLinkConfig(board=self.cfg.board))
                 case _:
                     raise FINNInternalError(
                         f"Vitis linking confíguration modifications for kernel type "
