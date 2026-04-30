@@ -29,6 +29,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 from __future__ import annotations
+import json
 
 import shlex
 import subprocess
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
 class ParallelVitisSynthesis(Transformation):
     """Execute a (parallel) synthesis on the model. Requires that the model has
     a link config. Afterwards the bitstreams are available.
+    Stores the paths of all XCLBINs in as JSON in the metadata prop "bitfile_output".
     """
 
     def __init__(self, cfg: DataflowBuildConfig) -> None:  # noqa
@@ -100,13 +102,19 @@ class ParallelVitisSynthesis(Transformation):
             tpe.shutdown(wait=True)
 
         # Check results and exceptions
+        results = {}
         for i, future in futures.items():
             result = cast("Path", future.result())
+            results[i] = str(result)
             if not result.exists():
                 log.critical(
                     f"XCLBIN for device {i} not found. Check "
                     f"synthesis logs at {configs[i].run_script_path.parent}"
                 )
+
+        # Store paths for usage in driver generation, etc.
+        # TODO: Find a better way to do this
+        model.set_metadata_prop("bitfile_output", json.dumps(results))
         return model, False
 
 

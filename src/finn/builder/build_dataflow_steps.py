@@ -1417,6 +1417,29 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig):
     """Create a driver that can be used to interface the generated accelerator.
     Use DataflowBuildConfig to select PYNQ Python or C++ driver."""
 
+    driver_dir = os.path.join(cfg.output_dir, "driver_cpp")
+    if DataflowOutputType.CPP_DRIVER in cfg.generate_outputs:
+        # generate C++ Driver
+        model = model.transform(
+            MakeCPPDriver(
+                cfg._resolve_driver_platform(),
+                version=cfg.cpp_driver_version,
+                host_mem=cfg.fpga_memory,
+            )
+        )
+        shutil.copytree(
+            model.get_metadata_prop("cpp_driver_dir"),
+            driver_dir,
+            dirs_exist_ok=True,
+            copy_function=shutil.copyfile,
+        )
+
+        log.info("C++ driver written into " + driver_dir)
+    else:
+        log.warning(
+            """Neither DataflowOutputType.PYNQ_DRIVER nor DataflowOutputType.CPP_DRIVER
+            in requested outputs, skipping step_make_driver."""
+        )
     driver_dir = os.path.join(cfg.output_dir, "driver")
     if DataflowOutputType.PYNQ_DRIVER in cfg.generate_outputs:
         # determine drivertype
@@ -1444,28 +1467,6 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig):
 
         shutil.copytree(model.get_metadata_prop("pynq_driver_dir"), driver_dir, dirs_exist_ok=True)
         log.info("PYNQ Python driver written into " + driver_dir)
-    elif DataflowOutputType.CPP_DRIVER in cfg.generate_outputs:
-        # generate C++ Driver
-        model = model.transform(
-            MakeCPPDriver(
-                cfg._resolve_driver_platform(),
-                version=cfg.cpp_driver_version,
-                host_mem=cfg.fpga_memory,
-            )
-        )
-        shutil.copytree(
-            model.get_metadata_prop("cpp_driver_dir"),
-            driver_dir,
-            dirs_exist_ok=True,
-            copy_function=shutil.copyfile,
-        )
-
-        log.info("C++ driver written into " + driver_dir)
-    else:
-        log.warning(
-            """Neither DataflowOutputType.PYNQ_DRIVER nor DataflowOutputType.CPP_DRIVER
-            in requested outputs, skipping step_make_driver."""
-        )
     return model
 
 
