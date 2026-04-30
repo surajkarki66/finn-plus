@@ -469,7 +469,7 @@ class MakeCPPDriver(Transformation):
                         "xrtDeviceIndex": device,
                         # Store the absolute path to the bitstream
                         "xclbinPath": xclbin_path.resolve(),
-                        "name": "MainDevice",  # Assign a name to this device configuration
+                        "name": f"Device_{device}",  # Assign a name to this device configuration
                         "idmas": json_idmas,  # Include the input DMA configurations
                         "odmas": json_odmas,  # Include the output DMA configurations
                     },

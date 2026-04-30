@@ -4,6 +4,10 @@ transformations / steps to edit the same configuration.
 
 from __future__ import annotations
 
+import json
+import re
+import shlex
+import subprocess
 from dataclasses import dataclass, field
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path
@@ -26,6 +30,13 @@ from finn.util.logging import log
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
+
+
+CU_PORT_REGEX = re.compile(r"\w+\.\w+")
+"""Regex object to test whether the given CU includes a port."""
+
+SYSTEM_PORT_REGEX = re.compile(r"^(HOST(\[\d+(:\d+)?\])?|(DDR|HBM|PLRAM)(\[\d+(:\d+)?\]))$")
+"""Regex object to test whether a system port tag (sp) looks correct."""
 
 
 @dataclass
@@ -105,7 +116,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
     @staticmethod
     def store_to_model(  # noqa
-        configs: dict[int, VitisLinkConfiguration], model: ModelWrapper, path: Path | None = None
+        configs: dict[int, VitisLinkConfiguration], model: ModelWrapper
     ) -> ModelWrapper:
         """Store all VitisLinkConfigurations into a modelwrapper. The path to this
         directory will be stored in the "vitis_link_configs" metadata prop.
@@ -115,9 +126,6 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
         Arguments:
         ---------
-            `path`: Path to a directory in which the configs are stored. This path may contain no
-                other files or directories. If no path is given, the function tries to read it
-                from the model itself. This only works if the path has been set once manually.
             `configs`: The configuration objects to store.
             `model`: The model to update when the configs are stored.
 
@@ -125,16 +133,10 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         -------
             ModelWrapper: The modified modelwrapper with the updated metadata prop.
         """
+        path = model.get_metadata_prop("vitis_link_configs")
         if path is None:
-            existing_path = model.get_metadata_prop("vitis_link_configs")
-            if existing_path is None:
-                raise FINNInternalError(
-                    "Can only store link config without explicit path, "
-                    "if the config has been saved at a given path once "
-                    "before. If this is the first call to this function "
-                    "for this config, provide a path!"
-                )
-            path = Path(existing_path)
+            path = make_build_dir("vitis_link_configs_")
+        path = Path(path)
         path.mkdir(exist_ok=True, parents=True)
         model.set_metadata_prop("vitis_link_configs", str(path.absolute()))
         for device, config in configs.items():
@@ -162,14 +164,22 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         ['b.in']
         """  # noqa
         # Check formatting
-        for cu in [cu_sender, cu_receiver]:
-            splits = cu.split(".")
-            if len(splits) != 2:
-                raise FINNVitisLinkConfigError(
-                    f"{cu} is incorrectly formatted. Required "
-                    f"syntax to add a streaming connection from CU "
-                    f'a on port out is "a.out".'
-                )
+        match = CU_PORT_REGEX.match(cu_sender)
+        if match is None:
+            raise FINNVitisLinkConfigError(
+                f"Incorrect formatting "
+                f"encountered while adding streaming "
+                f"connection: {cu_sender} should match "
+                f"the pattern <compute_unit_name>.<port>"
+            )
+        match = CU_PORT_REGEX.match(cu_receiver)
+        if match is None:
+            raise FINNVitisLinkConfigError(
+                f"Incorrect formatting "
+                f"encountered while adding streaming "
+                f"connection: {cu_receiver} should match "
+                f"the pattern <compute_unit_name>.<port>"
+            )
 
         # Yield warning if the direction seems wrong
         sender_port = cu_sender.split(".")[1]
@@ -194,11 +204,11 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
     def add_sp(self, cu_port_name: str, mem_type: str) -> None:
         """Add an SP assignment."""
-        known_sp_names = ["DDR", "HBM", "PLRAM", "HOST"]
-        if all(sp_name not in mem_type for sp_name in known_sp_names):
+        match = SYSTEM_PORT_REGEX.match(mem_type)
+        if match is None:
             log.warning(
-                f"Adding system port connection {cu_port_name}:{mem_type}. "
-                f"System port tag {mem_type} might be unknown."
+                f"SP (system port) assignment {cu_port_name}:{mem_type} looks wrong. "
+                f"This config may be incorrect. Continuing normally for now."
             )
         self.sp[cu_port_name] = mem_type
 
@@ -228,7 +238,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
                 continue
             if not xo_file.exists():
                 raise FINNVitisLinkConfigError(
-                    f"Tried adding .xo file which " f"does not exist: {xo_file}"
+                    f"Tried adding .xo file which does not exist: {xo_file}"
                 )
             self.xo.append(xo_file)
 
@@ -236,46 +246,117 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         """Add further lines to the connectivity section. For example to assign clocks or ports."""
         self.connectivity_section += txt + ("" if txt[-1] != "\n" else "\n")
 
+    def _get_kerneldefs(self) -> dict[str, dict[str, str]]:
+        """Use the `kernelinfo` utility to get information on all used kernels.
+        Returns the kernel info indexed by kernel name."""
+        infos = {}
+        for xo in self.xo:
+            result = subprocess.run(
+                shlex.split(f"kernelinfo --json {xo}"), capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                log.warning(f"Could not load kernel definitions for xo file {xo.name}.")
+                continue
+            data = json.loads(result.stdout)["kernelDefs"][0]
+            infos[data["name"]] = data
+        return infos
+
+    def _get_kernel_from_cu(self, cu: str) -> str:
+        """Return the kernel of the given CU."""
+        if cu not in self.cu:
+            raise FINNInternalError(f"Cannot retrieve kernel of unknown CU {cu}")
+        for kernel, name in self.nk:
+            if cu == name:
+                return kernel
+        raise FINNInternalError()
+
+    def _get_ports_for_cu(self, cu: str, kerneldefs: dict) -> list[str]:
+        """For the given CU and kernel definitions, find the kernel type of the
+        CU and list all ports that this kernel has.
+        """
+        kernel = self._get_kernel_from_cu(cu)
+        return [port["name"] for port in kerneldefs[kernel]["ports"]]
+
+    def _get_used_ports_for_cu(self, cu: str) -> list[str]:
+        """List all ports that are used in streaming-connections involving this CU."""
+        ports = []
+        for send in self.sc.keys():
+            for recv in self.sc[send]:
+                send_name, send_port = send.split(".")
+                recv_name, recv_port = recv.split(".")
+                if send_name == cu:
+                    ports.append(send_port)
+                if recv_name == cu:
+                    ports.append(recv_port)
+        return ports
+
     def get_config_validation_errors(self) -> None | list[FINNVitisLinkConfigError]:
-        """Check the configuration and if errors are found, return them."""
+        """Check the configuration and if errors are found, return them. Also prints warnings."""
         errors = []
-        # All CUs in SCs exist and CU ports are correctly formatted
+        kerneldefs = self._get_kerneldefs()
+
+        # Check kernel instantiations
+        for kernel, cu in self.nk:
+            if kernel not in kerneldefs.keys():
+                log.warning(
+                    f"Kernel {kernel} (CU: {cu}) has no matching definition in "
+                    f"the provided xo files. This may be caused by an error "
+                    f"when loading the kernel definitons, or because you forgot "
+                    f"to add the matching xo file to the configuration."
+                )
+
+        # Check connections
         for cu_sender, receivers in self.sc.items():
             for cu_receiver in receivers:
-                sender_split = cu_sender.split(".")
-                if len(sender_split) != 2:
-                    errors.append(
-                        FINNVitisLinkConfigError(
-                            f"SC {cu_sender}:{cu_receiver} "
-                            f"incorrectly formatted. "
-                            "Use the syntax CU.PORT"
-                        )
-                    )
-                sender_name = sender_split[0]
+                # Check if the sender of a streaming connection is a known CU
+                sender_name, sender_port = cu_sender.split(".")
                 if sender_name not in self.cu:
                     errors.append(
                         FINNVitisLinkConfigError(
-                            f"SC {cu_sender}:{cu_receiver} uses the unknown CU {sender_name}"
+                            f"Streaming connection {cu_sender}:"
+                            f"{cu_receiver} uses the unknown CU {sender_name}."
                         )
                     )
-                receiver_split = cu_receiver.split(".")
-                if len(receiver_split) != 2:
-                    errors.append(
-                        FINNVitisLinkConfigError(
-                            f"SC {cu_sender}:{cu_receiver} "
-                            f"incorrectly formatted. "
-                            "Use the syntax CU.PORT"
-                        )
-                    )
-                receiver_name = receiver_split[0]
+
+                # Check if the receiver of a streaming connection is a known CU
+                receiver_name, receiver_port = cu_receiver.split(".")
                 if receiver_name not in self.cu:
                     errors.append(
                         FINNVitisLinkConfigError(
-                            f"SC {cu_sender}:"
+                            f"Streaming connection {cu_sender}:"
                             f"{cu_receiver} uses the unknown "
-                            f"CU {receiver_name}"
+                            f"CU {receiver_name}."
                         )
                     )
+
+                # Check that the ports on the CUs exist
+                sender_kernel = self._get_kernel_from_cu(sender_name)
+                receiver_kernel = self._get_kernel_from_cu(receiver_name)
+                if not any(
+                    port["name"] == sender_port for port in kerneldefs[sender_kernel]["ports"]
+                ):
+                    log.warning(
+                        f"Port {sender_port} in streaming connection {cu_sender} "
+                        f"-> {cu_receiver} does not seem to exist on kernels of "
+                        f"type {sender_kernel}."
+                    )
+                if not any(
+                    port["name"] == receiver_port for port in kerneldefs[receiver_kernel]["ports"]
+                ):
+                    log.warning(
+                        f"Port {receiver_port} in streaming connection {cu_sender} "
+                        f"-> {cu_receiver} does not seem to exist on kernels of "
+                        f"type {receiver_kernel}."
+                    )
+
+        # Check for unused ports
+        for cu in self.cu:
+            available_ports = self._get_ports_for_cu(cu, kerneldefs)
+            used_ports = self._get_used_ports_for_cu(cu)
+            for port in available_ports:
+                if port not in used_ports:
+                    log.warning(f"CU {cu} has unused port {port}.")
+
         # No two same named CUs
         if len(set(self.cu)) != len(self.cu):
             errors.append(
@@ -389,7 +470,6 @@ class BuildBasicVitisLinkConfig(Transformation):
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         configs: dict[int, VitisLinkConfiguration] = {}
-        config_storage: Path = Path(make_build_dir("vitis_link_configs_"))
 
         # Check that we are the first to edit link configs
         vitis_link_configs = model.get_metadata_prop("vitis_link_configs")
@@ -509,7 +589,7 @@ class BuildBasicVitisLinkConfig(Transformation):
                         mem_idx = 0 if node_slr == -1 else cast("int", node_slr)
                     case _:
                         raise FINNUserError(
-                            f"Cannot do system-port placement for " f"unknown board {self.board}"
+                            f"Cannot do system-port placement for unknown board {self.board}"
                         )
             if cu_names[node.name] in ["idma", "odma"]:
                 configs[current_device].add_sp(
@@ -517,7 +597,7 @@ class BuildBasicVitisLinkConfig(Transformation):
                 )
 
         # Store everything, generate scripts and return
-        model = VitisLinkConfiguration.store_to_model(configs, model, config_storage)
+        model = VitisLinkConfiguration.store_to_model(configs, model)
         for config in configs.values():
             config.generate_config()
             config.generate_run_script()
