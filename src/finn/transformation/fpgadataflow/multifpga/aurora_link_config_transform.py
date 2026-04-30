@@ -131,4 +131,8 @@ class AddAuroraToLinkConfig(Transformation):
                         configs[device].add_sc(dummy_cu + ".A", aurora_cu + ".tx_axis")
                         dummy_per_device[device] += 1
 
+        for config in configs.values():
+            config.generate_config()
+            config.generate_run_script()
+        model = VitisLinkConfiguration.store_to_model(configs, model)
         return model, False

@@ -15,7 +15,7 @@ from finn.builder.build_dataflow_config import FpgaMemoryType, VitisOptStrategy
 from finn.templates import get_jinja_environment
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNVitisLinkConfigError
+from finn.util.exception import FINNInternalError, FINNVitisLinkConfigError
 from finn.util.fpgadataflow import (
     check_all_sdp_nodes,
     check_graph_is_line,
@@ -124,7 +124,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
     @staticmethod
     def store_to_model(  # noqa
-        path: Path, configs: dict[int, VitisLinkConfiguration], model: ModelWrapper
+        configs: dict[int, VitisLinkConfiguration], model: ModelWrapper, path: Path | None = None
     ) -> ModelWrapper:
         """Store all VitisLinkConfigurations into a modelwrapper. The path to this
         directory will be stored in the "vitis_link_configs" metadata prop.
@@ -135,7 +135,8 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         Arguments:
         ---------
             `path`: Path to a directory in which the configs are stored. This path may contain no
-                other files or directories.
+                other files or directories. If no path is given, the function tries to read it
+                from the model itself. This only works if the path has been set once manually.
             `configs`: The configuration objects to store.
             `model`: The model to update when the configs are stored.
 
@@ -143,6 +144,16 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         -------
             ModelWrapper: The modified modelwrapper with the updated metadata prop.
         """
+        if path is None:
+            existing_path = model.get_metadata_prop("vitis_link_configs")
+            if existing_path is None:
+                raise FINNInternalError(
+                    "Can only store link config without explicit path, "
+                    "if the config has been saved at a given path once "
+                    "before. If this is the first call to this function "
+                    "for this config, provide a path!"
+                )
+            path = Path(existing_path)
         path.mkdir(exist_ok=True, parents=True)
         model.set_metadata_prop("vitis_link_configs", str(path.absolute()))
         for device, config in configs.items():
@@ -519,7 +530,7 @@ class BuildBasicVitisLinkConfig(Transformation):
             )
 
         # Store everything, generate scripts and return
-        model = VitisLinkConfiguration.store_to_model(config_storage, configs, model)
+        model = VitisLinkConfiguration.store_to_model(configs, model, config_storage)
         for config in configs.values():
             config.generate_config()
             config.generate_run_script()

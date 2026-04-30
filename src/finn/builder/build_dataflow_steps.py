@@ -132,7 +132,7 @@ from finn.transformation.fpgadataflow.transpose_decomposition import (
     InferInnerOuterShuffles,
     ShuffleDecomposition,
 )
-from finn.transformation.fpgadataflow.vitis_build import MultiVitisBuild, VitisBuild
+from finn.transformation.fpgadataflow.vitis_build import VitisBuild
 from finn.transformation.fpgadataflow.vivado_power_estimation import VivadoPowerEstimation
 from finn.transformation.general import ApplyConfig
 from finn.transformation.move_reshape import RemoveCNVtoFCFlatten
@@ -1645,31 +1645,9 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
             copy(timing_rpt, report_dir + "/post_route_timing.rpt")
 
         elif cfg.shell_flow_type == ShellFlowType.VITIS_ALVEO:
-            model = model.transform(
-                VitisBuild(
-                    cfg._resolve_fpga_part(),
-                    cfg.synth_clk_period_ns,
-                    cfg._resolve_vitis_platform(),
-                    strategy=cfg.vitis_opt_strategy,
-                    enable_debug=cfg.enable_hw_debug,
-                    floorplan_file=cfg.vitis_floorplan_file,
-                    partition_model_dir=partition_model_dir,
-                    fpga_memory_type=cfg.fpga_memory,
-                )
-            )
+            # TODO: Rework missing parts here
+            model = model.transform(VitisBuild(cfg))
 
-            bitfile_path = os.path.join(bitfile_dir, "finn-accel.xclbin")
-            copy(model.get_metadata_prop("bitfile"), bitfile_path)
-            copy(
-                model.get_metadata_prop("vivado_synth_rpt"),
-                report_dir + "/post_synth_resources.xml",
-            )
-
-            model.set_metadata_prop("bitfile_output", os.path.abspath(bitfile_path))
-
-            post_synth_resources = model.analysis(post_synth_res)
-            with open(report_dir + "/post_synth_resources.json", "w") as f:
-                json.dump(post_synth_resources, f, indent=2)
         else:
             raise Exception("Unrecognized shell_flow_type: " + str(cfg.shell_flow_type))
         log.info(f"Bitfile written into {bitfile_dir}")
@@ -1679,13 +1657,6 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
             "DataflowOutputType.BITFILE not in requested outputs, skipping step_synthesize_bitfile."
         )
 
-    return model
-
-
-def step_multifpga_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Requires step_prepare_synthesis previously run. Minimal synthesis step for Multi-FPGA.
-    To be merged with step_synthesize_bitfile."""
-    model = model.transform(MultiVitisBuild(cfg))
     return model
 
 
@@ -1769,7 +1740,6 @@ build_dataflow_step_lookup = {
     "step_vivado_power_estimation": step_vivado_power_estimation,
     "step_synthesize_bitfile": step_synthesize_bitfile,
     "step_prepare_synthesis": step_prepare_synthesis,
-    "step_multifpga_synthesis": step_multifpga_synthesis,
     "step_deployment_package": step_deployment_package,
     "step_loop_rolling": step_loop_rolling,
 }
