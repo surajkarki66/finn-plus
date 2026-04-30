@@ -10,6 +10,9 @@ sc={{ origin_cu }}:{{ target_cu }}
 {% for cu, sp_type in sp.items() -%}
 sp={{ cu }}:{{ sp_type }}
 {% endfor %}
+{% for cu, slr in slr.items() -%}
+slr={{ cu }}:{{ slr }}
+{% endfor %}
 {% for a, b in connects -%}
 connect={{ a }}:{{ b }}
 {% endfor %}

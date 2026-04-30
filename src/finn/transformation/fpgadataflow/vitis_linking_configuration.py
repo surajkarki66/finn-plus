@@ -63,6 +63,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         self.sc: dict[str, list[str]] = {}
         self.sp: dict[str, str] = {}
         self.xo: list[Path] = []
+        self.slr: dict[str, str] = {}
         self.connects: list[tuple[str, str]] = []
         self.vivado_section: str = ""
         self.connectivity_section: str = ""
@@ -193,6 +194,10 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
             self.sc[cu_sender] = []
         self.sc[cu_sender].append(cu_receiver)
 
+    def add_slr(self, cu: str, slr: str) -> None:
+        """Place the given CU on the given SLR."""
+        self.slr[cu] = slr
+
     def add_sp(self, cu_port_name: str, mem_type: str) -> None:
         """Add an SP assignment."""
         known_sp_names = ["DDR", "HBM", "PLRAM", "HOST"]
@@ -322,6 +327,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
             nk=self.nk,
             sc=self.sc,
             sp=self.sp,
+            slr=self.slr,
             connects=self.connects,
             connectivity_extras=self.connectivity_section,
             vivado_extras=self.vivado_section,
