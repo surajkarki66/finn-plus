@@ -74,7 +74,7 @@ class ParallelVitisSynthesis(Transformation):
             raise FINNSynthesisError(
                 f"Synthesis likely failed. Try checking logs "
                 f"at {config.run_script_path.parent}.",
-                config.run_script_path.parent / "vivado.log",
+                config.run_script_path.parent / "v++_a.log",
             )
         return config.run_script_path.parent / "a.xclbin"
 
@@ -89,15 +89,18 @@ class ParallelVitisSynthesis(Transformation):
             workers = 1
 
         # Execute synthesis concurrently
-        futures: list[Future] = []
+        futures: dict[int, Future] = {}
         with ThreadPoolExecutor(workers) as tpe:
             for device, config in configs.items():
-                log.info(f"Submitting config {device} for synthesis.")
-                futures.append(tpe.submit(self.link, config))
+                log.info(
+                    f"Submitting config {device} for synthesis "
+                    f"(at {config.run_script_path.parent})"
+                )
+                futures[device] = tpe.submit(self.link, config)
             tpe.shutdown(wait=True)
 
         # Check results and exceptions
-        for i, future in enumerate(futures):
+        for i, future in futures.items():
             result = cast("Path", future.result())
             if not result.exists():
                 log.critical(

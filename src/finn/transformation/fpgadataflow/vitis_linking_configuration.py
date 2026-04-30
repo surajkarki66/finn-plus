@@ -4,7 +4,7 @@ transformations / steps to edit the same configuration.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path
 from qonnx.custom_op.registry import getCustomOp
@@ -25,7 +25,6 @@ from finn.util.fpgadataflow import (
 from finn.util.logging import log
 
 if TYPE_CHECKING:
-    from onnx import NodeProto
     from qonnx.core.modelwrapper import ModelWrapper
 
 
@@ -39,49 +38,31 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
     or continues silently.
     """
 
-    def __init__(  # noqa
-        self,
-        config_path: Path,
-        platform: str,
-        optimization_level: str,
-        f_mhz: int,
-        run_script_path: Path | None = None,
-    ) -> None:
-        """Create a new configuration with the given parameters.
+    config_path: Path
+    f_mhz: int
+    optimization_level: str
+    platform: str
+    run_script_path: Path = field(init=False, default_factory=lambda: Path())
+    cu: list[str] = field(default_factory=list)
+    nk: list[tuple[str, str]] = field(default_factory=list)
+    sc: dict[str, list[str]] = field(default_factory=dict)
+    sp: dict[str, str] = field(default_factory=dict)
+    xo: list[Path] = field(default_factory=list)
+    slr: dict[str, str] = field(default_factory=dict)
+    connects: list[tuple[str, str]] = field(default_factory=list)
+    vivado_section: str = ""
+    connectivity_section: str = ""
 
-        Arguments:
-        ---------
-            `config_path`: Path at which the configuration file will be stored.
-            `platform`: FPGA platform to link for.
-            `optimization_level`: v++ optimization level to use during linking.
-            `f_mhz`: Target clock frequency in MHz.
-            `run_script_path`: Path at which the linker start script will be stored.
-                If left empty, it is placed next to the config file as "run_link.sh".
-        """
-        self.cu: list[str] = []
-        self.nk: list[tuple[str, str]] = []
-        self.sc: dict[str, list[str]] = {}
-        self.sp: dict[str, str] = {}
-        self.xo: list[Path] = []
-        self.slr: dict[str, str] = {}
-        self.connects: list[tuple[str, str]] = []
-        self.vivado_section: str = ""
-        self.connectivity_section: str = ""
-        self.platform: str = platform
-        self.optimization_level: str = optimization_level
-        self.f_mhz: int = f_mhz
-        self.config_path = config_path
-        config_path.parent.mkdir(exist_ok=True, parents=True)
-        if run_script_path is not None:
-            self.run_script_path = run_script_path
-        else:
-            self.run_script_path = config_path.parent / "run_link.sh"
+    def __post_init__(self) -> None:  # noqa
+        self.config_path.parent.mkdir(exist_ok=True, parents=True)
+        self.run_script_path = self.config_path.parent / "run_link.sh"
         self.run_script_path.parent.mkdir(exist_ok=True, parents=True)
 
     def store(self, p: Path) -> None:
         """Store the config as a YAML file, so that it can be loaded
         by other transformations again.
         """
+        p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(str(self.to_yaml()))
 
     @staticmethod
@@ -117,7 +98,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
         configs = {}
         for device_path in storage_path.iterdir():
-            configs[int(str(device_path))] = VitisLinkConfiguration.load(
+            configs[int(str(device_path.name))] = VitisLinkConfiguration.load(
                 storage_path / device_path / "config.yaml"
             )
         return configs
@@ -193,7 +174,9 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         # Yield warning if the direction seems wrong
         sender_port = cu_sender.split(".")[1]
         receiver_port = cu_receiver.split(".")[1]
-        if sender_port.lower() in ["s_axis", "in"] or receiver_port.lower() in ["m_axis", "out"]:
+        if any(n in sender_port.lower() for n in ["s_axis", "in"]) or any(
+            n in receiver_port.lower() for n in ["m_axis", "out"]
+        ):
             log.error(
                 f"Adding connection sc={cu_sender}:{cu_receiver}. The port "
                 "names suggest that the order of sender and receiver might be "
@@ -212,7 +195,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
     def add_sp(self, cu_port_name: str, mem_type: str) -> None:
         """Add an SP assignment."""
         known_sp_names = ["DDR", "HBM", "PLRAM", "HOST"]
-        if mem_type not in known_sp_names:
+        if all(sp_name not in mem_type for sp_name in known_sp_names):
             log.warning(
                 f"Adding system port connection {cu_port_name}:{mem_type}. "
                 f"System port tag {mem_type} might be unknown."
@@ -404,7 +387,7 @@ class BuildBasicVitisLinkConfig(Transformation):
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         configs: dict[int, VitisLinkConfiguration] = {}
-        config_storage: Path = Path(make_build_dir("vitis_link_configs"))
+        config_storage: Path = Path(make_build_dir("vitis_link_configs_"))
 
         # Check that we are the first to edit link configs
         vitis_link_configs = model.get_metadata_prop("vitis_link_configs")
@@ -450,7 +433,7 @@ class BuildBasicVitisLinkConfig(Transformation):
                 assert device is not None
                 if device not in configs:
                     configs[device] = VitisLinkConfiguration(
-                        config_path=Path(make_build_dir(f"vitis_multi_link_device_{device}"))
+                        config_path=Path(make_build_dir(f"vitis_multi_link_device_{device}_"))
                         / "config.txt",
                         platform=self.platform,
                         optimization_level=self.optimization_level,
@@ -470,7 +453,7 @@ class BuildBasicVitisLinkConfig(Transformation):
 
         # Some temporary variables needed to construct the configs
         current_device: int
-        cu_names: dict[NodeProto, str] = {}
+        cu_names: dict[str, str] = {}
 
         # Loop through all SDPs
         check_all_sdp_nodes(model)
@@ -504,8 +487,8 @@ class BuildBasicVitisLinkConfig(Transformation):
             if predecessors is not None and (
                 not is_multifpga or get_device_id(predecessors[0]) == current_device
             ):
-                predecessor_cu = cu_names[predecessors[0]] + ".m_axis"
-                this_cu = cu_names[node.name] + ".s_axis"
+                predecessor_cu = cu_names[predecessors[0].name] + ".m_axis_0"
+                this_cu = cu_names[node.name] + ".s_axis_0"
                 configs[current_device].add_sc(predecessor_cu, this_cu)
 
             # Add system ports
@@ -525,9 +508,10 @@ class BuildBasicVitisLinkConfig(Transformation):
                     case _:
                         mem_type = "DDR"
                         mem_idx = 1
-            configs[current_device].add_sp(
-                cu_names[node.name] + ".m_axi_gmem0", f"{mem_type}[{mem_idx}]"
-            )
+            if cu_names[node.name] in ["idma", "odma"]:
+                configs[current_device].add_sp(
+                    cu_names[node.name] + ".m_axi_gmem0", f"{mem_type}[{mem_idx}]"
+                )
 
         # Store everything, generate scripts and return
         model = VitisLinkConfiguration.store_to_model(configs, model, config_storage)

@@ -105,7 +105,7 @@ class AddAuroraToLinkConfig(Transformation):
                         f"Adding AuroraFlow kernel to device {device}, "
                         f"index {index} connected to {node.name} (TX)."
                     )
-                    configs[device].add_sc(node.name + ".m_axis", f"{aurora_cu}.tx_axis")
+                    configs[device].add_sc(node.name + ".m_axis_0", f"{aurora_cu}.tx_axis")
 
                     # Check if we need a dummy kernel for the unused RX direction
                     if rx_kernel_pair is None:
@@ -121,7 +121,7 @@ class AddAuroraToLinkConfig(Transformation):
                         f"Adding AuroraFlow kernel to device {device}, "
                         f"index {index} connected to {node.name} (RX)."
                     )
-                    configs[device].add_sc(f"{aurora_cu}.rx_axis", node.name + ".s_axis")
+                    configs[device].add_sc(f"{aurora_cu}.rx_axis", node.name + ".s_axis_0")
 
                     # Check if we need a dummy kernel for the unused TX direction
                     if rx_kernel_pair is None:
