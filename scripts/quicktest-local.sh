@@ -117,7 +117,7 @@ if [ "$MODE" = "vivado" ]; then
         gecho "Test 4a: Vivado cppsim test (HLS LayerNorm)..."
 
         # cppsim test - tests HLS C++ simulation
-        pytest "tests/fpgadataflow/test_fpgadataflow_layernorm.py::test_fpgadataflow_hls_layernorm[FLOAT32-ishape1-1-cppsim]" \
+        pytest -k "test_fpgadataflow_hls_layernorm and cppsim and idt0" \
             -v \
             --maxfail=1 \
             --tb=short
@@ -132,7 +132,7 @@ if [ "$MODE" = "vivado" ]; then
         gecho "Test 4b: Vivado node-by-node rtlsim test (HLS LayerNorm)..."
 
         # node_by_node rtlsim test - tests RTL simulation per node
-        pytest "tests/fpgadataflow/test_fpgadataflow_layernorm.py::test_fpgadataflow_hls_layernorm[FLOAT32-ishape1-1-node_by_node]" \
+        pytest -k "test_fpgadataflow_hls_layernorm and node_by_node and idt0" \
             -v \
             --maxfail=1 \
             --tb=short
@@ -147,7 +147,7 @@ if [ "$MODE" = "vivado" ]; then
         gecho "Test 4c: Vivado stitched IP rtlsim test (HLS LayerNorm)..."
 
         # stitched_ip rtlsim test - tests RTL simulation of stitched IP
-        pytest "tests/fpgadataflow/test_fpgadataflow_layernorm.py::test_fpgadataflow_hls_layernorm[FLOAT32-ishape1-1-stitched_ip]" \
+        pytest -k "test_fpgadataflow_hls_layernorm and stitched_ip and idt0" \
             -v \
             --maxfail=1 \
             --tb=short
