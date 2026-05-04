@@ -280,6 +280,8 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
     def _get_used_ports_for_cu(self, cu: str) -> list[str]:
         """List all ports that are used in streaming-connections involving this CU."""
         ports = []
+
+        # Ports used to send and receive data
         for send in self.sc.keys():
             for recv in self.sc[send]:
                 send_name, send_port = send.split(".")
@@ -288,9 +290,14 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
                     ports.append(send_port)
                 if recv_name == cu:
                     ports.append(recv_port)
+
+        # Ports assigned to memory (implicitly used)
+        ports += [name.split(".")[1] for name in self.sp.keys()]
         return ports
 
-    def get_config_validation_errors(self) -> None | list[FINNVitisLinkConfigError]:
+    def get_config_validation_errors(
+        self, silent_warnings: bool = False
+    ) -> None | list[FINNVitisLinkConfigError]:
         """Check the configuration and if errors are found, return them. Also prints warnings."""
         errors = []
         kerneldefs = self._get_kerneldefs()
@@ -298,12 +305,13 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         # Check kernel instantiations
         for kernel, cu in self.nk:
             if kernel not in kerneldefs.keys():
-                log.warning(
-                    f"Kernel {kernel} (CU: {cu}) has no matching definition in "
-                    f"the provided xo files. This may be caused by an error "
-                    f"when loading the kernel definitons, or because you forgot "
-                    f"to add the matching xo file to the configuration."
-                )
+                if not silent_warnings:
+                    log.warning(
+                        f"Kernel {kernel} (CU: {cu}) has no matching definition in "
+                        f"the provided xo files. This may be caused by an error "
+                        f"when loading the kernel definitons, or because you forgot "
+                        f"to add the matching xo file to the configuration."
+                    )
 
         # Check connections
         for cu_sender, receivers in self.sc.items():
@@ -330,32 +338,35 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
                     )
 
                 # Check that the ports on the CUs exist
-                sender_kernel = self._get_kernel_from_cu(sender_name)
-                receiver_kernel = self._get_kernel_from_cu(receiver_name)
-                if not any(
-                    port["name"] == sender_port for port in kerneldefs[sender_kernel]["ports"]
-                ):
-                    log.warning(
-                        f"Port {sender_port} in streaming connection {cu_sender} "
-                        f"-> {cu_receiver} does not seem to exist on kernels of "
-                        f"type {sender_kernel}."
-                    )
-                if not any(
-                    port["name"] == receiver_port for port in kerneldefs[receiver_kernel]["ports"]
-                ):
-                    log.warning(
-                        f"Port {receiver_port} in streaming connection {cu_sender} "
-                        f"-> {cu_receiver} does not seem to exist on kernels of "
-                        f"type {receiver_kernel}."
-                    )
+                if not silent_warnings:
+                    sender_kernel = self._get_kernel_from_cu(sender_name)
+                    receiver_kernel = self._get_kernel_from_cu(receiver_name)
+                    if not any(
+                        port["name"] == sender_port for port in kerneldefs[sender_kernel]["ports"]
+                    ):
+                        log.warning(
+                            f"Port {sender_port} in streaming connection {cu_sender} "
+                            f"-> {cu_receiver} does not seem to exist on kernels of "
+                            f"type {sender_kernel}."
+                        )
+                    if not any(
+                        port["name"] == receiver_port
+                        for port in kerneldefs[receiver_kernel]["ports"]
+                    ):
+                        log.warning(
+                            f"Port {receiver_port} in streaming connection {cu_sender} "
+                            f"-> {cu_receiver} does not seem to exist on kernels of "
+                            f"type {receiver_kernel}."
+                        )
 
         # Check for unused ports
-        for cu in self.cu:
-            available_ports = self._get_ports_for_cu(cu, kerneldefs)
-            used_ports = self._get_used_ports_for_cu(cu)
-            for port in available_ports:
-                if port not in used_ports:
-                    log.warning(f"CU {cu} has unused port {port}.")
+        if not silent_warnings:
+            for cu in self.cu:
+                available_ports = self._get_ports_for_cu(cu, kerneldefs)
+                used_ports = self._get_used_ports_for_cu(cu)
+                for port in available_ports:
+                    if port not in used_ports and "s_axi_control" not in port.lower():
+                        log.warning(f"CU {cu} has unused port {port}.")
 
         # No two same named CUs
         if len(set(self.cu)) != len(self.cu):
@@ -383,7 +394,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         config is invalid.
         """
         # Checking for errors
-        errors = self.get_config_validation_errors()
+        errors = self.get_config_validation_errors(silent_warnings=True)
         if errors is not None:
             for err in errors:
                 log.error(f"{self.config_path}: {err}")

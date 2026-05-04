@@ -154,6 +154,15 @@ class VitisBuild(Transformation):
                         f"are not yet implemented."
                     )
 
+        # Check for errors and warnings
+        configs: dict[int, VitisLinkConfiguration] = VitisLinkConfiguration.load_from_model(model)
+        for device, config in configs.items():
+            log.info(f"Checking configuration for device {device}...")
+            errors = config.get_config_validation_errors(silent_warnings=False)
+            if errors is not None:
+                # TODO: Raise all exceptions as an exception group (Python 3.11)
+                raise errors[0]
+
         # Run the synthesis
         log.info("Starting synthesis...")
         model = model.transform(ParallelVitisSynthesis(self.cfg))
