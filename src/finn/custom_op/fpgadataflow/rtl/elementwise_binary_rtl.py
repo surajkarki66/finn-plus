@@ -9,6 +9,7 @@
 import numpy as np
 import os
 import shutil
+import warnings
 from qonnx.core.datatype import DataType
 
 from finn.custom_op.fpgadataflow import elementwise_binary
@@ -539,7 +540,13 @@ class ElementwiseBinary_rtl(ElementwiseBinaryOperation, RTLBackend):
         return [1]
 
     def minimize_weight_bit_width(self, model):
-        super().minimize_weight_bit_width(model)
+        # Skip weight bit width minimization for RTL elementwise ops
+        # Input and parameter bitwidth must be identical for RTL implementation
+        warnings.warn(
+            f"{self.onnx_node.name}: Skipping weight bit width minimization for RTL "
+            "elementwise op. Input and parameter bitwidth must be identical."
+        )
+        pass
 
     def _get_rtl_op_name(self):
         """Override in subclasses to return the correct RTL operation name."""

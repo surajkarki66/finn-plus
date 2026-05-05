@@ -483,7 +483,7 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig):
     model = apply_if_relevant(
         model,
         ["MultiThreshold", "Quant"],
-        to_hw.InferRequantLayer(bitwidth_threshold=8),
+        to_hw.InferRequantLayer(bitwidth_threshold=cfg.requant_bitwidth_threshold),
         "high-bitwidth input quantization as requant",
     )
     model = apply_if_relevant(
