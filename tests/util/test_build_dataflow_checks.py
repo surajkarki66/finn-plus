@@ -67,10 +67,17 @@ class TestConfigCheckIntegration:
         model_path = make_test_model(build_dir)
         output_dir = os.path.join(build_dir, "output")
 
-        with pytest.raises(AssertionError, match="Configuration check failed"):
-            build_dataflow_cfg(
-                model_path, cfg(output_dir, board="V80", shell_flow_type=ShellFlowType.VITIS_ALVEO)
-            )
+        with patch.dict("os.environ", {"XILINX_VIVADO": "/tools/Vivado/2025.1"}):
+            with pytest.raises(AssertionError, match="Configuration check failed"):
+                build_dataflow_cfg(
+                    model_path,
+                    cfg(
+                        output_dir,
+                        board="V80",
+                        shell_flow_type=ShellFlowType.VITIS_ALVEO,
+                        generate_outputs=[DataflowOutputType.BITFILE],
+                    ),
+                )
 
     def test_muted_config_proceeds(self):
         """Invalid config with mute_config_assertions=True should not raise."""
@@ -87,6 +94,7 @@ class TestConfigCheckIntegration:
                         output_dir,
                         board="V80",
                         shell_flow_type=ShellFlowType.VITIS_ALVEO,
+                        generate_outputs=[DataflowOutputType.BITFILE],
                         mute_config_assertions=True,
                     ),
                 )
@@ -111,6 +119,7 @@ class TestConfigCheckIntegration:
                         output_dir,
                         board="V80",
                         shell_flow_type=ShellFlowType.VITIS_ALVEO,
+                        generate_outputs=[DataflowOutputType.BITFILE],
                         mute_config_assertions=True,
                     ),
                 )
@@ -124,7 +133,7 @@ class TestConfigCheckIntegration:
         error_names = [
             c["name"] for c in report["checks"] if not c["passed"] and c["severity"] == "ERROR"
         ]
-        assert "v80_shell" in error_names
+        assert "v80_slash" in error_names
 
     @pytest.mark.parametrize(
         "board,flow,should_error",
@@ -136,17 +145,62 @@ class TestConfigCheckIntegration:
         ],
     )
     def test_board_shell_compatibility(self, board, flow, should_error):
-        """Test various board/shell flow combinations."""
+        """Test various board/shell flow combinations with BITFILE generation."""
+        build_dir = make_build_dir("test_config_check_")
+        model_path = make_test_model(build_dir)
+        output_dir = os.path.join(build_dir, "output")
+
+        env = {
+            "XILINX_VIVADO": "/tools/Vivado/2024.2",
+            "VITIS_PATH": "/tools/Vitis/2024.2",
+            "PLATFORM_REPO_PATHS": "/opt/platforms",
+            "XILINX_XRT": "/opt/xilinx/xrt",
+        }
+        with patch.dict("os.environ", env):
+            if should_error:
+                with pytest.raises(AssertionError, match="Configuration check failed"):
+                    build_dataflow_cfg(
+                        model_path,
+                        cfg(
+                            output_dir,
+                            board=board,
+                            shell_flow_type=flow,
+                            generate_outputs=[DataflowOutputType.BITFILE],
+                        ),
+                    )
+            else:
+                build_dataflow_cfg(
+                    model_path,
+                    cfg(
+                        output_dir,
+                        board=board,
+                        shell_flow_type=flow,
+                        generate_outputs=[DataflowOutputType.BITFILE],
+                    ),
+                )
+                assert os.path.exists(os.path.join(output_dir, "config_check_report.txt"))
+
+    def test_shell_without_bitfile_warning(self):
+        """Setting shell_flow_type without BITFILE should produce a warning."""
         build_dir = make_build_dir("test_config_check_")
         model_path = make_test_model(build_dir)
         output_dir = os.path.join(build_dir, "output")
 
         with patch.dict("os.environ", {"XILINX_VIVADO": "/tools/Vivado/2024.2"}):
-            if should_error:
-                with pytest.raises(AssertionError, match="Configuration check failed"):
-                    build_dataflow_cfg(
-                        model_path, cfg(output_dir, board=board, shell_flow_type=flow)
-                    )
-            else:
-                build_dataflow_cfg(model_path, cfg(output_dir, board=board, shell_flow_type=flow))
-                assert os.path.exists(os.path.join(output_dir, "config_check_report.txt"))
+            build_dataflow_cfg(
+                model_path, cfg(output_dir, shell_flow_type=ShellFlowType.VIVADO_ZYNQ)
+            )
+
+        with open(os.path.join(output_dir, "config_check_report.json")) as f:
+            report = json.load(f)
+        assert "shell_no_bitfile" in [c["name"] for c in report["checks"] if not c["passed"]]
+
+    def test_aupzu3_vivado_version(self):
+        """AUP-ZU3_8GB requires Vivado 2024.1+."""
+        build_dir = make_build_dir("test_config_check_")
+        model_path = make_test_model(build_dir)
+        output_dir = os.path.join(build_dir, "output")
+
+        with patch.dict("os.environ", {"XILINX_VIVADO": "/tools/Vivado/2022.2"}):
+            with pytest.raises(AssertionError, match="Configuration check failed"):
+                build_dataflow_cfg(model_path, cfg(output_dir, board="AUP-ZU3_8GB"))

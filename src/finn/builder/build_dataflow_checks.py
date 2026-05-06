@@ -98,9 +98,20 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 "mlo_vivado",
                 Severity.ERROR,
                 v and v >= (2024, 2),
-                "MLO requires Vivado 2024.2 or later (no system deployment support for "
-                f"earlier versions), found {v[0]}.{v[1] if v else 'unknown'}",
+                "MLO requires Vivado 2024.2 or later, " f"found {v[0]}.{v[1] if v else 'unknown'}",
                 "Upgrade to Vivado 2024.2 or later for MLO support",
+            )
+        )
+
+    if cfg.board == "AUP-ZU3_8GB":
+        checks.append(
+            _check(
+                "aupzu3_vivado",
+                Severity.ERROR,
+                v and v >= (2024, 1),
+                f"AUP-ZU3_8GB board requires Vivado 2024.1 or later, "
+                f"found {v[0]}.{v[1] if v else 'unknown'}",
+                "Upgrade to Vivado 2024.1 or later to use AUP-ZU3_8GB",
             )
         )
 
@@ -110,8 +121,8 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 "vivado_stable",
                 Severity.INFO,
                 False,
-                f"Vivado {v[0]}.{v[1]} is not a stable version. Recommended versions are "
-                "2022.2 and 2024.2, other versions may have unexpected issues",
+                f"Vivado {v[0]}.{v[1]} is used. Recommended versions are "
+                "2022.2 and 2024.2, other versions can be used but may have unexpected issues.",
             )
         )
 
@@ -127,32 +138,27 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
             )
         )
 
-    if cfg.board == "V80" and cfg.shell_flow_type != ShellFlowType.SLASH_ALVEO:
-        checks.append(
-            _check(
-                "v80_shell",
-                Severity.ERROR,
-                False,
-                "V80 board requires SLASH_ALVEO shell flow, "
-                f"but {cfg.shell_flow_type} was specified",
-                "Set shell_flow_type=ShellFlowType.SLASH_ALVEO for V80",
-            )
-        )
-
-    if cfg.shell_flow_type == ShellFlowType.SLASH_ALVEO:
+    if has_bitfile:
         is_v80 = cfg.board == "V80" or (cfg.fpga_part and cfg.fpga_part.startswith("xcv80"))
-        checks.append(
-            _check(
-                "slash_v80_only",
-                Severity.ERROR,
-                is_v80,
-                "SLASH_ALVEO shell flow only supports V80 board. "
-                "Any other board/fpga_part is invalid",
-                "Set board='V80' or use VITIS_ALVEO/VIVADO_ZYNQ for other boards",
+        is_slash = cfg.shell_flow_type == ShellFlowType.SLASH_ALVEO
+        if is_v80 or is_slash:  # Only check if V80 or SLASH is involved
+            checks.append(
+                _check(
+                    "v80_slash",
+                    Severity.ERROR,
+                    is_v80 == is_slash,  # Pass if both match (both true or both false)
+                    "V80 board and SLASH_ALVEO shell flow must be used together. "
+                    f"Got board={cfg.board}, shell_flow_type={cfg.shell_flow_type}",
+                    "Use board='V80' with shell_flow_type=SLASH_ALVEO, or use a different "
+                    "board with VITIS_ALVEO/VIVADO_ZYNQ",
+                )
             )
-        )
 
-    if cfg.board in alveo_boards and cfg.shell_flow_type != ShellFlowType.VITIS_ALVEO:
+    if (
+        has_bitfile
+        and cfg.board in alveo_boards
+        and cfg.shell_flow_type != ShellFlowType.VITIS_ALVEO
+    ):
         checks.append(
             _check(
                 "alveo_shell",
@@ -160,11 +166,15 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 False,
                 f"Alveo board '{cfg.board}' requires VITIS_ALVEO shell flow, "
                 f"but {cfg.shell_flow_type} was specified",
-                "Set shell_flow_type=ShellFlowType.VITIS_ALVEO for Alveo boards",
+                "Set shell_flow_type=ShellFlowType.VITIS_ALVEO for Alveo U* boards",
             )
         )
 
-    if cfg.board in pynq_boards and cfg.shell_flow_type != ShellFlowType.VIVADO_ZYNQ:
+    if (
+        has_bitfile
+        and cfg.board in pynq_boards
+        and cfg.shell_flow_type != ShellFlowType.VIVADO_ZYNQ
+    ):
         checks.append(
             _check(
                 "pynq_shell",
@@ -208,7 +218,7 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 Severity.ERROR,
                 False,
                 "BITFILE generation with VIVADO_ZYNQ requires 'board' to be set. "
-                "ZynqBuild needs the board name and will fail late in step_synthesize_bitfile "
+                "ZynqBuild needs the board name and will fail in step_synthesize_bitfile "
                 "if missing",
                 "Set board to a valid Zynq board name (e.g., 'Pynq-Z1', 'ZCU104')",
             )
@@ -222,7 +232,7 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                     Severity.ERROR,
                     False,
                     "BITFILE generation with VITIS_ALVEO requires 'board' or 'vitis_platform' "
-                    "to be set. VitisLink needs platform resolution and will fail late in "
+                    "to be set. VitisLink needs platform resolution and will fail in "
                     "step_synthesize_bitfile if missing",
                     "Set board (e.g., 'U250') or vitis_platform explicitly",
                 )
@@ -252,7 +262,8 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 Severity.ERROR,
                 False,
                 f"folding_config_file not found: {cfg.folding_config_file}",
-                "Check the path or remove folding_config_file to use automatic folding",
+                "Check the path or remove folding_config_file and set target_fps "
+                "to use automatic folding",
             )
         )
 
@@ -286,6 +297,18 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 )
 
     # === Warnings ===
+    if cfg.shell_flow_type is not None and not has_bitfile:
+        checks.append(
+            _check(
+                "shell_no_bitfile",
+                Severity.WARNING,
+                False,
+                f"shell_flow_type={cfg.shell_flow_type.name} is set but BITFILE is not in "
+                "generate_outputs. Shell flow type is only used for bitfile generation",
+                "Add BITFILE to generate_outputs or remove shell_flow_type",
+            )
+        )
+
     if not cfg.standalone_thresholds:
         checks.append(
             _check(
@@ -293,9 +316,10 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 Severity.WARNING,
                 False,
                 "standalone_thresholds=False: MatMul+MultiThreshold patterns will be fused "
-                "into MVAU with output activation, which cannot use RTL MVAU. HLS MVAU will "
-                "be used instead",
-                "Set standalone_thresholds=True if you want RTL MVAU implementation",
+                "into MVAU with output activation, which cannot use RTL MVAU. In those cases "
+                "HLS MVAU will be used instead",
+                "Set standalone_thresholds=True if you want to make sure to always get the "
+                "RTL MVAU implementation",
             )
         )
 
@@ -360,17 +384,6 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
             )
         )
 
-    if cfg.board == "AUP-ZU3_8GB":
-        checks.append(
-            _check(
-                "aupzu3",
-                Severity.WARNING,
-                False,
-                "AUP-ZU3_8GB board may require updated board files in your Vivado installation",
-                "Verify that board files for AUP-ZU3_8GB are installed",
-            )
-        )
-
     # === Info ===
     if cfg.verify_save_full_context:
         checks.append(
@@ -401,8 +414,7 @@ def run_all_config_checks(cfg: DataflowBuildConfig) -> Report:
                 "cpp_driver",
                 Severity.INFO,
                 False,
-                "C++ driver requested: The C++ driver is a community-maintained project "
-                "and not officially supported by the FINN team",
+                "C++ driver requested: The C++ driver is a community-maintained project",
             )
         )
 
