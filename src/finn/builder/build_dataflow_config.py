@@ -403,6 +403,10 @@ class DataflowBuildConfig:
     #: If set to commit hash specified version will be used
     cpp_driver_version: Optional[str] = "latest"
 
+    #: If True, suppress assertion errors for configuration checks.
+    #: Warnings and info will still be printed but errors will not halt the build.
+    mute_config_assertions: Optional[bool] = False
+
     def _resolve_hls_clk_period(self):
         if self.hls_clk_period_ns is None:
             # use same clk for synth and hls if not explicitly specified
