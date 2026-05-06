@@ -10,7 +10,7 @@ Quickstart
 1. Install Docker to run `without root <https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user>`_
 2. Set up ``FINN_XILINX_PATH`` and ``FINN_XILINX_VERSION`` environment variables pointing respectively to the Xilinx tools installation directory and version (e.g. ``FINN_XILINX_PATH=/opt/Xilinx`` and ``FINN_XILINX_VERSION=2022.2``)
 3. Clone the FINN compiler from the repo: ``git clone https://github.com/Xilinx/finn/`` and go into the directory where it is cloned
-4. Execute ``./run-docker.sh quicktest`` to verify your installation.
+4. Execute ``./run-docker.sh quicktest verify`` to verify your installation. It is normal to see warnings during the tests - FINN uses warnings to inform users about certain conditions. As long as all tests pass, your installation is successful.
 5. Optionally, follow the instructions on :ref:`PYNQ board first-time setup`, :ref:`Vitis-based Alveo first-time setup`, or :ref:`Slash-based Alveo first-time setup` for board setup.
 6. Optionally, set up a `Vivado/Vitis license`_.
 7. All done! See :ref:`Running FINN in Docker` for the various options on how to run the FINN compiler.
