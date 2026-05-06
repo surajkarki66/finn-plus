@@ -1,4 +1,4 @@
-# Copyright (C) Advanced Micro Devices, Inc. All rights reserved.
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Configuration check system for FINN builds - catches incompatibilities early."""
