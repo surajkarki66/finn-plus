@@ -1,6 +1,6 @@
 #!/bin/bash
 
-: ${PYTEST_PARALLEL=2}
+: ${PYTEST_PARALLEL=auto}
 
 cd $FINN_ROOT
 # check if command line argument is empty or not present
