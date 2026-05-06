@@ -108,7 +108,7 @@ class MakeCPPDriver(Transformation):
         if s in ["BINARY", "TERNARY", "BIPOLAR"]:
             return "Datatype" + s[0] + s[1:].lower()
         elif s.startswith("U"):
-            return "DatatypeUint<" + s.replace("UINT", "") + ">"
+            return "DatatypeUInt<" + s.replace("UINT", "") + ">"
         elif s.startswith("I"):
             return "DatatypeInt<" + s.replace("INT", "") + ">"
         elif "FLOAT" in s:
@@ -412,7 +412,9 @@ class MakeCPPDriver(Transformation):
             )
 
             # Load the IP layout information from the generated JSON file
-            ips = json.loads((xclbin_path / "ip_layout.json").read_text())["ip_layout"]["m_ip_data"]
+            ips = json.loads((xclbin_path.parent / "ip_layout.json").read_text())["ip_layout"][
+                "m_ip_data"
+            ]
 
             # Define a filter function to identify input/output DMA kernels
             # Filters for kernels that have valid base addresses
@@ -433,42 +435,50 @@ class MakeCPPDriver(Transformation):
 
             # Map driver's idma names to actual kernels and include shape information
             for i in range(len(driver_shapes["idma_names"])):
-                json_idmas.append(
-                    {
-                        "kernelName": next(
-                            self.format_kernel_name(name)
-                            for name in idmas
-                            if driver_shapes["idma_names"][i] in name
-                        ),
-                        "normalShape": driver_shapes["ishape_normal"][i],
-                        "foldedShape": driver_shapes["ishape_folded"][i],
-                        "packedShape": driver_shapes["ishape_packed"][i],
-                    }
-                )
+                idma_names = [
+                    self.format_kernel_name(name)
+                    for name in idmas
+                    if driver_shapes["idma_names"][i] in name
+                ]
+
+                # Not every FPGA might have an IDMA node
+                if len(idma_names) > 0:
+                    json_idmas.append(
+                        {
+                            "kernelName": idma_names[0],
+                            "normalShape": driver_shapes["ishape_normal"][i],
+                            "foldedShape": driver_shapes["ishape_folded"][i],
+                            "packedShape": driver_shapes["ishape_packed"][i],
+                        }
+                    )
 
             # Map driver's odma names to actual kernels and include shape information
             for i in range(len(driver_shapes["odma_names"])):
-                json_odmas.append(
-                    {
-                        "kernelName": next(
-                            self.format_kernel_name(name)
-                            for name in odmas
-                            if driver_shapes["odma_names"][i] in name
-                        ),
-                        "normalShape": driver_shapes["oshape_normal"][i],
-                        "foldedShape": driver_shapes["oshape_folded"][i],
-                        "packedShape": driver_shapes["oshape_packed"][i],
-                    }
-                )
+                odma_names = [
+                    self.format_kernel_name(name)
+                    for name in odmas
+                    if driver_shapes["odma_names"][i] in name
+                ]
+
+                # Not every FPGA might have an ODMA node
+                if len(odma_names) > 0:
+                    json_odmas.append(
+                        {
+                            "kernelName": odma_names[0],
+                            "normalShape": driver_shapes["oshape_normal"][i],
+                            "foldedShape": driver_shapes["oshape_folded"][i],
+                            "packedShape": driver_shapes["oshape_packed"][i],
+                        }
+                    )
 
             # Append the data. Includes the device index, so that this can be sorted later on
             data.append(
                 (
                     {
                         # Specify which XRT device to use (0 = first device)
-                        "xrtDeviceIndex": device,
+                        "xrtDeviceIndex": int(device),
                         # Store the absolute path to the bitstream
-                        "xclbinPath": xclbin_path.resolve(),
+                        "xclbinPath": str(xclbin_path.resolve()),
                         "name": f"Device_{device}",  # Assign a name to this device configuration
                         "idmas": json_idmas,  # Include the input DMA configurations
                         "odmas": json_odmas,  # Include the output DMA configurations
