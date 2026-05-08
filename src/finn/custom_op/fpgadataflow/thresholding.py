@@ -40,12 +40,11 @@ from qonnx.util.basic import (
 )
 
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
-from finn.custom_op.fpgadataflow.memstream import MemStreamSupport
 from finn.util.exception import FINNInternalError
 from finn.util.logging import log
 
 
-class Thresholding(MemStreamSupport, HWCustomOp):
+class Thresholding(HWCustomOp):
     """Abstraction layer for HW implementation of Thresholding."""
 
     def __init__(self, onnx_node, **kwargs):

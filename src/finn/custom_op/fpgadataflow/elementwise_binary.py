@@ -36,14 +36,13 @@ from qonnx.core.modelwrapper import ModelWrapper
 
 from finn.custom_op.fpgadataflow import register_custom_op
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
-from finn.custom_op.fpgadataflow.memstream import MemStreamSupport
 
 # FINN logging
 from finn.util.logging import log
 
 
 # Generic implementation for elementwise binary operations
-class ElementwiseBinaryOperation(MemStreamSupport, HWCustomOp):
+class ElementwiseBinaryOperation(HWCustomOp):
     # Specifies the elementwise operation to be implemented
     #   Format: (Identifier, Python, C++, RTL)
     _operation: tuple[str, np.ufunc, str, str] | None = None

@@ -84,7 +84,7 @@ class RTLBackend(HWCustomOp, ABC):
         return super_attrs
 
     @abstractmethod
-    def generate_hdl(self, model: "ModelWrapper", fpgapart: str, clk: str) -> None:
+    def generate_hdl(self, model: "ModelWrapper", fpgapart: str, clk: float) -> None:
         """Generate HDL code for this node.
 
         Args:
@@ -147,7 +147,7 @@ class RTLBackend(HWCustomOp, ABC):
             list[str]: List of TCL commands for IP Integrator
         """
 
-    def code_generation_ipgen(self, model: "ModelWrapper", fpgapart: str, clk: str) -> None:
+    def code_generation_ipgen(self, model: "ModelWrapper", fpgapart: str, clk: float) -> None:
         """Generate HDL code for IP generation.
         Wrapper method that calls generate_hdl to produce the HDL code for this node.
 
@@ -162,7 +162,7 @@ class RTLBackend(HWCustomOp, ABC):
         self.generate_hdl(model, fpgapart, clk)
 
     def execute_node(
-        self, context: dict[str, npt.NDArray], graph: "GraphProto"
+        self, context: dict[str, npt.NDArray], graph: "GraphProto"  # noqa: ARG002
     ) -> None:
         """Execute this node's RTL simulation.
 

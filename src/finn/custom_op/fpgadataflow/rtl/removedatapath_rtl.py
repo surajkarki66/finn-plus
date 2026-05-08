@@ -6,7 +6,6 @@ the control flow.
 """
 
 import numpy as np
-import os
 from collections.abc import Sequence
 from numpy import ndarray
 from numpy import typing as npt
@@ -18,6 +17,7 @@ from typing import Any, cast
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.util.exception import FINNInternalError
 from finn.util.logging import log
+from finn.util.settings import get_settings
 
 
 class RemoveDataPath_rtl(RTLBackend):
@@ -104,7 +104,7 @@ class RemoveDataPath_rtl(RTLBackend):
         ]
         return verilog_files
 
-    def generate_hdl(self, model: Any, fpgapart: str, clk: str) -> None:  # noqa: ARG002
+    def generate_hdl(self, model: Any, fpgapart: str, clk: float) -> None:  # noqa: ARG002
         """Generate the RTL code for this custom op.
 
         Args:
@@ -116,7 +116,7 @@ class RemoveDataPath_rtl(RTLBackend):
             FINNInternalError: If code_gen_dir_ipgen attribute is invalid.
 
         """
-        rtlsrc = Path(os.environ["FINN_RTLLIB"]) / "removedatapath" / "hdl"
+        rtlsrc = Path(get_settings().finn_rtllib) / "removedatapath" / "hdl"
         template_path = rtlsrc / "dummy_template.v"
 
         # save top module name so we can refer to it after this node has been renamed
@@ -199,7 +199,7 @@ class RemoveDataPath_rtl(RTLBackend):
                 f"normal_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get normal input shape"
             )
-        return normal_shape
+        return cast("Sequence[int]|npt.NDArray[np.int_]", normal_shape)
 
     def get_normal_output_shape(
         self, ind: int = 0  # noqa: ARG002
@@ -290,7 +290,12 @@ class RemoveDataPath_rtl(RTLBackend):
                 f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get outstream width"
             )
-        in_width = folded_shape[-1] * dtype.bitwidth()
+        if not isinstance(folded_shape[-1], int) or not isinstance(folded_shape[-1], np.integer):
+            raise FINNInternalError(
+                f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
+                "cannot get outstream width"
+            )
+        in_width = cast("int|np.integer", folded_shape[-1]) * dtype.bitwidth()
         return in_width
 
     def get_outstream_width(self, ind: int = 0) -> int:  # noqa: ARG002
@@ -323,7 +328,12 @@ class RemoveDataPath_rtl(RTLBackend):
                 f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get outstream width"
             )
-        in_width = folded_shape[-1] * dtype.bitwidth()
+        if not isinstance(folded_shape[-1], int) or not isinstance(folded_shape[-1], np.integer):
+            raise FINNInternalError(
+                f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
+                "cannot get outstream width"
+            )
+        in_width = cast("int|np.integer", folded_shape[-1]) * dtype.bitwidth()
         return in_width
 
     def get_input_datatype(self, ind: int = 0) -> BaseDataType:  # noqa: ARG002

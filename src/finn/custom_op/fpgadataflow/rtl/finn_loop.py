@@ -28,6 +28,7 @@
 
 import copy
 import math
+import re
 import numpy as np
 import numpy.typing as npt
 import os
@@ -39,6 +40,7 @@ from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp, is_custom_op
 from qonnx.util.basic import get_by_name, qonnx_make_model, roundup_to_integer_multiple
+from typing import cast
 
 import finn.core.onnx_exec as oxe
 from finn import xsi
@@ -47,10 +49,10 @@ from finn.custom_op.fpgadataflow import templates
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
-from finn.util.basic import make_build_dir
+from finn.util.basic import getHWCustomOp, make_build_dir
 from finn.util.create import adjacency_list
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
-from finn.util.exception import FINNInternalError
+from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.mlo_sim import mlo_prehook_func_factory
 from finn.util.settings import get_settings
 
@@ -64,9 +66,7 @@ def collect_ip_dirs(model, ipstitch_path):
     for node in model.graph.node:
         node_inst = getCustomOp(node)
         ip_dir_value = node_inst.get_nodeattr("ip_path")
-        assert os.path.isdir(
-            ip_dir_value
-        ), """The directory that should
+        assert os.path.isdir(ip_dir_value), """The directory that should
         contain the generated ip blocks doesn't exist."""
         ip_dirs += [ip_dir_value]
         if node.op_type.startswith("MVAU") or node.op_type == "Thresholding_hls":
@@ -414,24 +414,39 @@ class FINNLoop(RTLBackend, HWCustomOp):
         ) as f:
             f.write(template_wrapper)
 
-    def generate_params(self, model, path):
-        iteration = self.get_nodeattr("iteration")
+    def generate_params(self, model: "ModelWrapper", path: str) -> None:
+        """Generate .dat files for loop parameters and concatenate them together."""
+        iteration = cast("int", self.get_nodeattr("iteration"))
         loop_node = self.onnx_node
-        loop_body = self.get_nodeattr("body")
+        loop_body = cast("ModelWrapper", self.get_nodeattr("body"))
         for i, inp in enumerate(loop_node.input[1:]):
             params = model.get_initializer(inp)
             param_dtype = model.get_tensor_datatype(inp)
-            assert params.shape[0] == iteration
+            if params is None or not isinstance(params, np.ndarray):
+                raise FINNUserError(
+                    f"Expected initializer for loop parameter input {inp} "
+                    f"not found or not an ndarray."
+                )
+            if params.shape[0] != iteration:
+                raise FINNUserError(
+                    f"Expected first dimension of loop parameter {inp} to "
+                    f"be equal to iteration count {iteration}, but got {params.shape[0]}."
+                )
             # get node that initializer is attached to
             loop_tensor = loop_body.graph.input[i + 1].name
             param_node = loop_body.find_consumer(loop_tensor)
-            for iter in range(iteration):
-                loop_body.set_initializer(loop_tensor, params[iter])
+            if param_node is None:
+                raise FINNInternalError(
+                    f"Could not find consumer of loop parameter tensor {loop_tensor} in loop body."
+                )
+            inst = None
+            for it in range(iteration):
+                loop_body.set_initializer(loop_tensor, params[it])
                 loop_body.set_tensor_datatype(loop_tensor, param_dtype)
-                inst = getCustomOp(param_node)
+                inst = getHWCustomOp(param_node)
                 inst.generate_params(loop_body, path)
                 param_file = f"{path}/memblock.dat"
-                new_param_file = f"{path}/{param_node.op_type}_memblock_{iter}.dat"
+                new_param_file = f"{path}/{param_node.op_type}_memblock_{it}.dat"
                 if param_node.op_type.startswith("MVAU") or param_node.op_type.startswith(
                     "Elementwise"
                 ):
@@ -439,80 +454,85 @@ class FINNLoop(RTLBackend, HWCustomOp):
                     shutil.move(param_file, new_param_file)
                 elif param_node.op_type.startswith("Thresholding"):
                     # get all generated Thresholding dat files
-                    pe = inst.get_nodeattr("PE")
-                    output_data_type = inst.get_nodeattr("outputDataType")
+                    pe = cast("int", inst.get_nodeattr("PE"))
+                    output_data_type = cast("str", inst.get_nodeattr("outputDataType"))
                     o_bitwidth = DataType[output_data_type].bitwidth()
                     param_files = []
                     for stage in range(o_bitwidth):
                         for pe_value in range(pe):
                             param_files.append(
-                                path
-                                + "/%s_threshs_%s_%s.dat"
-                                % (
-                                    param_node.name,
-                                    pe_value,
-                                    stage,
-                                )
+                                path + f"/{param_node.name}_threshs_{pe_value}_{stage}.dat"
                             )
                     for param_file in param_files:
                         param_path = Path(param_file)
                         new_param_file = param_path.with_name(
-                            param_path.stem + "_i" + str(iter) + param_path.suffix
+                            param_path.stem + "_i" + str(it) + param_path.suffix
                         )
                         shutil.move(param_path, new_param_file)
                 else:
-                    raise Exception
+                    raise FINNUserError(
+                        f"Node of type {param_node.op_type} not supported as loop node."
+                    )
 
             if param_node.op_type.startswith("MVAU") or param_node.op_type.startswith(
                 "Elementwise"
             ):
                 # concatinate all .dat files together
-                param_file = f"{path}/memblock_{param_node.op_type}_id_{i + 1}.dat"
-                with open(param_file, "w") as outfile:
-                    for iter in range(iteration):
-                        memblock_file = f"{path}/{param_node.op_type}_memblock_{iter}.dat"
-                        with open(memblock_file) as infile:
+                param_file = Path(path) / f"memblock_{param_node.op_type}_id_{i + 1}.dat"
+                with param_file.open("w") as outfile:
+                    for it in range(iteration):
+                        memblock_file = Path(path) / f"{param_node.op_type}_memblock_{it}.dat"
+                        with memblock_file.open("r") as infile:
                             for line in infile:
                                 outfile.write(line)
-                        os.remove(memblock_file)
+                        memblock_file.unlink()  # remove the per-iteration file after concatenation
                 # Replace the path for the dat files in the ipgen files if Eltwise
                 # Adapted from transformations.fpgadataflow.replace_verilog_relpaths
                 if param_node.op_type.startswith("Elementwise"):
                     param_customop = getCustomOp(param_node)
-                    ipgen_path = param_customop.get_nodeattr("code_gen_dir_ipgen")
-                    if ipgen_path is not None and os.path.isdir(ipgen_path):
-                        for dname, dirs, files in os.walk(ipgen_path):
-                            for fname in files:
-                                if fname.endswith("_memstream_wrapper.v"):
-                                    fpath = os.path.join(dname, fname)
-                                    with open(fpath) as f:
-                                        s = f.read()
-                                    old = "%s/memblock.dat" % ipgen_path
-                                    new = "%s/memblock_%s_id_%s.dat" % (
-                                        path,
-                                        param_node.op_type,
-                                        i + 1,
-                                    )
-                                    s = s.replace(old, new)
-                                    with open(fpath, "w") as f:
-                                        f.write(s)
+                    ipgen_path_str = param_customop.get_nodeattr("code_gen_dir_ipgen")
+                    ipgen_path = Path(cast("str", ipgen_path_str))
+                    if ipgen_path.is_dir():
+                        init_file = Path(path) / f"memblock_{param_node.op_type}_id_{i + 1}.dat"
+                        pattern = re.compile(
+                            r'^(\s*parameter\s+INIT_FILE\s*=\s*")[^"]+(".*)$',
+                            re.MULTILINE,
+                        )
+                        for fpath in ipgen_path.rglob("*_memstream_wrapper.v"):
+                            s = fpath.read_text()
+                            updated, n = pattern.subn(
+                                lambda m, init_file=init_file: (
+                                    f"{m.group(1)}{init_file}{m.group(2)}"
+                                ),
+                                s,
+                                count=1,
+                            )
+                            if n:
+                                print(f"Updating INIT_FILE in {fpath} -> {init_file}")
+                                fpath.write_text(updated)
             elif param_node.op_type.startswith("Thresholding"):
                 # concatinate all .dat files together
-                pe = inst.get_nodeattr("PE")
-                output_data_type = inst.get_nodeattr("outputDataType")
+                if inst is None:
+                    raise FINNInternalError(
+                        "Expected inst to be set after loop over iterations, but it was not."
+                    )
+                pe = cast("int", inst.get_nodeattr("PE"))
+                output_data_type = cast("str", inst.get_nodeattr("outputDataType"))
                 o_bitwidth = DataType[output_data_type].bitwidth()
                 for stage in range(o_bitwidth):
                     for pe_value in range(pe):
-                        param_file = path + "/Thresholding_id_%s_threshs_%s_%s.dat" % (
-                            i + 1,
-                            pe_value,
-                            stage,
+                        param_file = (
+                            Path(path) / f"Thresholding_id_{i + 1}_threshs_{pe_value}_{stage}.dat"
                         )
-                        with open(param_file, "w") as outfile:
-                            for iter in range(iteration):
-                                iter_file = f"{path}/{param_node.name}_threshs_{pe_value}_{stage}_i{iter}.dat"
-                                with open(iter_file) as infile:
+                        with param_file.open("w") as outfile:
+                            for it in range(iteration):
+                                iter_file = (
+                                    Path(path)
+                                    / f"{param_node.name}_threshs_{pe_value}_{stage}_i{it}.dat"
+                                )
+                                with iter_file.open("r") as infile:
                                     cnt = 0
+                                    hex_len = 0
                                     for line in infile:
                                         if cnt == 0:
                                             hex_len = len(line.strip())
@@ -526,24 +546,31 @@ class FINNLoop(RTLBackend, HWCustomOp):
                                         for _ in range(next_pow2 - cnt):
                                             # write out as hex of len hex_len
                                             outfile.write(hex(pad_val)[2:].zfill(hex_len) + "\n")
-                                os.remove(iter_file)
+                                iter_file.unlink()
 
                 # Replace the path for the dat files in the ipgen files
                 # Adapted from transformations.fpgadataflow.replace_verilog_relpaths
                 param_customop = getCustomOp(param_node)
-                ipgen_path = param_customop.get_nodeattr("ipgen_path")
-                if ipgen_path is not None and os.path.isdir(ipgen_path):
-                    for dname, dirs, files in os.walk(ipgen_path):
-                        for fname in files:
-                            if fname.endswith(".v"):
-                                fpath = os.path.join(dname, fname)
-                                with open(fpath) as f:
-                                    s = f.read()
-                                old = "./%s" % param_node.name
-                                new = "%s/Thresholding_id_%s" % (path, i + 1)
-                                s = s.replace(old, new)
-                                with open(fpath, "w") as f:
-                                    f.write(s)
+                ipgen_p = cast("str", param_customop.get_nodeattr("ipgen_path"))
+                ipgen_path = Path(ipgen_p)
+                if ipgen_path.is_dir():
+                    threshold_path = f"{path}/Thresholding_id_{i + 1}_"
+                    pattern = re.compile(
+                        r'^(\s*parameter\s+THRESHOLDS_PATH\s*=\s*")[^"]+(".*)$',
+                        re.MULTILINE,
+                    )
+                    for fpath in ipgen_path.rglob("*.v"):
+                        print(f"Checking {fpath} for THRESHOLDS_PATH to update...")
+                        s = fpath.read_text()
+                        updated, n = pattern.subn(
+                            lambda m, threshold_path=threshold_path: (
+                                f"{m.group(1)}{threshold_path}{m.group(2)}"
+                            ),
+                            s,
+                            count=1,
+                        )
+                        if n:
+                            fpath.write_text(updated)
 
     def generate_hdl_stream_tap(self):
         """Helper function to generate verilog code for stream tap components."""
@@ -1166,5 +1193,5 @@ class FINNLoop(RTLBackend, HWCustomOp):
         cmd.append("create_bd_cell -type ip -vlnv %s %s" % (vlnv, self.onnx_node.name))
         return cmd
 
-    def get_rtl_file_list(self, abspath=False):
-        pass
+    def get_rtl_file_list(self, abspath: bool = False):
+        return []

@@ -56,6 +56,7 @@ from finn.util.basic import launch_process_helper, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 from finn.util.logging import log
+from finn.util.hbm_mock import HBMDummy
 
 
 def is_external_input(model: ModelWrapper, node: "NodeProto", i: int) -> bool:
@@ -240,6 +241,27 @@ class CreateStitchedIP(Transformation):
         if not node_inst.get_nodeattr("mlo_max_iter"):
             if node.op_type == "FINNLoop":
                 for mm_intf_name in aximm_intf_name:
+                    if self.functional_simulation:
+                        code_gen_dir = make_build_dir(
+                            prefix="code_gen_ipgen_" + inst_name + "_" + mm_intf_name[0] + "_dummy_"
+                        )
+                        dummy = HBMDummy(
+                            inst_name + "_" + mm_intf_name[0] + "_dummy",
+                            64,
+                            256,
+                            Path(code_gen_dir),
+                        )
+                        dummy.generate_hdl()
+                        self.create_cmds.extend(dummy.code_generation_ipi())
+                        self.connect_cmds.extend(dummy.code_clk_rst())
+                        self.connect_cmds.extend(
+                            [
+                                f"connect_bd_intf_net "
+                                f"[get_bd_intf_pins {inst_name}/{mm_intf_name[0]}] "
+                                f"[get_bd_intf_pins {dummy.name}/s_axi]",
+                            ]
+                        )
+                        continue
                     self.connect_cmds.extend(
                         [
                             f"make_bd_intf_pins_external "

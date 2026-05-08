@@ -47,13 +47,12 @@ from qonnx.util.basic import (
 )
 
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
-from finn.custom_op.fpgadataflow.memstream import MemStreamSupport
 from finn.util.data_packing import numpy_to_hls_code, pack_innermost_dim_as_hex_string
 from finn.util.logging import log
 from finn.util.settings import get_settings
 
 
-class VVAU(MemStreamSupport, HWCustomOp):
+class VVAU(HWCustomOp):
     """Abstraction layer for HW implementation of VectorVectorActivation layers."""
 
     def __init__(self, onnx_node, **kwargs):

@@ -507,6 +507,16 @@ def step_generate_hardware(
         loop_model.set_metadata_prop("is_mlo", "1")
         # Recursion here
         loop_model = step_generate_hardware(loop_model, cfg, parent_node=node.name)
+
+        node_inst.set_nodeattr("body", loop_model.graph)
+
+    # Codegen for the current model
+    model = step_hw_codegen(model, cfg)
+
+    # Stitch submodels
+    for node in model.get_nodes_by_op_type("FINNLoop"):
+        node_inst = cast("FINNLoop", getCustomOp(node))
+        loop_model = cast("ModelWrapper", node_inst.get_nodeattr("body"))
         # Pack subgraph with IPs and FIFOs into stitched IP
         loop_model = loop_model.transform(
             CreateStitchedIP(
@@ -516,9 +526,6 @@ def step_generate_hardware(
             )
         )
         node_inst.set_nodeattr("body", loop_model.graph)
-
-    # Codegen for the current model
-    model = step_hw_codegen(model, cfg)
 
     # IP Gen for the current model
     model = step_hw_ipgen(model, cfg, parent_node=parent_node)
@@ -533,67 +540,13 @@ def step_generate_hardware(
     # IP Gen for the inserted FIFOs and any remaining
     # IPs that needed to be re-gen after FIFO insertion
     model = step_hw_ipgen(model, cfg, parent_node=parent_node)
-    model.save("afterfirstiteration.onnx")
 
     return model
 
 
-# def prepare_loop_ops_fifo_sizing(node, cfg):
-#     node_inst = getCustomOp(node)
-#     loop_model = node_inst.get_nodeattr("body")
-#     loop_model = loop_model.transform(GiveUniqueNodeNamesRecursive(prefix=node.name + "_"))
-#     # go first into subgraph to check if there are other loop ops
-#     loop_nodes = loop_model.get_nodes_by_op_type("FINNLoop")
-#     for loop_node in loop_nodes:
-#         prepare_loop_ops_fifo_sizing(loop_node, cfg)
-#     loop_model = loop_model.transform(
-#         PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period())
-#     )
-#     loop_model = loop_model.transform(HLSSynthIP(cfg._resolve_hls_clk_period()))
-#     loop_model = loop_model.transform(ReplaceVerilogRelPaths())
-#     if cfg.fifosim_save_waveform:
-#         report_dir = cfg.output_dir + "/report"
-#         os.makedirs(report_dir, exist_ok=True)
-#         loop_model.set_metadata_prop(
-#             "rtlsim_trace", os.path.abspath(report_dir) + f"/{node.name}_fifosim_trace.wdb"
-#         )
-#     loop_model = loop_model.transform(
-#         InsertAndSetFIFODepths(
-#             cfg._resolve_fpga_part(),
-#             cfg._resolve_hls_clk_period(),
-#             swg_exception=cfg.default_swg_exception,
-#             vivado_ram_style=cfg.large_fifo_mem_style,
-#             fifosim_input_throttle=cfg.fifosim_input_throttle,
-#         )
-#     )
-#     loop_model = loop_model.transform(SplitLargeFIFOs())
-#     loop_model = loop_model.transform(RemoveShallowFIFOs())
-#     loop_model = loop_model.transform(GiveUniqueNodeNamesRecursive(prefix=node.name + "_"))
-#     loop_model = loop_model.transform(GiveReadableTensorNames())
-#     node_inst.set_nodeattr("body", loop_model.graph)
-
-
-# def prepare_loop_ops_ipgen(node, cfg):
-#     node_inst = getCustomOp(node)
-#     loop_model = node_inst.get_nodeattr("body")
-#     # go first into subgraph to check if there are other loop ops
-#     loop_nodes = loop_model.get_nodes_by_op_type("FINNLoop")
-#     for loop_node in loop_nodes:
-#         prepare_loop_ops_ipgen(loop_node, cfg)
-#     loop_model = loop_model.transform(HLSSynthIP(cfg._resolve_hls_clk_period()))
-#     loop_model = loop_model.transform(
-#         CreateStitchedIP(
-#             cfg._resolve_fpga_part(),
-#             cfg.synth_clk_period_ns,
-#             vitis=False,
-#         )
-#     )
-#     node_inst.set_nodeattr("body", loop_model.graph)
-
-
 @register_build_dataflow_step()
 def step_qonnx_to_finn(model: ModelWrapper, cfg: DataflowBuildConfig):
-    """This step will only execute if QONNX nodes are found.
+    """Step will only execute if QONNX nodes are found.
     These include the following op_types: "Quant" , "Trunc" and "BinaryQuant".
     If such nodes are found the step will run the tidy-up step from QONNX
     and then convert the QONNX model to the FINN-ONNX dialect.
