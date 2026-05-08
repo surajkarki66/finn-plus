@@ -3,9 +3,11 @@ import pytest
 
 import brevitas.nn as qnn
 import configparser
+import onnx.helper as oh
 import torch
 from brevitas.export import export_qonnx
 from brevitas_examples.bnn_pynq.models.resnet import quant_resnet18
+from networkx.classes.digraph import DiGraph
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 
@@ -17,6 +19,9 @@ from finn.builder.custom_step_library.resnet import (
     step_resnet_tidy,
 )
 from finn.util.basic import make_build_dir
+
+
+# ---- RESNET 18 ----
 
 
 class RN18(torch.nn.Module):
@@ -104,3 +109,26 @@ def prepare_resnet_for_multifpga(
     for step in steps:
         model = step(model, cfg)
     return model, cfg
+
+
+# ---- GRAPH UTILITY ----
+
+
+def list_contains_all_elements(this: list, other: list) -> bool:
+    """Return whether a list contain all elements of another list."""
+    return all(n in this for n in other)
+
+
+def networkx_to_onnx(g: DiGraph) -> ModelWrapper:
+    """Convert a networkx graph into a QONNX ModelWrapper."""
+    nodes = [oh.make_node("StreamingDataflowPartition", [], [], n) for n in g.nodes]
+    get_node_by_name = lambda name: [n for n in nodes if n.name == name][0]  # noqa
+    for i, edge in enumerate(g.edges):
+        source_node = get_node_by_name(edge[0])
+        target_node = get_node_by_name(edge[1])
+        source_node.output.append(f"edge_{i}")
+        target_node.input.append(f"edge_{i}")
+    # TODO: Make graph inputs and outputs
+    graph = oh.make_graph(nodes, "graph", [], [])
+    model = oh.make_model(graph)
+    return ModelWrapper(model)

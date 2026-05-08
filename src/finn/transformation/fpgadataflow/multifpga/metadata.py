@@ -6,6 +6,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from onnx import NodeProto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -71,6 +72,22 @@ class NetworkMetadata(ABC):
     @abstractmethod
     def load(p: Path) -> NetworkMetadata:
         """Load the metadata from the given path."""
+
+    @abstractmethod
+    def node_is_sender(self, node: NodeProto) -> bool:
+        """Return whether the given node acts as a sender (TX) on its device."""
+
+    @abstractmethod
+    def node_is_receiver(self, node: NodeProto) -> bool:
+        """Return whether the given node acts as a receiver (RX) on its device."""
+
+    @abstractmethod
+    def get_partner_node(self, node: NodeProto, direction: DataDirection) -> NodeProto | None:
+        """Search through all nodes and return the one that acts as a communication partner
+        in the given direction. If A <-> B, then get_partner_node(A, TX) returns B and
+        get_partner_node(B, RX) returns A. (get_partner_node(A, RX) would return None,
+        since A is not a receiving from any node.)
+        """  # noqa
 
 
 class CreateNetworkMetadata(ABC):

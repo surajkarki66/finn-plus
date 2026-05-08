@@ -1561,15 +1561,15 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
                     model = model.transform(
                         PartitionForMultiFPGA(pc, part, cast("str", cfg.board), output_dir)
                     )
-                    model = model.transform(
-                        CreateMultiFPGAStreamingDataflowPartition(
-                            pc.separate_iodmas, sdp_partition_dir, pc.verbosity
-                        )
+                model = model.transform(
+                    CreateMultiFPGAStreamingDataflowPartition(
+                        pc.separate_iodmas, sdp_partition_dir, pc.verbosity
                     )
-                    model = model.transform(
-                        AssignNetworkMetadata(pc.communication_kernel, pc.topology, pc.verbosity)
-                    )
-                    model = model.transform(PrepareCommunicationKernels(platform, part, pc))
+                )
+                model = model.transform(
+                    AssignNetworkMetadata(pc.communication_kernel, pc.topology, pc.verbosity)
+                )
+                model = model.transform(PrepareCommunicationKernels(platform, part, pc))
 
             # Create / package XOs for all SDPs
             model = model.transform(BuildAllXOs(part, clk_ns))

@@ -1,10 +1,12 @@
+"""Test the graph utility functions regarding inseparable nodes, which is important for the current
+Multi-FPGA implementation.
+"""
+
 from __future__ import annotations
 
 import pytest
 
-import onnx.helper as oh
 from networkx import DiGraph, articulation_points
-from qonnx.core.modelwrapper import ModelWrapper
 
 from finn.transformation.fpgadataflow.multifpga.utils import (
     _get_end_nodes_nx,
@@ -14,23 +16,7 @@ from finn.transformation.fpgadataflow.multifpga.utils import (
     get_inseparable_nodes,
 )
 
-
-def list_contains_all_elements(this: list, other: list) -> bool:
-    return all(n in this for n in other)
-
-
-def networkx_to_onnx(g: DiGraph) -> ModelWrapper:
-    nodes = [oh.make_node("StreamingDataflowPartition", [], [], n) for n in g.nodes]
-    get_node_by_name = lambda name: [n for n in nodes if n.name == name][0]  # noqa
-    for i, edge in enumerate(g.edges):
-        source_node = get_node_by_name(edge[0])
-        target_node = get_node_by_name(edge[1])
-        source_node.output.append(f"edge_{i}")
-        target_node.input.append(f"edge_{i}")
-    # TODO: Make graph inputs and outputs
-    graph = oh.make_graph(nodes, "graph", [], [])
-    model = oh.make_model(graph)
-    return ModelWrapper(model)
+from tests.fpgadataflow.multifpga.utils import list_contains_all_elements, networkx_to_onnx
 
 
 # Graphs and what the expected results are. If None, the function should crash
@@ -106,14 +92,18 @@ graphs = {
         graphs["two_output_graph"],
     ],
 )
-def test_find_split_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
-    """Test that all splits are found. Check on a networkx graph directly"""
+def test_find_split_nodes_networkx(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
+    """Test that all splits in a networkx graph are found."""
     g, expected_splits = graph_data
     art_points = list(articulation_points(g.to_undirected())) + _get_end_nodes_nx(g)
     all_splits = [
         _split_nodes_from_nx(g, splitter, art_points) for splitter in _get_split_nodes_nx(g)
     ]
-    assert len(expected_splits) == len(all_splits)
+    assert len(expected_splits) == len(all_splits), (
+        f"Expected {len(expected_splits)} but found {len(all_splits)} splits."
+        f"The splits found were: {all_splits}. "
+        f"The expected splits were: {expected_splits}."
+    )
     for expected_split_list in expected_splits:
         found_and_correct = False
         for found_split_list in all_splits:
@@ -130,16 +120,19 @@ def test_find_split_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
 
 
 def test_correct_input_count() -> None:
+    """Internal test."""
     assert len(_get_start_nodes_nx(graphs["two_input_graph"][0])) == 2
     assert len(_get_end_nodes_nx(graphs["two_input_graph"][0])) == 1
 
 
 def test_correct_output_count() -> None:
+    """Internal test."""
     assert len(_get_start_nodes_nx(graphs["two_output_graph"][0])) == 1
     assert len(_get_end_nodes_nx(graphs["two_output_graph"][0])) == 2
 
 
 def test_onnx_to_networkx() -> None:
+    """Test that the conversion between a modelwrapper and a networkx graph is done correctly."""
     raise NotImplementedError()
 
 
@@ -157,13 +150,20 @@ def test_onnx_to_networkx() -> None:
     ],
 )
 def test_inseperable_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
+    """Check that the inseparable node function finds the correct node groups by checking against
+    pre-defined examples.
+    """
     g, expected_splits = graph_data
     model = networkx_to_onnx(g)
     indices = {}
     for i, node in enumerate(model.graph.node):
         indices[node.name] = i
     found_splits = get_inseparable_nodes(model)
-    assert len(found_splits) == len(expected_splits)
+    assert len(found_splits) == len(expected_splits), (
+        f"Expected {len(expected_splits)} but found {len(found_splits)} splits. "
+        f"The splits found were: {found_splits}. "
+        f"The expected splits were: {expected_splits}."
+    )
     for expected_split_list in expected_splits:
         found_and_correct = False
         expected_split_list_int = [indices[n] for n in expected_split_list]
