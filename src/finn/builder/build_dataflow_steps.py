@@ -33,6 +33,7 @@ accelerator from an ONNX model.
 """
 
 import json
+import math
 import numpy as np
 import os
 import shutil
@@ -100,14 +101,12 @@ from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
 from finn.transformation.fpgadataflow.replace_verilog_relpaths import ReplaceVerilogRelPaths
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
 from finn.transformation.fpgadataflow.set_fifo_depths import (
-    InsertAndSetFIFODepths,
-    RemoveShallowFIFOs,
+    ApplyFIFODepthsFromFile,
     SplitLargeFIFOs,
-    xsi_fifosim,
 )
 from finn.transformation.fpgadataflow.set_folding import SetFolding
 from finn.transformation.fpgadataflow.set_loop_boundary import SetLoopBoundary
-from finn.transformation.fpgadataflow.simulation import ApplyFIFOSizes
+from finn.transformation.fpgadataflow.simulation import ApplySimulatedFIFOSizes
 from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
 from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
@@ -126,12 +125,13 @@ from finn.transformation.qonnx.quant_act_to_multithreshold import default_filter
 from finn.transformation.streamline import Streamline
 from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
-from finn.util.basic import get_liveness_threshold_cycles, get_rtlsim_trace_depth
-from finn.util.config import extract_model_config_consolidate_shuffles, extract_model_config_to_json
+from finn.util.basic import get_liveness_threshold_cycles, get_rtlsim_trace_depth, getHWCustomOp
+from finn.util.config import extract_model_config_to_json
 from finn.util.exception import FINNUserError
 from finn.util.execution import execute_parent
 from finn.util.logging import log
 from finn.util.mlo_sim import is_mlo, mlo_prehook_func_factory
+from qonnx.transformation.base import Transformation
 
 if TYPE_CHECKING:
     from finn.custom_op.fpgadataflow.rtl.finn_loop import FINNLoop
@@ -348,7 +348,9 @@ def verify_step(
     log.info(f"Verification for {step_name} : {res_to_str[all_res]}")
 
 
-def prepare_for_stitched_ip_rtlsim(verify_model, cfg):
+def prepare_for_stitched_ip_rtlsim(
+    verify_model: ModelWrapper, cfg: DataflowBuildConfig
+) -> ModelWrapper:
     """Prepare model for stitched IP RTL simulation.
 
     Switches implementation styles from Vivado components to RTL where needed
@@ -485,10 +487,163 @@ def step_size_fifo_connected(model: ModelWrapper, cfg: DataflowBuildConfig) -> M
 @register_build_dataflow_step()
 def step_apply_fifosizes(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Apply the previously found FIFO sizes to the model."""
-    model = model.transform(ApplyFIFOSizes(cfg))
-    model = model.transform(SplitLargeFIFOs(max_qsrl_depth=256))
+    model = model.transform(ApplySimulatedFIFOSizes(cfg))
+    if cfg.split_large_fifos:
+        model = model.transform(SplitLargeFIFOs(max_qsrl_depth=256))
     model = model.transform(GiveUniqueNodeNamesRecursive())
     model = model.transform(GiveReadableTensorNames())
+    return model
+
+
+@register_build_dataflow_step()
+def step_set_fifo_depths(
+    model: ModelWrapper, cfg: DataflowBuildConfig, parent_node: str | None = None
+) -> ModelWrapper:
+    """Depending on the auto_fifo_depths setting, do one of the following:
+    * if auto_fifo_depths=True:  Run the appropriate auto-sizing transformation
+    to attempt to determine the FIFO sizes that provide full throughput.
+    May take a long time.
+    * if auto_fifo_depths=False:  Load the FIFO sizes from the folding config file and apply them.
+    Coherency with config file node naming is ensured by calling
+    `GiveUniqueNodeNamesRecursive`.
+    """
+    if cfg.auto_fifo_depths:
+        if cfg.fifosim_save_waveform:
+            report_dir = Path(cfg.output_dir) / "report"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            model.set_metadata_prop("rtlsim_trace", str(report_dir.resolve() / "fifosim_trace.wdb"))
+        if cfg.auto_fifo_strategy == AutoFIFOSizingMethod.DISTRIBUTED_SIMULATION:
+            model = step_build_simulation(model, cfg, parent_node=parent_node)
+            model = step_size_fifo_connected(model, cfg)
+            model = step_apply_fifosizes(model, cfg)
+        elif cfg.auto_fifo_strategy == AutoFIFOSizingMethod.LIVE_FIFO:
+            hw_attrs = [
+                "PE",
+                "SIMD",
+                "EmbFold",
+                "SeqFold",
+                "parallel_window",
+                "ram_style",
+                "ram_style_thresholds",
+                "ram_style_mask",
+                "depth",
+                "impl_style",
+                "resType",
+                "mac_resource",
+                "mem_mode",
+                "runtime_writeable_weights",
+                "inFIFODepths",
+                "outFIFODepths",
+                "depth_trigger_uram",
+                "depth_trigger_bram",
+            ]
+            # Create all DWCs and FIFOs normally
+            model = model.transform(InsertDWC())
+            model = model.transform(
+                InsertFIFO(vivado_ram_style=cfg.large_fifo_mem_style, create_shallow_fifos=True)
+            )
+
+            # Clean up model
+            model = model.transform(SortGraph())
+            model = model.transform(GiveUniqueNodeNamesRecursive())
+            model = model.transform(GiveReadableTensorNames())
+
+            # save original folding config before potentially modifying it
+            cfg_path = str(cfg.output_dir) + "/report/folding_config_before_lfs.json"
+            extract_model_config_to_json(model, cfg_path, hw_attrs)
+            model.set_metadata_prop("folding_config_before_lfs", cfg_path)
+
+            # Disable runtime-writable weights, external weights, and dynamic mode
+            for node in model.graph.node:
+                if node.domain.startswith("finn.custom_op.fpgadataflow"):
+                    node_inst = getCustomOp(node)
+                    try:
+                        if node_inst.get_nodeattr("runtime_writeable_weights") == 1:
+                            node_inst.set_nodeattr("runtime_writeable_weights", 0)
+                            if node_inst.get_nodeattr("ram_style") == "ultra":
+                                node_inst.set_nodeattr("ram_style", "block")
+                    except AttributeError:
+                        pass
+                    try:
+                        if node_inst.get_nodeattr("mem_mode") == "external":
+                            node_inst.set_nodeattr("mem_mode", "internal_decoupled")
+                    except AttributeError:
+                        pass
+                    try:
+                        if node_inst.get_nodeattr("dynamic_mode") == 1:
+                            node_inst.set_nodeattr("dynamic_mode", 0)
+                    except AttributeError:
+                        pass
+
+            # Specialize FIFOs to RTL back-end
+            for node in model.get_nodes_by_op_type("StreamingFIFO"):
+                node_inst = getCustomOp(node)
+                node_inst.set_nodeattr("preferred_impl_style", "rtl")
+            model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
+
+            # Clean up model
+            model = model.transform(SortGraph())
+            model = model.transform(GiveUniqueNodeNamesRecursive())
+            model = model.transform(GiveReadableTensorNames())
+
+            # Set impl_style + ID attributes
+            # We can't infer ID from the unique node name at IP instantiation,
+            # because the nodes will be wrapped in SDPs
+            for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
+                node_inst = getCustomOp(node)
+                idf = int(node.name.split("_")[-1])
+                node_inst.set_nodeattr("impl_style", "virtual")
+                node_inst.set_nodeattr("fifo_id", idf)
+
+            return model
+        else:
+            raise FINNUserError("Unsupported auto_fifo_strategy: " + cfg.auto_fifo_strategy)
+
+        # generate a dedicated report about final FIFO sizes
+        fifo_info = {}
+        fifo_info["fifo_depths"] = {}
+        fifo_info["fifo_sizes"] = {}
+        fifo_info["impl_style"] = {}
+        fifo_info["ram_style"] = {}
+        total_fifo_size = 0
+        for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
+            node_inst = getHWCustomOp(node)
+            fifo_info["fifo_depths"][node.name] = node_inst.get_nodeattr("depth")
+            fifo_info["fifo_sizes"][node.name] = (
+                node_inst.get_instream_width()
+                * math.ceil(cast("int", node_inst.get_nodeattr("depth")) / 32)
+                * 32
+            )  # Round up to nearest multiple of 32 to reflect actual hardware usage
+            fifo_info["impl_style"][node.name] = node_inst.get_nodeattr("impl_style")
+            fifo_info["ram_style"][node.name] = node_inst.get_nodeattr("ram_style")
+            total_fifo_size += fifo_info["fifo_sizes"][node.name]
+        fifo_info["total_fifo_size_kiB"] = int(total_fifo_size / 8.0 / 1024.0)
+
+        with (Path(cfg.output_dir) / "report" / "fifo_sizing.json").open("w") as f:
+            json.dump(fifo_info, f, indent=2)
+    else:
+        if cfg.fifo_config_file is None:
+            raise FINNUserError("auto_fifo_depths is set to False but no fifo_config_file provided")
+        log.info(
+            f"auto_fifo_depths is set to False, applying FIFO sizes from {cfg.fifo_config_file}"
+        )
+        # insert DWCs, FIFOs and run ApplyConfig once more
+        model = model.transform(InsertDWC())
+        # need to make sure all FIFOs are created so that their depth can be
+        # set by ApplyConfig, so create_shallow_fifos=True
+        model = model.transform(InsertFIFO(create_shallow_fifos=True))
+        model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
+        model = model.transform(GiveUniqueNodeNamesRecursive())
+        model = model.transform(GiveReadableTensorNames())
+        model = model.transform(ApplyFIFODepthsFromFile(cfg.fifo_config_file))
+
+    # after FIFOs are ready to go, call PrepareIP and HLSSynthIP again
+    # this will only run for the new nodes (e.g. FIFOs and DWCs)
+    # Codegen for the inserted FIFOs
+    model = step_hw_codegen(model, cfg)
+    # IP Gen for the inserted FIFOs and any remaining
+    # IPs that needed to be re-gen after FIFO insertion
+    model = step_hw_ipgen(model, cfg, parent_node=parent_node)
     return model
 
 
@@ -531,21 +686,13 @@ def step_generate_hardware(
     model = step_hw_ipgen(model, cfg, parent_node=parent_node)
 
     # FIFO sizing for the current model
-    model = step_build_simulation(model, cfg, parent_node=parent_node)
-    model = step_size_fifo_connected(model, cfg)
-    model = step_apply_fifosizes(model, cfg)
-
-    # Codegen for the inserted FIFOs
-    model = step_hw_codegen(model, cfg)
-    # IP Gen for the inserted FIFOs and any remaining
-    # IPs that needed to be re-gen after FIFO insertion
-    model = step_hw_ipgen(model, cfg, parent_node=parent_node)
+    model = step_set_fifo_depths(model, cfg, parent_node=parent_node)
 
     return model
 
 
 @register_build_dataflow_step()
-def step_qonnx_to_finn(model: ModelWrapper, cfg: DataflowBuildConfig):
+def step_qonnx_to_finn(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Step will only execute if QONNX nodes are found.
     These include the following op_types: "Quant" , "Trunc" and "BinaryQuant".
     If such nodes are found the step will run the tidy-up step from QONNX
@@ -632,7 +779,9 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
     preferred implementation styles for each node."""
 
     # Helper function to conditionally apply transformation
-    def apply_if_relevant(model, op_types, transform, desc=""):
+    def apply_if_relevant(
+        model: ModelWrapper, op_types: list[str], transform: Transformation, desc: str = ""
+    ) -> ModelWrapper:
         # Check if any of the relevant op types exist in the model
         if any(len(model.get_nodes_by_op_type(op_type)) > 0 for op_type in op_types):
             if desc:
@@ -951,64 +1100,69 @@ def step_apply_folding_config(model: ModelWrapper, cfg: DataflowBuildConfig) -> 
 def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Generate per-layer resource and cycle estimates using analytical models."""
     if DataflowOutputType.ESTIMATE_REPORTS in cfg.generate_outputs:
-        report_dir = cfg.output_dir + "/report"
-        os.makedirs(report_dir, exist_ok=True)
+        report_dir = Path(cfg.output_dir) / "report"
+        report_dir.mkdir(parents=True, exist_ok=True)
         ops_and_params = model.analysis(op_and_param_counts)
-        with open(report_dir + "/op_and_param_counts.json", "w") as f:
+        with (report_dir / "op_and_param_counts.json").open("w") as f:
             json.dump(ops_and_params, f, indent=2)
         estimate_layer_cycles = model.analysis(exp_cycles_per_layer)
-        with open(report_dir + "/estimate_layer_cycles.json", "w") as f:
+        with (report_dir / "estimate_layer_cycles.json").open("w") as f:
             json.dump(estimate_layer_cycles, f, indent=2)
         estimate_layer_resources = model.analysis(
             partial(res_estimation, fpgapart=cfg._resolve_fpga_part())
         )
         estimate_layer_resources["total"] = aggregate_dict_keys(estimate_layer_resources)
-        with open(report_dir + "/estimate_layer_resources.json", "w") as f:
+        with (report_dir / "estimate_layer_resources.json").open("w") as f:
             json.dump(estimate_layer_resources, f, indent=2)
         estimate_layer_resources_complete = model.analysis(
             partial(res_estimation_complete, fpgapart=cfg._resolve_fpga_part())
         )
-        with open(report_dir + "/estimate_layer_config_alternatives.json", "w") as f:
+        with (report_dir / "estimate_layer_config_alternatives.json").open("w") as f:
             json.dump(estimate_layer_resources_complete, f, indent=2)
 
         # generate reports for MLO nodes
         loop_nodes = model.get_nodes_by_op_type("FINNLoop")
         for node in loop_nodes:
-            node_inst = getCustomOp(node)
-            loop_model = node_inst.get_nodeattr("body")
+            node_inst = cast("FINNLoop", getCustomOp(node))
+            loop_model = cast("ModelWrapper", node_inst.get_nodeattr("body"))
             ops_and_params = loop_model.analysis(op_and_param_counts)
-            with open(report_dir + f"/op_and_param_counts_{node.name}.json", "w") as f:
+            with (report_dir / f"op_and_param_counts_{node.name}.json").open("w") as f:
                 json.dump(ops_and_params, f, indent=2)
             estimate_layer_cycles = loop_model.analysis(exp_cycles_per_layer)
-            with open(report_dir + f"/estimate_layer_cycles_{node.name}.json", "w") as f:
+            with (report_dir / f"estimate_layer_cycles_{node.name}.json").open("w") as f:
                 json.dump(estimate_layer_cycles, f, indent=2)
             estimate_layer_resources = loop_model.analysis(
                 partial(res_estimation, fpgapart=cfg._resolve_fpga_part())
             )
             estimate_layer_resources["total"] = aggregate_dict_keys(estimate_layer_resources)
-            with open(report_dir + f"/estimate_layer_resources_{node.name}.json", "w") as f:
+            with (report_dir / f"estimate_layer_resources_{node.name}.json").open("w") as f:
                 json.dump(estimate_layer_resources, f, indent=2)
             estimate_layer_resources_complete = loop_model.analysis(
                 partial(res_estimation_complete, fpgapart=cfg._resolve_fpga_part())
             )
-            with open(
-                report_dir + f"/estimate_layer_config_alternatives_{node.name}.json", "w"
+            with (report_dir / f"estimate_layer_config_alternatives_{node.name}.json").open(
+                "w"
             ) as f:
                 json.dump(estimate_layer_resources_complete, f, indent=2)
 
         if not is_mlo(model):
             # need to call AnnotateCycles before dataflow_performance
             model = model.transform(AnnotateCycles())
-            estimate_network_performance = model.analysis(dataflow_performance)
+            estimate_network_performance: dict[str, str | int | float] = dict(
+                model.analysis(dataflow_performance)
+            )
             # add some more metrics to estimated performance
             n_clock_cycles_per_sec = (10**9) / cfg.synth_clk_period_ns
-            est_fps = n_clock_cycles_per_sec / estimate_network_performance["max_cycles"]
+            est_fps = n_clock_cycles_per_sec / cast(
+                "int", estimate_network_performance["max_cycles"]
+            )
             estimate_network_performance["estimated_throughput_fps"] = est_fps
             est_latency_ns = (
-                estimate_network_performance["critical_path_cycles"] * cfg.synth_clk_period_ns
+                cast("int", estimate_network_performance["critical_path_cycles"])
+                * cfg.synth_clk_period_ns
             )
             estimate_network_performance["estimated_latency_ns"] = est_latency_ns
-            with open(report_dir + "/estimate_network_performance.json", "w") as f:
+            with (report_dir / "estimate_network_performance.json").open("w") as f:
                 json.dump(estimate_network_performance, f, indent=2)
         else:
             log.warning(
@@ -1069,192 +1223,6 @@ def step_insert_dwc(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapp
     """Insert data width converters between layers where necessary."""
     model = model.transform(InsertDWC())
     return model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-
-
-@register_build_dataflow_step()
-def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Depending on the auto_fifo_depths setting, do one of the following:
-    * if auto_fifo_depths=True:  Run the appropriate auto-sizing transformation
-    to attempt to determine the FIFO sizes that provide full throughput.
-    May take a long time.
-    * if auto_fifo_depths=False:  Assume the folding config file contains FIFO
-    sizes as well. Runs the `InsertFIFO` transformation, then
-    `ApplyConfig(cfg.folding_config_file)`, and finally `RemoveShallowFIFOs`.
-    Coherency with config file node naming is ensured by calling
-    `GiveUniqueNodeNamesRecursive`.
-    """
-    hw_attrs = [
-        "PE",
-        "SIMD",
-        "EmbFold",
-        "SeqFold",
-        "parallel_window",
-        "ram_style",
-        "ram_style_thresholds",
-        "ram_style_mask",
-        "depth",
-        "impl_style",
-        "resType",
-        "mac_resource",
-        "mem_mode",
-        "runtime_writeable_weights",
-        "inFIFODepths",
-        "outFIFODepths",
-        "depth_trigger_uram",
-        "depth_trigger_bram",
-    ]
-
-    # Experimental live FIFO-sizing, overwrites all other FIFO-related behavior
-    if cfg.live_fifo_sizing:
-        # Create all DWCs and FIFOs normally
-        model = model.transform(InsertDWC())
-        model = model.transform(
-            InsertFIFO(vivado_ram_style=cfg.large_fifo_mem_style, create_shallow_fifos=True)
-        )
-
-        # Clean up model
-        model = model.transform(SortGraph())
-        model = model.transform(GiveUniqueNodeNamesRecursive())
-        model = model.transform(GiveReadableTensorNames())
-
-        # save original folding config before potentially modifying it
-        cfg_path = str(cfg.output_dir) + "/report/folding_config_before_lfs.json"
-        extract_model_config_to_json(model, cfg_path, hw_attrs)
-        model.set_metadata_prop("folding_config_before_lfs", cfg_path)
-
-        # Disable runtime-writable weights, external weights, and dynamic mode
-        for node in model.graph.node:
-            if node.domain.startswith("finn.custom_op.fpgadataflow"):
-                node_inst = getCustomOp(node)
-                try:
-                    if node_inst.get_nodeattr("runtime_writeable_weights") == 1:
-                        node_inst.set_nodeattr("runtime_writeable_weights", 0)
-                        if node_inst.get_nodeattr("ram_style") == "ultra":
-                            node_inst.set_nodeattr("ram_style", "block")
-                except AttributeError:
-                    pass
-                try:
-                    if node_inst.get_nodeattr("mem_mode") == "external":
-                        node_inst.set_nodeattr("mem_mode", "internal_decoupled")
-                except AttributeError:
-                    pass
-                try:
-                    if node_inst.get_nodeattr("dynamic_mode") == 1:
-                        node_inst.set_nodeattr("dynamic_mode", 0)
-                except AttributeError:
-                    pass
-
-        # Specialize FIFOs to RTL back-end
-        for node in model.get_nodes_by_op_type("StreamingFIFO"):
-            node_inst = getCustomOp(node)
-            node_inst.set_nodeattr("preferred_impl_style", "rtl")
-        model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-
-        # Clean up model
-        model = model.transform(SortGraph())
-        model = model.transform(GiveUniqueNodeNamesRecursive())
-        model = model.transform(GiveReadableTensorNames())
-
-        # Set impl_style + ID attributes
-        # We can't infer ID from the unique node name at IP instantiation,
-        # because the nodes will be wrapped in SDPs
-        for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
-            node_inst = getCustomOp(node)
-            idf = int(node.name.split("_")[-1])
-            node_inst.set_nodeattr("impl_style", "virtual")
-            node_inst.set_nodeattr("fifo_id", idf)
-
-        return model
-
-    if cfg.auto_fifo_depths:
-        strategy = cfg.auto_fifo_strategy
-        if strategy == "largefifo_rtlsim":
-            if cfg.fifosim_save_waveform:
-                report_dir = Path(cfg.output_dir) / "report"
-                report_dir.mkdir(parents=True, exist_ok=True)
-                model.set_metadata_prop(
-                    "rtlsim_trace", str(report_dir.resolve() / "fifosim_trace.wdb")
-                )
-            model = model.transform(
-                InsertAndSetFIFODepths(
-                    cfg._resolve_fpga_part(),
-                    cfg._resolve_hls_clk_period(),
-                    swg_exception=cfg.default_swg_exception,
-                    vivado_ram_style=cfg.large_fifo_mem_style,
-                    fifosim_input_throttle=cfg.fifosim_input_throttle,
-                    cfg_n_inferences=cfg.fifosim_n_inferences,
-                )
-            )
-            model = model.transform(GiveUniqueNodeNamesRecursive())
-            model = model.transform(GiveReadableTensorNames(), apply_to_subgraphs=True)
-            # InsertAndSetFIFODepths internally removes any shallow FIFOs
-            # so no need to call RemoveShallowFIFOs here
-        elif cfg.auto_fifo_strategy == AutoFIFOSizingMethod.DISTRIBUTED_SIMULATION:
-            # TODO: When merging into dev, this should be finalized
-            model = step_build_simulation(model, cfg)
-            model = step_size_fifo_connected(model, cfg)
-            model = step_apply_fifosizes(model, cfg)
-            return model
-        else:
-            assert "Unsupported auto_fifo_strategy: " + cfg.auto_fifo_strategy
-    else:
-        log.info("auto_fifo_depths is set to False, assume folding cfg json contains FIFO sizes.")
-        # assume folding cfg json contains FIFO sizes too
-        # insert DWCs, FIFOs and run ApplyConfig once more
-        model = model.transform(InsertDWC())
-        # need to make sure all FIFOs are created so that their depth can be
-        # set by ApplyConfig, so create_shallow_fifos=True
-        model = model.transform(InsertFIFO(create_shallow_fifos=True))
-        model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-        model = model.transform(GiveUniqueNodeNamesRecursive())
-        model = model.transform(GiveReadableTensorNames())
-        if cfg.folding_config_file is not None:
-            model = model.transform(ApplyConfig(cfg.folding_config_file))
-
-    # extract the final configuration and save it as json
-    if model.get_nodes_by_op_type("InnerShuffle_rtl") or model.get_nodes_by_op_type(
-        "OuterShuffle_hls"
-    ):
-        extract_model_config_consolidate_shuffles(
-            model, cfg.output_dir + "/report/final_hw_config.json", hw_attrs
-        )
-    else:
-        extract_model_config_to_json(
-            model, cfg.output_dir + "/report/final_hw_config.json", hw_attrs
-        )
-
-    # perform FIFO splitting and shallow FIFO removal only after the final config
-    # json file has been written. otherwise, since these transforms may add/remove
-    # FIFOs, we get name mismatch problems when trying to reuse the final config.
-    if cfg.split_large_fifos:
-        model = model.transform(SplitLargeFIFOs())
-    model = model.transform(RemoveShallowFIFOs())
-
-    # generate a dedicated report about final FIFO sizes
-    fifo_info = {}
-    fifo_info["fifo_depths"] = {}
-    fifo_info["fifo_sizes"] = {}
-    total_fifo_size = 0
-    for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
-        node_inst = getCustomOp(node)
-        fifo_info["fifo_depths"][node.name] = node_inst.get_nodeattr("depth")
-        fifo_info["fifo_sizes"][
-            node.name
-        ] = node_inst.get_instream_width() * node_inst.get_nodeattr("depth")
-        total_fifo_size += fifo_info["fifo_sizes"][node.name]
-    fifo_info["total_fifo_size_kB"] = int(total_fifo_size / 8.0 / 1000.0)
-
-    with open(cfg.output_dir + "/report/fifo_sizing.json", "w") as f:
-        json.dump(fifo_info, f, indent=2)
-
-    # With this step moved before step_hw_codegen and step_hw_ipgen, the following
-    # could be removed, but we keep it for now for backwards compatibility:
-
-    # after FIFOs are ready to go, call PrepareIP and HLSSynthIP again
-    # this will only run for the new nodes (e.g. FIFOs and DWCs)
-    model = model.transform(PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period()))
-    model = model.transform(HLSSynthIP(cfg._resolve_fpga_part()))
-    return model
 
 
 def verify_mlo(model: ModelWrapper, cfg: DataflowBuildConfig, step: str):
@@ -1361,9 +1329,9 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
     Depends on the DataflowOutputType.STITCHED_IP output product.
     """
     if DataflowOutputType.RTLSIM_PERFORMANCE in cfg.generate_outputs and not is_mlo(model):
-        assert (
-            DataflowOutputType.STITCHED_IP in cfg.generate_outputs
-        ), "rtlsim_perf needs stitched IP"
+        assert DataflowOutputType.STITCHED_IP in cfg.generate_outputs, (
+            "rtlsim_perf needs stitched IP"
+        )
         report_dir = cfg.output_dir + "/report"
         os.makedirs(report_dir, exist_ok=True)
         rtlsim_bs = int(cfg.rtlsim_batch_size)
@@ -1440,7 +1408,7 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig):
             driver_type = "FINNDMAInstrumentationOverlay"
             if cfg.instrumentation_no_dma:
                 driver_type = "FINNInstrumentationOverlay"
-            if cfg.live_fifo_sizing:
+            if cfg.auto_fifo_strategy == AutoFIFOSizingMethod.LIVE_FIFO and cfg.auto_fifo_depths:
                 driver_type = "FINNLiveFIFOOverlay"
         else:
             driver_type = "FINNDMAOverlay"

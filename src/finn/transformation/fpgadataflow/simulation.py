@@ -78,7 +78,10 @@ def store_fifo_data(
             merged = data
         else:
             merged = pd.merge(
-                data, pd.read_csv(fifo_data_path), on=merge_on, how=merge_how  # type: ignore
+                data,
+                pd.read_csv(fifo_data_path),
+                on=merge_on,
+                how=merge_how,  # type: ignore
             )
             merged = merged.sort_values(sort_on)
         merged.to_csv(fifo_data_path, index=False)
@@ -115,20 +118,20 @@ class Simulation:
         fpgapart: str,
         clk_ns: float,
         functional_sim: bool,
-        workers: int | None = None,
+        workers: int | None = None,  # noqa: ARG002
     ) -> None:
         """Create a new simulation instance. Read simulation binary paths
         from the simulation_binaries metadata prop field."""
         self.simulation_type = simulation_type
         self.model = model
-        sim_binaries = self.model.get_metadata_prop("simulation_binaries")
+        sim_binaries_str = self.model.get_metadata_prop("simulation_binaries")
 
-        if sim_binaries is None:
+        if sim_binaries_str is None:
             raise FINNUserError(
                 "No field simulation_binaries found in the model. Make "
                 "sure to run the BuildSimulation transformation beforehand."
             )
-        sim_binaries: list[Path] = [Path(p) for p in str(sim_binaries).split("\n")]
+        sim_binaries: list[Path] = [Path(p) for p in str(sim_binaries_str).split("\n")]
         if len(sim_binaries) != len(self.model.graph.node):
             raise FINNUserError(
                 "The number of found simulation binaries does not match the number "
@@ -139,9 +142,6 @@ class Simulation:
             raise FINNUserError(
                 "Simulation binary data points to invalid paths. Please rerun BuildSimulation."
             )
-        # TODO: Currently we have to recompile even if we just
-        # TODO: called BuildSimulation in the step before
-        # (However this only compiles, it should NOT stitch the IPs again)
         self.model = self.model.transform(BuildSimulation(fpgapart, clk_ns, functional_sim))
         self.binaries: dict[int, Path] = {i: sim_binaries[i] for i in range(len(sim_binaries))}
         match simulation_type:
@@ -164,10 +164,12 @@ class Simulation:
             raise FINNInternalError("Errors occurred: \n" + "\n\t".join(errors))
 
     def simulate(self) -> Any:
+        """Run the simulation and return the results.
+        The type of the results may differ based on the simulation type."""
         raise NotImplementedError("Call simulate() on subclasses.")
 
 
-class ApplyFIFOSizes(Transformation):
+class ApplySimulatedFIFOSizes(Transformation):
     """Apply a FIFO sizing configuration to the model.
     If FIFOs already exist the step is skipped."""
 
@@ -223,9 +225,15 @@ class ApplyFIFOSizes(Transformation):
             n = getCustomOp(node)
             if n is not None:
                 if predecessors is not None:
-                    n.set_nodeattr("inFIFODepths", [0] * len(predecessors))
+                    n.set_nodeattr(
+                        "inFIFODepths",
+                        cast("list[str | int | float]", [0] * len(predecessors)),
+                    )
                 if successors is not None:
-                    n.set_nodeattr("outFIFODepths", [0] * len(successors))
+                    n.set_nodeattr(
+                        "outFIFODepths",
+                        cast("list[str | int | float]", [0] * len(successors)),
+                    )
 
         # Set new outFIFODepths according to config
         graph = model.graph
@@ -246,17 +254,17 @@ class ApplyFIFOSizes(Transformation):
                     "or due to changes in the model after the simulation was run. "
                     "Consider re-running the entire flow from start to finish."
                 )
-            fifos = cast("list[int]", (self.fifo_depths[node_ind]["depths"]))
+            fifos = cast("list[str | int | float]", (self.fifo_depths[node_ind]["depths"]))
             n0.set_nodeattr("outFIFODepths", fifos)
 
         # Insert the FIFOs into the model
         model = model.transform(InsertFIFO(True, self.max_qsrl_depth, self.vivado_ram_style))
 
         model = model.transform(GiveUniqueNodeNames())
-        model: ModelWrapper = model.transform(GiveReadableTensorNames())
+        model = model.transform(GiveReadableTensorNames())
         model = model.transform(SpecializeLayers(self.cfg._resolve_fpga_part()))  # noqa
         model = model.transform(GiveUniqueNodeNames())
-        model: ModelWrapper = model.transform(GiveReadableTensorNames())
+        model = model.transform(GiveReadableTensorNames())
 
         # Sanity check to make sure fifos were inserted
         inserted_fifo_count = sum(
