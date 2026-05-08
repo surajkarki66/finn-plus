@@ -96,28 +96,7 @@ class ApplyFIFODepthsFromFile(Transformation):
             graph_modified = True
         return (model, graph_modified)
 
-
-class SplitLargeFIFOs(Transformation):
-    """Split large FIFOs before implementation, for two reasons.
-
-    - impl_style="vivado" supports a max depth of 32k. Any larger
-      FIFOs must be implemented as a sequence of smaller FIFOs.
-    - impl_style="vivado" requires power-of-two depths, which is
-      normally handled by rounding up to the nearest power-of-two.
-      So a FIFO of size 8196 normally gets rounded-up to a depth of
-      16384 and wastes a lot of resources. Here, instead, we split
-      this up into two FIFOs of depth 8192 + 4.
-
-    """
-
-    def __init__(self, max_qsrl_depth: int = 256, max_vivado_depth: int = 32768) -> None:
-        """Initialize SplitLargeFIFOs with maximum FIFO depth constraints."""
-        super().__init__()
-        self.max_qsrl_depth = max_qsrl_depth
-        self.max_vivado_depth = max_vivado_depth
-
-    def get_fifo_split_configs(
-        self, depth: int, max_qsrl_depth: int = 256, max_vivado_depth: int = 32768
+def get_fifo_split_configs(depth: int, max_qsrl_depth: int = 256, max_vivado_depth: int = 32768
     ) -> list[tuple[int, str]]:
         """Break non-power-of-2 sized FIFO depths into several ones."""
 
@@ -169,6 +148,25 @@ class SplitLargeFIFOs(Transformation):
 
         return ret_final
 
+class SplitLargeFIFOs(Transformation):
+    """Split large FIFOs before implementation, for two reasons.
+
+    - impl_style="vivado" supports a max depth of 32k. Any larger
+      FIFOs must be implemented as a sequence of smaller FIFOs.
+    - impl_style="vivado" requires power-of-two depths, which is
+      normally handled by rounding up to the nearest power-of-two.
+      So a FIFO of size 8196 normally gets rounded-up to a depth of
+      16384 and wastes a lot of resources. Here, instead, we split
+      this up into two FIFOs of depth 8192 + 4.
+
+    """
+
+    def __init__(self, max_qsrl_depth: int = 256, max_vivado_depth: int = 32768) -> None:
+        """Initialize SplitLargeFIFOs with maximum FIFO depth constraints."""
+        super().__init__()
+        self.max_qsrl_depth = max_qsrl_depth
+        self.max_vivado_depth = max_vivado_depth
+
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, Literal[False]]:
         """Split large FIFOs into chains of smaller power-of-two FIFOs."""
         graph = model.graph
@@ -177,7 +175,7 @@ class SplitLargeFIFOs(Transformation):
             if node.op_type == ("StreamingFIFO_rtl"):
                 n_inst = getHWCustomOp(node)
                 depth = cast("int", n_inst.get_nodeattr("depth"))
-                cfgs = self.get_fifo_split_configs(
+                cfgs = get_fifo_split_configs(
                     depth, self.max_qsrl_depth, self.max_vivado_depth
                 )
                 if len(cfgs) > 1:

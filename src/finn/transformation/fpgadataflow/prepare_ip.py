@@ -1,3 +1,4 @@
+"""Module which implements the PrepareIP transformation, which generates the code for each node."""
 # Copyright (C) 2020, Xilinx, Inc.
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 # All rights reserved.
@@ -55,7 +56,6 @@ def _codegen_single_node(
         inst = cast("RTLBackend|HLSBackend", getHWCustomOp(node))
         # get the path of the code generation directory
         code_gen_dir = cast("str", inst.get_nodeattr("code_gen_dir_ipgen"))
-        print(f"Code generation directory for node {node.name}: {code_gen_dir}")
         # ensure that there is a directory
         if code_gen_dir == "" or not Path(code_gen_dir).is_dir():
             code_gen_dir = make_build_dir(prefix="code_gen_ipgen_" + str(node.name) + "_")
@@ -64,7 +64,6 @@ def _codegen_single_node(
             inst.code_generation_ipgen(model, fpgapart, clk)
         else:
             log.debug(f"Using cached code for {node.name}")
-            print(f"Using cached code for node {node.name}...")
     except KeyError:
         # exception if op_type is not supported
         raise FINNUserError(f"Custom op_type {op_type} is currently not supported.") from None

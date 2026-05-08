@@ -194,7 +194,7 @@ class RemoveDataPath_rtl(RTLBackend):
                 f"normal_shape attribute is empty in {self.onnx_node.name}, "
                 "cannot get normal input shape"
             )
-        if type(normal_shape[0]) is not int:
+        if not isinstance(normal_shape[0], int) and not isinstance(normal_shape[0], np.integer):
             raise FINNInternalError(
                 f"normal_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get normal input shape"
@@ -242,7 +242,7 @@ class RemoveDataPath_rtl(RTLBackend):
                 f"folded_shape attribute is empty in {self.onnx_node.name}, "
                 "cannot get folded input shape"
             )
-        if type(folded_shape[0]) is not int:
+        if not isinstance(folded_shape[0], int) and not isinstance(folded_shape[0], np.integer):
             raise FINNInternalError(
                 f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get folded input shape"
@@ -290,7 +290,7 @@ class RemoveDataPath_rtl(RTLBackend):
                 f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get outstream width"
             )
-        if not isinstance(folded_shape[-1], int) or not isinstance(folded_shape[-1], np.integer):
+        if not isinstance(folded_shape[-1], int) and not isinstance(folded_shape[-1], np.integer):
             raise FINNInternalError(
                 f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get outstream width"
@@ -328,10 +328,10 @@ class RemoveDataPath_rtl(RTLBackend):
                 f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
                 "cannot get outstream width"
             )
-        if not isinstance(folded_shape[-1], int) or not isinstance(folded_shape[-1], np.integer):
+        if not isinstance(folded_shape[-1], int) and not isinstance(folded_shape[-1], np.integer):
             raise FINNInternalError(
                 f"folded_shape attribute not set correctly in {self.onnx_node.name}, "
-                "cannot get outstream width"
+                f"cannot get outstream width"
             )
         in_width = cast("int|np.integer", folded_shape[-1]) * dtype.bitwidth()
         return in_width

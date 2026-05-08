@@ -427,8 +427,6 @@ class SimulationBuilder:
         node_model.set_metadata_prop("input_node", str(input_node).lower())
         node_model.set_metadata_prop("output_node", str(output_node).lower())
 
-        node_model.save(f"isolated_node_{target_node.name}.onnx")
-
         return node_model
 
     def _get_stream_descriptions(self, model: ModelWrapper) -> tuple[str, str]:
