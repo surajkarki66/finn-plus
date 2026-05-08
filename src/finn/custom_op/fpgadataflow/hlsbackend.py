@@ -37,9 +37,9 @@ from qonnx.core.datatype import DataType
 from finn import xsi
 from finn.custom_op.fpgadataflow import templates
 from finn.templates import get_templates_folder
-from finn.util.basic import CppBuilder, launch_process_helper, make_build_dir
+from finn.util.basic import MAX_ALLOWED_APT_INT_W, CppBuilder, launch_process_helper, make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
-from finn.util.exception import FINNError, FINNUserError
+from finn.util.exception import FINNError, FINNInternalError, FINNUserError
 from finn.util.hls import CallHLS
 from finn.util.logging import log
 from finn.util.settings import get_settings
@@ -651,7 +651,13 @@ compilation transformations?
         instream = self.get_instream_width()
         outstream = self.get_outstream_width()
         ret = max([instream, outstream])
-        assert ret <= 8191, "AP_INT_MAX_W=%d is larger than allowed maximum of 8191" % ret
+        if ret > MAX_ALLOWED_APT_INT_W:
+            raise FINNInternalError(
+                f"The HLS top module of node "
+                f"{self.onnx_node.name} "
+                f"requires AP_INT_MAX_W to be set "
+                f"to {ret}, but the maximum allowed is {MAX_ALLOWED_APT_INT_W}."
+            )
         return ret
 
     def timeout_value(self):
