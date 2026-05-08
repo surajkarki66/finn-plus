@@ -340,8 +340,8 @@ compilation transformations?
         return "V"
 
     def execute_node(
-        self, context: dict[str, np.ndarray], graph: "GraphProto"
-    ) -> None:  # noqa: ARG002
+        self, context: dict[str, np.ndarray], graph: "GraphProto"  # noqa: ARG002
+    ) -> None:
         """Execute node in specified mode (cppsim or rtlsim)."""
         mode = self.get_nodeattr("exec_mode")
         node = self.onnx_node
