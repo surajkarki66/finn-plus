@@ -36,11 +36,13 @@ dataflow architectures.
 import numpy as np
 import os
 from qonnx.core.datatype import DataType
+from typing import Literal
 
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.custom_op.fpgadataflow.vectorvectoractivation import VVAU
 from finn.util.basic import is_versal
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
+from finn.util.exception import FINNUserError
 from finn.util.settings import get_settings
 
 
@@ -138,9 +140,7 @@ class VVAU_rtl(VVAU, RTLBackend):
                     # so use it as such for weight generation
                     if self.get_input_datatype(1) == DataType["BIPOLAR"]:
                         export_wdt = DataType["BINARY"]
-                    wei = npy_to_rtlsim_input(
-                        f"{code_gen_dir}/weights.npy", export_wdt, wnbits
-                    )
+                    wei = npy_to_rtlsim_input(f"{code_gen_dir}/weights.npy", export_wdt, wnbits)
                     dim_h, dim_w = self.get_nodeattr("Dim")
                     num_w_reps = dim_h * dim_w
 
@@ -174,7 +174,7 @@ class VVAU_rtl(VVAU, RTLBackend):
             has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
-    def lut_estimation(self):
+    def lut_estimation(self) -> Literal[0]:
         """Estimate LUT utilization for this VVAU node.
 
         Returns
@@ -184,7 +184,7 @@ class VVAU_rtl(VVAU, RTLBackend):
         """
         return 0
 
-    def dsp_estimation(self, fpgapart):
+    def dsp_estimation(self, fpgapart: str) -> int:
         """Estimate DSP utilization for this VVAU node.
 
         Parameters
@@ -201,7 +201,7 @@ class VVAU_rtl(VVAU, RTLBackend):
         Q = self.get_nodeattr("SIMD")
         return int(P * np.ceil(Q / 3))
 
-    def instantiate_ip(self, cmd):
+    def instantiate_ip(self, cmd) -> None:
         """Add RTL IP instantiation commands to Vivado script.
 
         Parameters
@@ -334,7 +334,7 @@ class VVAU_rtl(VVAU, RTLBackend):
         dsp_chain_len = critical_path_dsps if critical_path_dsps < max_chain_len else max_chain_len
         return dsp_chain_len
 
-    def _resolve_dsp_version(self, fpgapart):
+    def _resolve_dsp_version(self, fpgapart: str) -> Literal[3]:
         """Resolve DSP version based on target FPGA part.
 
         Parameters
@@ -349,19 +349,22 @@ class VVAU_rtl(VVAU, RTLBackend):
 
         Raises
         ------
-        AssertionError
+        FINNUserError
             If LUT-based compute or non-Versal device is targeted
         """
         # Based on target device and activation/weight-width, choose the
         # supported RTL compute core
-        assert (
-            self.get_nodeattr("resType") != "lut"
-        ), f"""LUT-based RTL-VVU implementation currently not supported!
-        Please change resType for {self.onnx_node.name} to 'dsp' or consider switching to HLS-based VVAU!"""
+        if self.get_nodeattr("resType") == "lut":
+            raise FINNUserError(
+                f"""LUT-based RTL-VVU implementation currently not supported!
+            Please change resType for {self.onnx_node.name} "
+            f"to 'dsp' or consider switching to HLS-based VVAU!"""
+            )
         is_versal_family = is_versal(fpgapart)
-        assert (
-            is_versal_family
-        ), "DSP-based (RTL) VVU currently only supported on Versal (DSP58) devices"
+        if not is_versal_family:
+            raise FINNUserError(
+                "DSP-based (RTL) VVU currently only supported on Versal (DSP58) devices"
+            )
 
         return 3
 

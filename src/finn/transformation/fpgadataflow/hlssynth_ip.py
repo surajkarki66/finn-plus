@@ -29,14 +29,14 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import qonnx.custom_op.registry as registry
-from qonnx.transformation.base import NodeLocalTransformation
-from typing import Literal, cast, TYPE_CHECKING
+from onnx import NodeProto
 from pathlib import Path
+from qonnx.transformation.base import NodeLocalTransformation
+from typing import TYPE_CHECKING, Literal, cast
 
+from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.fpgadataflow import is_hls_node
 from finn.util.logging import log
-from finn.util.exception import FINNUserError, FINNInternalError
-from onnx import NodeProto
 
 if TYPE_CHECKING:
     from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend

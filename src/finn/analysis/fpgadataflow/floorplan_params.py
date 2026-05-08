@@ -28,14 +28,15 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from qonnx.custom_op.registry import getCustomOp
-from finn.util.fpgadataflow import is_fpgadataflow_node
 from typing import TYPE_CHECKING, cast
+
+from finn.util.fpgadataflow import is_fpgadataflow_node
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
 
 
-def floorplan_params(model:"ModelWrapper"):
+def floorplan_params(model: "ModelWrapper"):
     """Gathers SLR and partition IDs from nodes.
 
     Returns {node name : {slr, device id, partition id, memory port}}."""

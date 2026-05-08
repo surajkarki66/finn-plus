@@ -42,7 +42,7 @@ def unsupported_layers(
             sink_nodes.append(n)
 
     # BFS to check paths
-    queue : deque[tuple[NodeProto, bool, bool]] = deque()
+    queue: deque[tuple[NodeProto, bool, bool]] = deque()
     # Track (node_id, in_green_section, has_seen_complete_green_section)
     visited = []
 

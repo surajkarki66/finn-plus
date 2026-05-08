@@ -56,8 +56,9 @@ from finn.util.logging import log
 from finn.util.settings import get_settings
 
 if TYPE_CHECKING:
-    from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
     from onnx import NodeProto
+
+    from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 
 # test boards used for bnn pynq tests
 test_board_map = ["Pynq-Z1", "KV260_SOM", "ZCU104", "U55C"]
@@ -116,6 +117,7 @@ part_map["V80"] = "xcv80-lsva4737-2MHP-e-s"
 def getHWCustomOp(node: "NodeProto") -> "HWCustomOp":  # noqa: N802
     """Get the HWCustomOp from a node. Throws an error if the node is not an HWCustomOp."""
     from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
+
     n = getCustomOp(node)
     if not isinstance(n, HWCustomOp):
         raise FINNInternalError(f"Node {node.name} is not an HWCustomOp")

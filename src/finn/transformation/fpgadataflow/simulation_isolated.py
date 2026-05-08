@@ -598,9 +598,7 @@ class RunLayerIsolatedSimulation(Transformation):
                         # TODO: Tests
                         edited_bounds[predecessor.name][producer_idx] = in_fifo_upper_bound[
                             node.name
-                        ][
-                            key
-                        ]
+                        ][key]
                         log.info(
                             f"Incoming FIFO {node.name}[{key}/{consumer_idx}] "
                             f"-> outgoing FIFO {predecessor.name}[{producer_idx}]"

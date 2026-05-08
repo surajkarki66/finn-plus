@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # ##########################################################################
-"""FINN XSI (Xilinx Simulation Interface) support module
+"""FINN XSI (Xilinx Simulation Interface) support module.
 
 This module provides utilities for RTL simulation support via finn_xsi.
 The finn_xsi extension must be built separately using the setup command.
@@ -18,10 +18,11 @@ Usage:
         import finn_xsi.adapter
 """
 
+import contextlib
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from finn.util.logging import log
 
 
@@ -137,10 +138,8 @@ def _load_modules() -> bool:
     finally:
         # Remove from path if we added it
         if path_added and str(xsi_path) in sys.path:
-            try:
+            with contextlib.suppress(ValueError):
                 sys.path.remove(str(xsi_path))
-            except ValueError:
-                pass  # Path was already removed somehow
 
 
 # List of functions to wrap from finn_xsi.adapter
@@ -174,13 +173,13 @@ def __getattr__(name: str) -> Any:
 class SimEngine:
     """Wrapper for finn_xsi.sim_engine.SimEngine."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         """Create a new SimEngine."""
         if not _load_modules():
             raise ImportError("finn_xsi not available. Run: python -m finn.xsi.setup")
         self._engine = _sim_engine_module.SimEngine(*args, **kwargs)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         """Get attribute of the given name."""
         return getattr(self._engine, name)
 

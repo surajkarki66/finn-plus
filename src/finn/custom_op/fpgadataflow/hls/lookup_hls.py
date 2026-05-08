@@ -187,8 +187,7 @@ class Lookup_hls(Lookup, HLSBackend):
             ext_mem_width = self.get_nodeattr("ext_mem_width")
             assert edt.bitwidth() == 8, (
                 "Lookup with mem_mode=external "
-                 "only works with 8-bit embeddings but found "
-                + str(edt)
+                "only works with 8-bit embeddings but found " + str(edt)
             )
             emb_dim = self.get_nodeattr("EmbeddingDim")
             # need to zero-pad embeddings in external mode for burst alignment

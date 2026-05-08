@@ -25,19 +25,19 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-from pathlib import Path
 import qonnx.custom_op.registry as registry
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from finn.util.fpgadataflow import is_hls_node
 from finn.util.logging import log
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
 
 
-def hls_synth_res_estimation(model:"ModelWrapper") -> dict[str, dict[str, int]]:
+def hls_synth_res_estimation(model: "ModelWrapper") -> dict[str, dict[str, int]]:
     """Extract the FPGA resource results from the Vitis HLS synthesis estimates.
     Note that this analysis pass only works on nodes that have an HLS backend.
     Ensure that all nodes have unique names (by calling the GiveUniqueNodeNames

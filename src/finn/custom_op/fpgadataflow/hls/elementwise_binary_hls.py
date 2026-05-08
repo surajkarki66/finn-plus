@@ -1210,4 +1210,3 @@ class ElementwiseMax_hls(
     elementwise_binary.ElementwiseMax,
 ):
     """HLS Implementation of the elementwise max operation."""
-

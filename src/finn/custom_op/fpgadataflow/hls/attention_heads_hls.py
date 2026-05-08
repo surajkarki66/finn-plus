@@ -8,12 +8,11 @@ import numpy as np
 # Operating system stuff, e.g. paths
 import os
 
+# The generic HW custom operator version of the operator as a base class
+from finn.custom_op.fpgadataflow.attention_heads import MergeMultiHeads, SplitMultiHeads
+
 # Base class for specializing HW operators as implemented via HLS
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
-# The generic HW custom operator version of the operator as a base class
-from finn.custom_op.fpgadataflow.attention_heads import (
-    MergeMultiHeads, SplitMultiHeads
-)
 
 
 # HLS Backend specialization of the multi-head attention splitting operator

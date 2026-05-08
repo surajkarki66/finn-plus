@@ -28,20 +28,20 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from pathlib import Path
-from typing import Literal, cast, TYPE_CHECKING
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
+from typing import TYPE_CHECKING, Literal, cast
 
-from finn.util.basic import make_build_dir
+from finn.util.basic import getHWCustomOp, make_build_dir
+from finn.util.exception import FINNUserError
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 from finn.util.logging import log
-from finn.util.exception import FINNUserError
-from finn.util.basic import getHWCustomOp
 
 if TYPE_CHECKING:
+    from onnx import NodeProto
+
     from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
     from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
-    from onnx import NodeProto
 
 
 def _codegen_single_node(

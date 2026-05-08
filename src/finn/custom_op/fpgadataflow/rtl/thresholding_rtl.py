@@ -385,9 +385,7 @@ class Thresholding_rtl(Thresholding, RTLBackend):
 
             sim = self.get_rtlsim()
             nbits = self.get_instream_width()
-            rtlsim_inp = npy_to_rtlsim_input(
-                f"{code_gen_dir}/input_0.npy", export_idt, nbits
-            )
+            rtlsim_inp = npy_to_rtlsim_input(f"{code_gen_dir}/input_0.npy", export_idt, nbits)
             io_dict = {
                 "inputs": {"in0": rtlsim_inp},
                 "outputs": {"out0": []},

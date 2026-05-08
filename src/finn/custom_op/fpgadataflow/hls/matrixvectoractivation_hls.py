@@ -29,12 +29,16 @@
 import math
 import numpy as np
 import os
-from qonnx.core.datatype import DataType
+from qonnx.core.datatype import BaseDataType, DataType
+from typing import TYPE_CHECKING
 
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 from finn.custom_op.fpgadataflow.matrixvectoractivation import MVAU
 from finn.util.basic import is_versal
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
+
+if TYPE_CHECKING:
+    from qonnx.core.modelwrapper import ModelWrapper
 
 # ONNX i/o tensor shape assumptions for MatrixVectorActivation_hls:
 # input 0 is the input tensor, shape (.., i_size) = (..., MW)
@@ -406,7 +410,8 @@ class MVAU_hls(MVAU, HLSBackend):
         mem_mode = self.get_nodeattr("mem_mode")
         if mem_mode == "internal_embedded":
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-                f"""void {self.onnx_node.name}(hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
+                f"""void {self.onnx_node.name}(
+                    hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
                     hls::stream<ap_uint<{self.get_outstream_width()}>> &out0_V
                     )"""
             ]
@@ -616,7 +621,7 @@ class MVAU_hls(MVAU, HLSBackend):
             has to be set to one of the following value ("cppsim", "rtlsim")"""
             )
 
-    def minimize_weight_bit_width(self, model):
+    def minimize_weight_bit_width(self, model: "ModelWrapper") -> BaseDataType:
         """Minimize weight and threshold datatypes, with HLS-specific adjustments.
 
         The HLS implementation uses the threshold datatype for comparisons.

@@ -31,9 +31,9 @@
 # aximm simulation tasks for handling the aximm interfaces.
 
 import numpy as np
+from collections.abc import Callable
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
-from collections.abc import Callable
 
 from finn import xsi
 

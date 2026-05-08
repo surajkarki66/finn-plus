@@ -1,8 +1,7 @@
 """Dummy class to mock the HBM interface for simulation purposes."""
 
-from pathlib import Path
-
 from jinja2 import Environment
+from pathlib import Path
 
 from finn.util.settings import get_settings
 

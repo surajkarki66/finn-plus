@@ -63,7 +63,7 @@ class HWCustomOp(CustomOp):
     when writing a new fpgadataflow custom op node.
     """
 
-    def __init__(self, onnx_node: NodeProto, **kwargs: Any) -> None:
+    def __init__(self, onnx_node: NodeProto, **kwargs: int) -> None:
         """Initialize HWCustomOp with an ONNX node.
 
         Args:
@@ -339,7 +339,7 @@ class HWCustomOp(CustomOp):
         are there and that particular attributes are set correctly. Can also
         check if the number of inputs is equal to the expected number."""
 
-    def generate_params(self, model: Any, path: str) -> None:
+    def generate_params(self, model: "ModelWrapper", path: str | Path) -> None:
         """Generate parameters (i.e. weights and thresholds).
 
         Member function of HWCustomOp class that must be implemented by every node

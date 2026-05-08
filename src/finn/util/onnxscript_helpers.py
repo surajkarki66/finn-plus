@@ -178,9 +178,7 @@ class PytorchHierarchyNode:
         return True
 
     # Return all nodes from the given name hierarchy on down
-    def get_nodes(
-        self, search_hierarchy: list[str], instance_hierarchy: list[str] | None = None
-    ):
+    def get_nodes(self, search_hierarchy: list[str], instance_hierarchy: list[str] | None = None):
         if instance_hierarchy is None:
             instance_hierarchy = []
 

@@ -138,8 +138,8 @@ class FINNDMAOverlay(Overlay):
             hw_ext_weights = self.io_shape_dict["number_of_external_weights"]
             assert len(self.external_weights) == hw_ext_weights, (
                 "Number of hardware external weights and number of external "
-                 "weight tensors available do not match. \n"
-                 "Is runtime_weight_dir pointing to the correct folder?"
+                "weight tensors available do not match. \n"
+                "Is runtime_weight_dir pointing to the correct folder?"
             )
 
     def load_runtime_weights(self, flush_accel=True, verify=True):

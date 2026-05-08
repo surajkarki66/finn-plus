@@ -34,13 +34,19 @@ various weight memory modes.
 """
 
 import numpy as np
+import numpy.typing as npt
 import os
+from typing import TYPE_CHECKING, Literal
 
 from finn.custom_op.fpgadataflow.matrixvectoractivation import MVAU
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.util.basic import get_dsp_block, is_versal
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
+from finn.util.exception import FINNUserError
 from finn.util.settings import get_settings
+
+if TYPE_CHECKING:
+    from onnx import NodeProto
 
 # ONNX i/o tensor shape assumptions for MatrixVectorActivation_rtl:
 # input 0 is the input tensor, shape (.., i_size) = (..., MW)
@@ -52,7 +58,7 @@ from finn.util.settings import get_settings
 class MVAU_rtl(MVAU, RTLBackend):
     """Class that corresponds to finn-rtl Matrix Vector Unit."""
 
-    def __init__(self, onnx_node, **kwargs):
+    def __init__(self, onnx_node: "NodeProto", **kwargs: int) -> None:
         """Initialize the RTL Matrix Vector Activation Unit.
 
         Parameters
@@ -64,7 +70,13 @@ class MVAU_rtl(MVAU, RTLBackend):
         """
         super().__init__(onnx_node, **kwargs)
 
-    def get_nodeattr_types(self):
+    def get_nodeattr_types(
+        self,
+    ) -> dict[
+        str,
+        tuple[str, bool, int | float | str | bool | npt.NDArray | list]
+        | tuple[str, bool, int | float | str | bool | npt.NDArray | list, set | None],
+    ]:
         """Get dictionary of attribute names and their types for this node.
 
         Returns
@@ -73,7 +85,11 @@ class MVAU_rtl(MVAU, RTLBackend):
             Dictionary mapping attribute names to type specifications,
             including pumpedCompute for double-pumped DSP operation
         """
-        my_attrs = {
+        my_attrs: dict[
+            str,
+            tuple[str, bool, int | float | str | bool | npt.NDArray | list]
+            | tuple[str, bool, int | float | str | bool | npt.NDArray | list, set | None],
+        ] = {
             # Double-pumped DSPs enabled
             "pumpedCompute": ("i", False, 0, {0, 1}),
         }
@@ -127,12 +143,11 @@ class MVAU_rtl(MVAU, RTLBackend):
                         reshaped_input,
                     )
 
-                if in_ind == 1:
-                    if dynamic_input or self.get_nodeattr("mlo_max_iter"):
-                        reshaped_input = context[inputs].reshape(-1, context[inputs].shape[-1])
-                        self.make_weight_file(
-                            reshaped_input, "decoupled_npy", f"{code_gen_dir}/input_1.npy"
-                        )
+                if in_ind == 1 and (dynamic_input or self.get_nodeattr("mlo_max_iter")):
+                    reshaped_input = context[inputs].reshape(-1, context[inputs].shape[-1])
+                    self.make_weight_file(
+                        reshaped_input, "decoupled_npy", f"{code_gen_dir}/input_1.npy"
+                    )
 
             sim = self.get_rtlsim()
             nbits = self.get_instream_width()
@@ -323,7 +338,7 @@ class MVAU_rtl(MVAU, RTLBackend):
         dsp_chain_len = critical_path_dsps if critical_path_dsps < max_chain_len else max_chain_len
         return dsp_chain_len
 
-    def _resolve_dsp_version(self, dsp_block):
+    def _resolve_dsp_version(self, dsp_block: str) -> Literal[3, 2, 1]:
         """Resolve DSP version based on target FPGA device.
 
         Selects the appropriate RTL compute core version for the target DSP type.
@@ -340,10 +355,12 @@ class MVAU_rtl(MVAU, RTLBackend):
         """
         # Based on target device and activation/weight-width, choose the
         # supported RTL compute core
-        assert (
-            self.get_nodeattr("resType") != "lut"
-        ), f"""LUT-based RTL-MVU implementation currently not supported!
-        Please change resType for {self.onnx_node.name} to 'dsp' or consider switching to HLS-based MVAU!"""
+        if self.get_nodeattr("resType") == "lut":
+            raise FINNUserError(
+                f"LUT-based RTL-MVU implementation currently not supported!"
+                f"Please change resType for {self.onnx_node.name} to 'dsp' "
+                f"or consider switching to HLS-based MVAU!"
+            )
 
         match dsp_block:
             case "DSP58":

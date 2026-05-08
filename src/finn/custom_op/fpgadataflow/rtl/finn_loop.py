@@ -28,10 +28,10 @@
 
 import copy
 import math
-import re
 import numpy as np
 import numpy.typing as npt
 import os
+import re
 import shutil
 import subprocess
 from onnx import GraphProto
@@ -66,7 +66,9 @@ def collect_ip_dirs(model, ipstitch_path):
     for node in model.graph.node:
         node_inst = getCustomOp(node)
         ip_dir_value = node_inst.get_nodeattr("ip_path")
-        assert os.path.isdir(ip_dir_value), """The directory that should
+        assert os.path.isdir(
+            ip_dir_value
+        ), """The directory that should
         contain the generated ip blocks doesn't exist."""
         ip_dirs += [ip_dir_value]
         if node.op_type.startswith("MVAU") or node.op_type == "Thresholding_hls":

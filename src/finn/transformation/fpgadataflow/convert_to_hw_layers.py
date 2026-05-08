@@ -1234,9 +1234,7 @@ class InferPool(Transformation):
                     accum_bits = inst.get_accum_size()
 
                 else:
-                    raise Exception(
-                        f"pad_value and pool_fxn not configured for {node.op_type}"
-                    )
+                    raise Exception(f"pad_value and pool_fxn not configured for {node.op_type}")
 
                 # format input tensor
                 im2col_node = helper.make_node(

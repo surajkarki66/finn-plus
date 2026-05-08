@@ -55,8 +55,8 @@ from finn.transformation.fpgadataflow.replace_verilog_relpaths import ReplaceVer
 from finn.util.basic import launch_process_helper, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
-from finn.util.logging import log
 from finn.util.hbm_mock import HBMDummy
+from finn.util.logging import log
 
 
 def is_external_input(model: ModelWrapper, node: "NodeProto", i: int) -> bool:

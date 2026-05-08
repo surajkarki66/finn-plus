@@ -29,7 +29,7 @@
 import math
 import numpy as np
 import os
-from qonnx.core.datatype import DataType
+from qonnx.core.datatype import BaseDataType, DataType
 
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 from finn.custom_op.fpgadataflow.vectorvectoractivation import VVAU
@@ -455,14 +455,15 @@ class VVAU_hls(VVAU, HLSBackend):
             )
         ]
 
-    def save_as_npy(self):
+    def save_as_npy(self) -> None:
         self.code_gen_dict["$SAVEASCNPY$"] = []
 
-    def blackboxfunction(self):
+    def blackboxfunction(self) -> None:
         mem_mode = self.get_nodeattr("mem_mode")
         if mem_mode == "internal_embedded":
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
-                f"""void {self.onnx_node.name}(hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
+                f"""void {self.onnx_node.name}(
+                hls::stream<ap_uint<{self.get_instream_width(0)}>> &in0_V,
                 hls::stream<ap_uint<{self.get_outstream_width()}>> &out0_V
                 )"""
             ]
@@ -480,7 +481,7 @@ class VVAU_hls(VVAU, HLSBackend):
                     currently no other parameter value is supported!"""
             )
 
-    def pragmas(self):
+    def pragmas(self) -> None:
         mem_mode = self.get_nodeattr("mem_mode")
         self.code_gen_dict["$PRAGMAS$"] = ["#pragma HLS INTERFACE axis port=in0_V"]
         self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS INTERFACE axis port=out0_V")
@@ -510,7 +511,7 @@ class VVAU_hls(VVAU, HLSBackend):
                 "#pragma HLS ARRAY_PARTITION variable=threshs.m_thresholds complete dim=3"
             )
 
-    def minimize_weight_bit_width(self, model):
+    def minimize_weight_bit_width(self, model) -> BaseDataType:
         """Minimize weight and threshold datatypes, with HLS-specific adjustments.
 
         The HLS implementation uses the threshold datatype for comparisons.

@@ -1000,8 +1000,7 @@ def permute_shape(shape, perm):
 
 
 class MoveScalarLinearPastSplit(Transformation):
-    """Move scalar Mul and Add nodes past channel split operation.
-    """
+    """Move scalar Mul and Add nodes past channel split operation."""
 
     def __init__(self):
         super().__init__()
@@ -1568,8 +1567,7 @@ class MoveTransposePastJoinConcat(MoveIdenticalOpPastJoinOp):
 
 
 class MoveAffinePastJoinConcat(MoveIdenticalOpPastJoinOp):
-    """Applies to scalar linear or channelwise affine ops with the same parameter value
-    """
+    """Applies to scalar linear or channelwise affine ops with the same parameter value"""
 
     def __init__(self, linear_ops=["Mul", "Add"]):
         super().__init__(linear_ops, ["Concat"])

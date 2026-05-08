@@ -187,9 +187,7 @@ class Requant_rtl(Requant, RTLBackend):
             reshaped_input = inp_val.reshape(folded_ishape)
             np.save(os.path.join(code_gen_dir, "input_0.npy"), reshaped_input)
             nbits = self.get_instream_width(0)
-            rtlsim_inp = npy_to_rtlsim_input(
-                f"{code_gen_dir}/input_0.npy", export_idt, nbits
-            )
+            rtlsim_inp = npy_to_rtlsim_input(f"{code_gen_dir}/input_0.npy", export_idt, nbits)
 
             io_dict = {
                 "inputs": {"in0": rtlsim_inp},

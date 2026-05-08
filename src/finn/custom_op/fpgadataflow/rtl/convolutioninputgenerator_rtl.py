@@ -41,6 +41,7 @@ from qonnx.custom_op.general import im2col
 from qonnx.custom_op.general.im2col import compute_conv_output_dim
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.util.basic import roundup_to_integer_multiple
+from typing import Literal
 
 from finn.custom_op.fpgadataflow.convolutioninputgenerator import ConvolutionInputGenerator
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
@@ -764,11 +765,13 @@ class ConvolutionInputGenerator_rtl(ConvolutionInputGenerator, RTLBackend):
         code_gen_dict["$GENERATE_OUTPUT_MAPPING$"] = []
         out_idx = mmv_out - 1
         for fifo_id, reg_fifo in enumerate(reg_fifos):
-            for fifo_idx, access_idx in enumerate(reg_fifo):
+            for _fifo_idx, access_idx in enumerate(reg_fifo):
                 if access_idx != -1:
                     code_gen_dict["$GENERATE_OUTPUT_MAPPING$"].append(
                         f"""assign data_out[OUT_ELEM_WIDTH*{out_idx}+:OUT_ELEM_WIDTH]
-                        = reg_fifo_{fifo_id}[{len(reg_fifo) - 1 - int((max(reg_fifo) - access_idx) / M)}*{M}*OUT_ELEM_WIDTH+
+                        = reg_fifo_{fifo_id}[
+                        {len(reg_fifo) - 1 - int((max(reg_fifo) - access_idx) / M)}
+                        *{M}*OUT_ELEM_WIDTH+
                         OUT_ELEM_WIDTH*{(max(reg_fifo) - access_idx) % M}+:OUT_ELEM_WIDTH];"""
                     )
                     # reversal: out_idx=0 -> oldest buffer element -> highest access_idx
@@ -798,7 +801,7 @@ class ConvolutionInputGenerator_rtl(ConvolutionInputGenerator, RTLBackend):
 
         return template_path, code_gen_dict
 
-    def select_impl_style(self):
+    def select_impl_style(self) -> Literal["parallel", "default"]:
         """Select implementation style based on folding configuration."""
         simd = self.get_nodeattr("SIMD")
         M = self.get_nodeattr("M")

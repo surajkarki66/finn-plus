@@ -171,10 +171,10 @@ always @(posedge ap_clk) begin
 				// WLAST mismatch - protocol error detected
 				// Continue anyway (lenient slave behavior)
 			end
-			
+
 			// Always increment beat counter each write beat
 			write_beat_idx <= write_beat_idx + 8'd1;
-			
+
 			// Track when all expected beats received
 			if ((write_beat_idx + 8'd1) == (write_len + 8'd1)) begin
 				write_all_beats_received <= 1'b1;

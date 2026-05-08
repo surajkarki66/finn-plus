@@ -32,8 +32,7 @@ if TYPE_CHECKING:
 
 
 def get_constant_from_value(value):
-    """Get the constant value of a tensor.
-    """
+    """Get the constant value of a tensor."""
     # Handle input and/or inititalizer values
     if value.producer() is None:
         return value.const_value.numpy()
@@ -42,8 +41,7 @@ def get_constant_from_value(value):
 
 
 def same_values(inputs):
-    """Check if all inputs have the same constant value.
-    """
+    """Check if all inputs have the same constant value."""
     if not inputs:
         return False
 
@@ -72,16 +70,12 @@ def build_loop_replace_pattern(graph, LoopBody):
             for node in nodes:
                 if node.inputs[i].shape != g_shape:
                     log.warning(
-
-                            f"LoopRolling: Index {i} expected shape {g_shape}, "
-                            f"got {node.inputs[i].shape}."
-
+                        f"LoopRolling: Index {i} expected shape {g_shape}, "
+                        f"got {node.inputs[i].shape}."
                     )
                     raise Exception(
-
-                            "LoopRolling: all loop-body initializers of the same index "
-                            "must have the same shape."
-
+                        "LoopRolling: all loop-body initializers of the same index "
+                        "must have the same shape."
                     )
 
             # Build Concat Node

@@ -35,6 +35,7 @@ Supports various memory modes, parallelization strategies, and quantized datatyp
 
 import math
 import numpy as np
+import numpy.typing as npt
 import os
 import qonnx.custom_op.general.xnorpopcount as xp
 import textwrap
@@ -45,11 +46,15 @@ from qonnx.util.basic import (
     interleave_matrix_outer_dim_from_partitions,
     roundup_to_integer_multiple,
 )
+from typing import TYPE_CHECKING, cast
 
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.util.data_packing import numpy_to_hls_code, pack_innermost_dim_as_hex_string
 from finn.util.logging import log
 from finn.util.settings import get_settings
+
+if TYPE_CHECKING:
+    from onnx import NodeProto
 
 # ONNX i/o tensor shape assumptions for MatrixVectorActivation:
 # input 0 is the input tensor, shape (.., i_size) = (..., MW)
@@ -62,7 +67,7 @@ from finn.util.settings import get_settings
 class MVAU(HWCustomOp):
     """Abstraction layer for HW implementation of MatrixVectorActivation layers."""
 
-    def __init__(self, onnx_node, **kwargs):
+    def __init__(self, onnx_node: "NodeProto", **kwargs: int) -> None:
         """Initialize the MVAU custom operation.
 
         Parameters
@@ -74,7 +79,13 @@ class MVAU(HWCustomOp):
         """
         super().__init__(onnx_node, **kwargs)
 
-    def get_nodeattr_types(self):
+    def get_nodeattr_types(
+        self,
+    ) -> dict[
+        str,
+        tuple[str, bool, int | float | str | bool | npt.NDArray | list]
+        | tuple[str, bool, int | float | str | bool | npt.NDArray | list, set | None],
+    ]:
         """Get dictionary of attribute names and their types for this node.
 
         Returns
@@ -82,7 +93,11 @@ class MVAU(HWCustomOp):
         dict
             Dictionary mapping attribute names to type specifications
         """
-        my_attrs = {
+        my_attrs: dict[
+            str,
+            tuple[str, bool, int | float | str | bool | npt.NDArray | list]
+            | tuple[str, bool, int | float | str | bool | npt.NDArray | list, set | None],
+        ] = {
             "PE": ("i", True, 0),
             "SIMD": ("i", True, 0),
             "MW": ("i", True, 0),
@@ -509,23 +524,23 @@ class MVAU(HWCustomOp):
         depth_multiplier = math.ceil(omega / 4096)
         return width_multiplier * depth_multiplier
 
-    def bram_estimation(self):
-        """Calculates resource estimation for BRAM based on:
+    def bram_estimation(self) -> int:
+        """Calculate resource estimation for BRAM based on:
         - FINN-R: An End-to-End Deep-Learning Framework for Fast
         Exploration of Quantized Neural Networks
         - M. Blott, T. B. Preusser, N. J. Fraser, G. Gambardella, K. O'Brien,
         Y. Umuroglu, M. Leeser and K. Vissers
-        - 12. Sep 2018
+        - 12. Sep 2018.
         """
         # TODO add in/out FIFO contributions
-        P = self.get_nodeattr("PE")
-        Q = self.get_nodeattr("SIMD")
+        p = cast("int", self.get_nodeattr("PE"))
+        q = cast("int", self.get_nodeattr("SIMD"))
         wdt = self.get_input_datatype(1)
-        W = wdt.bitwidth()
-        D_in = self.get_nodeattr("MW")
-        D_out = self.get_nodeattr("MH")
-        omega = (D_in * D_out) / (Q * P)
-        mem_width = Q * W * P
+        w = wdt.bitwidth()
+        d_in = cast("int", self.get_nodeattr("MW"))
+        d_out = cast("int", self.get_nodeattr("MH"))
+        omega = (d_in * d_out) / (q * p)
+        mem_width = q * w * p
         mmode = self.get_nodeattr("mem_mode")
         mstyle = self.get_nodeattr("ram_style")
         if (
