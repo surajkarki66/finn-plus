@@ -491,7 +491,7 @@ class Alveo_NxU55C_Platform(Platform):
         ]
 
 
-platforms = dict()
+platforms: dict[str, type[Platform]] = {}
 platforms["U50"] = Alveo_NxU50_Platform
 platforms["U200"] = Alveo_NxU200_Platform
 platforms["U250"] = Alveo_NxU250_Platform

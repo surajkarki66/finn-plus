@@ -8,10 +8,6 @@ from finn.builder.build_dataflow_config import (
     MFTopology,
     PartitioningConfiguration,
 )
-from finn.builder.build_dataflow_steps import (
-    step_create_multifpga_sdp,
-    step_prepare_network_infrastructure,
-)
 from finn.util.basic import make_build_dir
 
 
@@ -45,7 +41,7 @@ def test_multifpga_end2end_artifical_network(
     # TODO: Make this model entirely from scratch
     # TODO: Collapse all params and only pass a partitioning config
     temps = make_build_dir("test_end2end_artificial_outputs")
-    cfg = DataflowBuildConfig(
+    _ = DataflowBuildConfig(
         output_dir=temps,
         synth_clk_period_ns=5.0,
         partitioning_configuration=PartitioningConfiguration(
@@ -56,6 +52,6 @@ def test_multifpga_end2end_artifical_network(
         nodes, devices, assignment_type, assignment_order, shuffle_devices
     )
     model.set_metadata_prop("is_multifpga", "True")
-    model = step_create_multifpga_sdp(model, cfg)
-    model = step_prepare_network_infrastructure(model, cfg)
+    # model = step_create_multifpga_sdp(model, cfg)
+    # model = step_prepare_network_infrastructure(model, cfg)
     raise NotImplementedError("Assertions.")

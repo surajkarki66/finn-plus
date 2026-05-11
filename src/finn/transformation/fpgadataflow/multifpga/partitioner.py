@@ -34,6 +34,7 @@ from finn.util.exception import (
     FINNInternalError,
     FINNMultiFPGAConfigError,
     FINNMultiFPGAError,
+    FINNMultiFPGANoPartitionerSolutionError,
     FINNMultiFPGAUserError,
 )
 from finn.util.logging import LogDisabledConsole, log
@@ -89,6 +90,12 @@ class Partitioner(ABC):
                 "libgurobi instead of before). Falling back to CBC"
             )  # See finn-plus issue #67
             self.model = Model(solver_name=mip.CBC)
+        except mip.exceptions.InterfacingError as e:
+            log.warning(
+                f"Could not create a default-initialized mip.Model. "
+                f"The error encountered was: {e}. Trying to fallback to a CBC based model."
+            )
+            self.model = Model(solver_name=mip.CBC)
 
         # Details about the partitioning
         self.index_node_map = index_node_name_map
@@ -96,7 +103,7 @@ class Partitioner(ABC):
             for i in range(nodes):
                 if i not in self.index_node_map.keys():
                     raise FINNInternalError(
-                        f"Cannot use index-node map, since " f"name of node index {i} is missing!"
+                        f"Cannot use index-node map, since name of node index {i} is missing!"
                     )
         self.strategy = strategy
         self.max_utilization = max_utilization
@@ -477,12 +484,12 @@ class AuroraPartitioner(Partitioner):  # noqa
                         else:
                             raise FINNMultiFPGAConfigError(
                                 f"Node {node}'s usage of {restype} is above "
-                                f"the allowed utilization "
+                                f"the allowed utilization per device "
                                 f"({self.resource_estimates[node][restype]} > "
                                 f"{max_util}). "
                                 "Theoretical max per device would "
-                                f"be {total_per_device[restype]} "
-                                "on a single device. Partitioning will fail!"
+                                f"be {total_per_device[restype]}. "
+                                "Partitioning will fail!"
                             )
 
             # Balance so that the maximum difference to the ideal load over all devices and
@@ -679,6 +686,8 @@ class PartitionForMultiFPGA(Transformation):
                 f'partitioner "{self.partitioner_type.__name__}" was chosen!'
             )
 
+        self.partitioner: Partitioner | None = None
+
         # Run some checks
         # Needed to resolve platform
         if board is None:
@@ -819,7 +828,7 @@ class PartitionForMultiFPGA(Transformation):
 
         # Create the partitioner itself
         device_resources = available_resources(platforms[self.board](), self.considered_resources)
-        partitioner = self.partitioner_type(
+        self.partitioner = self.partitioner_type(
             devices=self.devices,
             topology=self.topology,
             strategy=self.partitioning_strategy,
@@ -840,29 +849,38 @@ class PartitionForMultiFPGA(Transformation):
         logdir = Path(make_build_dir("partition_solver_"))
 
         # Print information
-        self._log_pre_solve_information(partitioner)
+        self._log_pre_solve_information(self.partitioner)
 
         # Actually try to solve the model
-        mapping = partitioner.solve(
+        mapping = self.partitioner.solve(
             solver_timeout=self.timeout,
         )
         if mapping is None:
-            raise FINNMultiFPGAConfigError(
+            raise FINNMultiFPGANoPartitionerSolutionError(
                 f"No feasible partitioning solution could be found for "
                 f"the given model and configuration. If you are sure "
                 f"that everything is set up correctly, try using a "
                 f"different solver. Reports can be found at: "
                 f"{logdir.absolute()}"
             )
+        if self.partitioner.status is not None and self.verbosity.value > MFVerbosity.LOW.value:
+            if self.partitioner.status == mip.OptimizationStatus.OPTIMAL:
+                log.info("OPTIMAL solution found!")
+            elif self.partitioner.status == mip.OptimizationStatus.FEASIBLE:
+                log.info("FEASIBLE solution found.")
+            else:
+                log.info(f"Model optimization status: {self.partitioner.status.name}")
 
         # Apply results back to the model
         # TODO: Warning for very low resource usage
         model = model.transform(ApplyPartitioning(mapping))
 
         # Write results
-        partitioner.write_results(self.output_dir / "partitioning.yaml")
+        self.partitioner.write_results(self.output_dir / "partitioning.yaml")
 
         # Print results to console
-        self._log_post_solve_information(model, mapping, partitioner.get_resource_use_relative())
+        self._log_post_solve_information(
+            model, mapping, self.partitioner.get_resource_use_relative()
+        )
 
         return model, False

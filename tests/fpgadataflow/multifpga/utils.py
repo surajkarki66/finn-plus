@@ -94,6 +94,7 @@ rn18_pre_multifpga_steps = [
     "step_hw_ipgen",
     "step_set_fifo_depths",
 ]
+"""Steps required to prepare the ResNet18 model for Multi-FPGA usage."""
 
 
 def prepare_resnet_for_multifpga(
@@ -120,7 +121,9 @@ def list_contains_all_elements(this: list, other: list) -> bool:
 
 
 def networkx_to_onnx(g: DiGraph) -> ModelWrapper:
-    """Convert a networkx graph into a QONNX ModelWrapper."""
+    """Convert a networkx graph into a QONNX ModelWrapper.
+    All nodes will be StreamingDataflowPartitions.
+    """
     nodes = [oh.make_node("StreamingDataflowPartition", [], [], n) for n in g.nodes]
     get_node_by_name = lambda name: [n for n in nodes if n.name == name][0]  # noqa
     for i, edge in enumerate(g.edges):

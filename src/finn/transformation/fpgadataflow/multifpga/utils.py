@@ -197,6 +197,7 @@ def _resources_per_device_per_slr(p: Platform) -> dict[int, dict[str, int]]:
     new = {}
     for slr in range(len(res)):
         new[slr] = {}
+        # TODO: As soon as platforms.py uses dicts instead of lists this can be removed
         for i, name in enumerate(["LUT", "FF", "BRAM_18K", "URAM", "DSP"]):
             new[slr][name] = res[slr][i]
     return new

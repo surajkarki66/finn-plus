@@ -108,6 +108,14 @@ class FINNMultiFPGAConfigError(FINNUserError):
         super().__init__(*args)
 
 
+class FINNMultiFPGANoPartitionerSolutionError(FINNUserError):
+    """(User) The partitioner could not find a solution."""
+
+    def __init__(self, *args: object) -> None:
+        """Create a new FINNMultiFPGANoPartitionerSolutionError."""
+        super().__init__(*args)
+
+
 class FINNVitisLinkConfigError(FINNInternalError):
     """(Internal) An error appearing in a vitis link configuration when trying to
     generate a script or config. May happen in both single- and multifpga cases.

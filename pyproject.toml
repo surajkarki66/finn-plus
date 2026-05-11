@@ -55,7 +55,7 @@ onnxruntime = "1.20.1"
 onnxscript = ">=0.6.2"                                # TODO: the onnx-passes installation will overwrite this version
 protobuf = "5.29.6"
 pyyaml = "~6.0.2"
-mip = "~1.13.0"
+mip = "1.17.0"
 cmake = "~4.0.3"
 brevitas = "0.12.1"
 qonnx = "1.0.0"

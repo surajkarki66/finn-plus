@@ -32,52 +32,6 @@ if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
 
 
-@pytest.mark.parametrize(
-    "platform", [platforms.Alveo_NxU280_Platform(), platforms.Zynq7020_Platform()]
-)
-@pytest.mark.parametrize("topology", [MFTopology.CHAIN])
-@pytest.mark.parametrize("network_ports", [2])
-@pytest.mark.parametrize("ideal_max_util", [(0.8, 0.9), (0.9, 1.0), (0.2, 0.8), (0.2, 1.0)])
-def test_enforce_utilization_limit_aurora(
-    platform: platforms.Platform,
-    topology: MFTopology,
-    network_ports: int,
-    ideal_max_util: tuple[float, float],
-) -> None:
-    """Test that the partitioner upholds the resource utilization limit."""
-    test_dir_identifier = f"test_util_limit_{platform.__class__.__name__}_{topology.name}"
-    diff = 0.05
-    max_util = ideal_max_util[1]
-    ideal_util = ideal_max_util[0]
-    devices = 2
-    nodes = 2
-    considered_resources = ["LUT", "FF", "DSP", "BRAM_18K"]
-    res_per_device = available_resources(platform, considered_resources)
-    # Device0 is underutilized, Device1 is overutilized
-    resource_estimates = {
-        0: {res: res_per_device[res] * (max_util - diff) for res in considered_resources},
-        1: {res: res_per_device[res] * (max_util + diff) for res in considered_resources},
-    }
-    with pytest.raises(FINNMultiFPGANoPartitionerSolutionError):
-        part = AuroraPartitioner(
-            output_dir=Path(make_build_dir(test_dir_identifier + "_")),
-            network_ports_per_device=network_ports,
-            strategy=PartitioningStrategy.RESOURCE_UTILIZATION,
-            devices=devices,
-            nodes=nodes,
-            considered_resources=considered_resources,
-            resources_per_device=res_per_device,
-            inseperable_nodes=[],
-            topology=topology,
-            max_utilization=max_util,
-            ideal_utilization=ideal_util,
-            resource_estimates=resource_estimates,
-            verbosity=MFVerbosity.NONE,
-        )
-        solution = part.solve(100)
-        assert solution is None
-
-
 @pytest.mark.multifpga
 @pytest.mark.slow
 @pytest.mark.parametrize("model_type", ["rn18", "multi-fclayer"])

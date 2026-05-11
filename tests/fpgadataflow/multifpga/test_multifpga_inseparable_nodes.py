@@ -149,9 +149,9 @@ def test_onnx_to_networkx() -> None:
         graphs["two_output_graph"],
     ],
 )
-def test_inseperable_nodes(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
+def test_inseperable_nodes_qonnx(graph_data: tuple[DiGraph, list[list[str]]]) -> None:
     """Check that the inseparable node function finds the correct node groups by checking against
-    pre-defined examples.
+    pre-defined examples. The networkx graph is first converted to an ONNX graph.
     """
     g, expected_splits = graph_data
     model = networkx_to_onnx(g)
