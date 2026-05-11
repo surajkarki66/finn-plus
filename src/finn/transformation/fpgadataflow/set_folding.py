@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import finn.custom_op.fpgadataflow.hls.elementwise_binary_hls as elementwise_binary_hls
 from finn.analysis.fpgadataflow.dataflow_performance import dataflow_performance
 from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
-from finn.util.basic import MAX_ALLOWED_APT_INT_W
+from finn.util.basic import MAX_ALLOWED_AP_INT_W
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 from finn.util.logging import log
 
@@ -130,6 +130,13 @@ class SetFolding(Transformation):
         self.mvau_wwidth_max = mvau_wwidth_max
         self.two_pass_relaxation = two_pass_relaxation
 
+        if self.mvau_wwidth_max > MAX_ALLOWED_AP_INT_W:
+            log.error(
+                f"mvau_wwidth_max is larger than {MAX_ALLOWED_AP_INT_W} "
+                f"(max. allowed AP_INT_MAX_W). "
+                f"This will likely cause issues for HLS components!"
+            )
+
     def optimize_attribute_val(self, node_inst: HWCustomOp, max_val: int, attr_name: str) -> None:
         """Optimize the folding attribute until the target cycles are met."""
         node_inst.set_nodeattr(attr_name, 1)
@@ -143,7 +150,7 @@ class SetFolding(Transformation):
         self.any_throughput_target_missed = True
         log.warning(
             f"Node {node_inst.onnx_node.name} did not meet the target cycles. {attr_name} "
-            f"was set to {node_inst.get_nodeattr(attr_name)}. Estimated: "
+            f"was finalized to {node_inst.get_nodeattr(attr_name)}. Estimated: "
             f"{node_inst.get_exp_cycles()} (cyc/frame), Target: "
             f"{self.target_cycles_per_frame} (cyc/frame)."
         )
@@ -215,7 +222,7 @@ class SetFolding(Transformation):
                         mvau_internal_decoupled_weightstream_max_width_too_large = True
                         node_inst.set_nodeattr("SIMD", prev_simd_val)
                         log.warning(
-                            f"{node.name}: Weight stream grew wider than max "
+                            f"{node.name}: Width of weights per PE grew wider than max "
                             f"width {self.mvau_wwidth_max}. Reverting SIMD "
                             f"value {simd_val} -> {prev_simd_val}. "
                             f"Estimated: {node_inst.get_exp_cycles()} (cyc/frame), "
@@ -230,14 +237,14 @@ class SetFolding(Transformation):
                     for val in divisors(max_pe):
                         node_inst.set_nodeattr("PE", val)
                         cyc = node_inst.get_exp_cycles()
-                        if node_inst.get_instream_width(1) > self.mvau_wwidth_max:
+                        if node_inst.get_instream_width(1) > MAX_ALLOWED_AP_INT_W:
                             # revert PE back to last value
                             node_inst.set_nodeattr("PE", prev_pe_val)
                             self.any_throughput_target_missed = True
                             mvau_internal_decoupled_weightstream_max_width_too_large = True
                             log.warning(
-                                f"{node.name}: Weight stream became wider than max "
-                                f"width {self.mvau_wwidth_max}. Reverting PE value "
+                                f"{node.name}: Weight stream per PE became wider than max "
+                                f"ap_(u)int width {MAX_ALLOWED_AP_INT_W}. Reverting PE value "
                                 f"{val} -> {prev_pe_val}. "
                                 f"Estimated: {node_inst.get_exp_cycles()} (cyc/frame), "
                                 f"Target: {self.target_cycles_per_frame} (cyc/frame). "
@@ -391,9 +398,10 @@ class SetFolding(Transformation):
             log.warning("One or more nodes did not reach the target throughput. ")
             if mvau_internal_decoupled_weightstream_max_width_too_large:
                 log.warning(
-                    f"Try increasing the mvau_wwidth_max (limited to "
-                    f"{MAX_ALLOWED_APT_INT_W} for HLS MVAUs) or "
-                    f"lowering the target FPS."
+                    "SIMD parallelization for at least one node was limited by "
+                    "mvau_wwidth_max >= bitwidth * SIMD. Try increasing "
+                    "mvau_wwidth_max, decreasing the weight bitwidth or, "
+                    "if possible, decreasing the throughput target."
                 )
 
         model = model.transform(GiveUniqueNodeNames())

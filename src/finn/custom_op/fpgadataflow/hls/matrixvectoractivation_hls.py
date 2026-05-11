@@ -33,7 +33,7 @@ from qonnx.core.datatype import DataType
 
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 from finn.custom_op.fpgadataflow.matrixvectoractivation import MVAU
-from finn.util.basic import MAX_ALLOWED_APT_INT_W, is_versal
+from finn.util.basic import MAX_ALLOWED_AP_INT_W, is_versal
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
 from finn.util.exception import FINNInternalError
 
@@ -507,12 +507,12 @@ class MVAU_hls(MVAU, HLSBackend):
         weight_bits = self.get_input_datatype(1).bitwidth()
         single_pe_w = simd * weight_bits
         final = max([weightstream, max_of_io, single_pe_w])
-        if final > MAX_ALLOWED_APT_INT_W:
+        if final > MAX_ALLOWED_AP_INT_W:
             raise FINNInternalError(
                 f"The HLS top module of node "
                 f"{self.onnx_node.name} "
                 f"requires AP_INT_MAX_W to be set "
-                f"to {final}, but the maximum allowed is {MAX_ALLOWED_APT_INT_W}."
+                f"to {final}, but the maximum allowed is {MAX_ALLOWED_AP_INT_W}."
             )
         return final
 

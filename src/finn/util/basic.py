@@ -59,7 +59,7 @@ from finn.util.logging import log
 from finn.util.settings import get_settings
 
 
-MAX_ALLOWED_APT_INT_W: Final[int] = 8191
+MAX_ALLOWED_AP_INT_W: Final[int] = 8191
 """Constant which describes the max width of an `ap_int` HLS datatype.
 The max width can be changed by setting the `AP_INT_MAX_W` macro in the HLS source code.
 According to UG1399 (2022.02), the default is 1024 bit, the max value that the
