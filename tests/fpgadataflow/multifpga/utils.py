@@ -10,6 +10,8 @@ from brevitas_examples.bnn_pynq.models.resnet import quant_resnet18
 from networkx.classes.digraph import DiGraph
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.util.cleanup import cleanup as qonnx_cleanup
+from testing_util.test import get_test_model
 
 from finn.builder.build_dataflow import resolve_build_steps
 from finn.builder.build_dataflow_config import DataflowBuildConfig
@@ -19,7 +21,6 @@ from finn.builder.custom_step_library.resnet import (
     step_resnet_tidy,
 )
 from finn.util.basic import make_build_dir
-
 
 # ---- RESNET 18 ----
 
@@ -104,6 +105,97 @@ def prepare_resnet_for_multifpga(
     Changes the configs steps and returns the new configuration.
     """
     cfg.steps = rn18_pre_multifpga_steps
+    if skip_fifo_sizing:
+        cfg.steps.remove("step_set_fifo_depths")
+    steps = resolve_build_steps(cfg)
+    for step in steps:
+        model = step(model, cfg)
+    return model, cfg
+
+
+# ---- MOBILENET ----
+
+mn_pre_multifpga_steps = [
+    "step_qonnx_to_finn",
+    "step_tidy_up",
+    "finn.builder.custom_step_library.mobilenet.step_mobilenet_streamline",  # Custom step
+    "finn.builder.custom_step_library.mobilenet.step_mobilenet_lower_convs",  # Custom step
+    "finn.builder.custom_step_library.mobilenet.step_mobilenet_convert_to_hw_layers",  # Custom step
+    "step_create_dataflow_partition",
+    "step_specialize_layers",
+    "step_apply_folding_config",
+    "step_minimize_bit_width",
+    "step_generate_estimate_reports",
+    "step_set_fifo_depths",
+    "step_hw_codegen",
+    "step_hw_ipgen",
+]
+
+
+def prepare_mobilenet_for_multifpga(
+    model: ModelWrapper, cfg: DataflowBuildConfig, skip_fifo_sizing: bool = False
+) -> tuple[ModelWrapper, DataflowBuildConfig]:
+    """Run all steps until the model is ready for Multi-FPGA. For Mobilenets.
+    Changes the configs steps and returns the new configuration.
+    """
+    cfg.steps = mn_pre_multifpga_steps
+    if skip_fifo_sizing:
+        cfg.steps.remove("step_set_fifo_depths")
+    steps = resolve_build_steps(cfg)
+    for step in steps:
+        model = step(model, cfg)
+    return model, cfg
+
+
+def generate_mobilenet(
+    model_onnx_path: Path, wbits: int, abits: int, pretrained: bool
+) -> ModelWrapper:
+    """Provide a mobilenet modelwrapper."""
+    fc = get_test_model("mobilenet", wbits, abits, pretrained)
+    export_qonnx(fc, torch.randn((1, 3, 224, 224)), str(model_onnx_path))
+    qonnx_cleanup(str(model_onnx_path), out_file=str(model_onnx_path))
+    return ModelWrapper(str(model_onnx_path))
+
+
+# ---- BASIC MODELS ----
+
+basic_pre_multifpga_steps = [
+    "step_qonnx_to_finn",
+    "step_tidy_up",
+    "step_streamline",
+    "step_convert_to_hw",
+    "step_create_dataflow_partition",
+    "step_specialize_layers",
+    "step_target_fps_parallelization",
+    "step_apply_folding_config",
+    "step_minimize_bit_width",
+    "step_generate_estimate_reports",
+    "step_set_fifo_depths",
+    "step_hw_codegen",
+    "step_hw_ipgen",
+]
+
+
+def generate_basic_model(
+    model_onnx_path: Path, typename: str, wbits: int, abits: int
+) -> ModelWrapper:
+    """Provide a basic modelwrapper. This can be one of the TFC, CNV, etc. models."""
+    fc = get_test_model(typename, wbits, abits, True)
+    ishape = (1, 1, 28, 28)
+    if typename == "CNV":
+        ishape = (1, 3, 32, 32)
+    export_qonnx(fc, torch.randn(ishape), str(model_onnx_path))
+    qonnx_cleanup(str(model_onnx_path), out_file=str(model_onnx_path))
+    return ModelWrapper(str(model_onnx_path))
+
+
+def prepare_basic_model_for_multifpga(
+    model: ModelWrapper, cfg: DataflowBuildConfig, skip_fifo_sizing: bool = False
+) -> tuple[ModelWrapper, DataflowBuildConfig]:
+    """Run all steps until the model is ready for Multi-FPGA. For basic models.
+    Changes the configs steps and returns the new configuration.
+    """
+    cfg.steps = basic_pre_multifpga_steps
     if skip_fifo_sizing:
         cfg.steps.remove("step_set_fifo_depths")
     steps = resolve_build_steps(cfg)

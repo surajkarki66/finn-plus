@@ -36,6 +36,7 @@ from finn.util.exception import (
     FINNMultiFPGAError,
     FINNMultiFPGANoPartitionerSolutionError,
     FINNMultiFPGAUserError,
+    FINNUserError,
 )
 from finn.util.logging import LogDisabledConsole, log
 from finn.util.platforms import platforms
@@ -56,7 +57,7 @@ class Partitioner(ABC):
 
     Parameters
     ----------
-        inseperable_nodes: Nodes that need to stay together because they are in a split
+        inseparable_nodes: Nodes that need to stay together because they are in a split
 
         considered_resources: What types of resources are used in the objective
             function to determine load.
@@ -68,7 +69,7 @@ class Partitioner(ABC):
         topology: MFTopology | None,
         devices: int,
         nodes: int,
-        inseperable_nodes: list[list[int]],
+        inseparable_nodes: list[list[int]],
         verbosity: MFVerbosity,
         resources_per_device: dict,
         output_dir: Path,
@@ -78,24 +79,34 @@ class Partitioner(ABC):
         max_utilization: float | None = None,
         ideal_utilization: float | None = None,
         index_node_name_map: dict[int, str] | None = None,
+        solver: str | None = None,
     ) -> None:
         # MIP member variables first
         self.status: mip.OptimizationStatus | None
-        try:
-            self.model = Model()
-        except OSError:
-            log.warning(
-                "Creation of mip.Model failed. This might be known bug "
-                "(LD_LIBRARY_PATH only modified at runtime to point to "
-                "libgurobi instead of before). Falling back to CBC"
-            )  # See finn-plus issue #67
-            self.model = Model(solver_name=mip.CBC)
-        except mip.exceptions.InterfacingError as e:
-            log.warning(
-                f"Could not create a default-initialized mip.Model. "
-                f"The error encountered was: {e}. Trying to fallback to a CBC based model."
-            )
-            self.model = Model(solver_name=mip.CBC)
+        self.solver = solver
+        if solver is None:
+            try:
+                self.model = Model()
+            except OSError:
+                log.warning(
+                    "Creation of mip.Model failed. This might be known bug "
+                    "(LD_LIBRARY_PATH only modified at runtime to point to "
+                    "libgurobi instead of before). Falling back to CBC"
+                )  # See finn-plus issue #67
+                self.model = Model(solver_name=mip.CBC)
+            except mip.exceptions.InterfacingError as e:
+                log.warning(
+                    f"Could not create a default-initialized mip.Model. "
+                    f"The error encountered was: {e}. Trying to fallback to a CBC based model."
+                )
+                self.model = Model(solver_name=mip.CBC)
+        else:
+            try:
+                self.model = Model(solver_name=solver)
+            except mip.exceptions.InterfacingError as e:
+                raise FINNUserError(
+                    f"Cannot create mip solver of type {solver}. Original error: {e}"
+                ) from e
 
         # Details about the partitioning
         self.index_node_map = index_node_name_map
@@ -109,7 +120,7 @@ class Partitioner(ABC):
         self.max_utilization = max_utilization
         self.topology = topology
         self.ideal_util = ideal_utilization
-        self.inseperable_nodes = inseperable_nodes
+        self.inseparable_nodes = inseparable_nodes
         self.resource_estimates = resource_estimates
         self.resources_per_device = resources_per_device
         self.considered_resources = (
@@ -134,7 +145,7 @@ class Partitioner(ABC):
             log.info(f"Considered resource types: {self.considered_resources}")
             log.info(f"Ideal resource utilization: {self.ideal_util}")
             log.info(f"Maximum resource utilization: {self.max_utilization}")
-            log.info(f"Groups of inseparable nodes: {len(self.inseperable_nodes)}")
+            log.info(f"Groups of inseparable nodes: {len(self.inseparable_nodes)}")
             log.info(f"Network ports per device: {self.network_ports_per_device}")
 
         if (self.strategy == PartitioningStrategy.RESOURCE_UTILIZATION) and (
@@ -204,7 +215,7 @@ class AuroraPartitioner(Partitioner):  # noqa
         strategy: PartitioningStrategy,
         devices: int,
         nodes: int,
-        inseperable_nodes: list[list[int]],
+        inseparable_nodes: list[list[int]],
         resources_per_device: dict,
         verbosity: MFVerbosity,
         topology: MFTopology,
@@ -215,13 +226,14 @@ class AuroraPartitioner(Partitioner):  # noqa
         max_utilization: float | None = None,
         ideal_utilization: float | None = None,
         index_node_name_map: dict[int, str] | None = None,
+        solver: str | None = None,
     ) -> None:
         super().__init__(
             strategy,
             topology,
             devices,
             nodes,
-            inseperable_nodes,
+            inseparable_nodes,
             verbosity,
             resources_per_device,
             output_dir,
@@ -231,6 +243,7 @@ class AuroraPartitioner(Partitioner):  # noqa
             max_utilization,
             ideal_utilization,
             index_node_name_map,
+            solver=solver,
         )
         self.verbosity = verbosity
         if self.model is None or type(self.model) is not Model:
@@ -284,14 +297,14 @@ class AuroraPartitioner(Partitioner):  # noqa
 
         # Grouped nodes need to stay together
         # First check that no group is too large
-        if len(self.inseperable_nodes) > 0:
-            nodes_in_groups = sum(len(group) for group in self.inseperable_nodes)
-            max_devices_possible = nodes - nodes_in_groups + len(self.inseperable_nodes)
-            for i, group in enumerate(self.inseperable_nodes):
+        if len(self.inseparable_nodes) > 0:
+            nodes_in_groups = sum(len(group) for group in self.inseparable_nodes)
+            max_devices_possible = nodes - nodes_in_groups + len(self.inseparable_nodes)
+            for i, group in enumerate(self.inseparable_nodes):
                 # 1. Single group larger than the model itself
                 if len(group) > nodes:
                     raise FINNMultiFPGAError(
-                        f"Group {i} of inseperable nodes is larger than the total set of all "
+                        f"Group {i} of inseparable nodes is larger than the total set of all "
                         f"nodes in the model. (Has {len(group)} nodes, but only {nodes} "
                         "nodes in the graph!)"
                     )
@@ -307,13 +320,13 @@ class AuroraPartitioner(Partitioner):  # noqa
                 raise FINNMultiFPGAError(
                     f"Requested number of FPGAs ({devices}) is larger than the number of "
                     f"devices possible. {nodes - nodes_in_groups} nodes can be alone on a "
-                    f"device, and {len(self.inseperable_nodes)} groups of nodes can be on a "
+                    f"device, and {len(self.inseparable_nodes)} groups of nodes can be on a "
                     f"device. The largest possible device count partitioning would "
                     f"result in {max_devices_possible} devices"
                 )
 
         # Nodes in groups stay together
-        for group in self.inseperable_nodes:
+        for group in self.inseparable_nodes:
             for node in range(len(group) - 1):
                 self.model += self.chosen_device[group[node]] == self.chosen_device[group[node + 1]]
 
@@ -687,6 +700,7 @@ class PartitionForMultiFPGA(Transformation):
             )
 
         self.partitioner: Partitioner | None = None
+        self.mapping: dict[str, int] | None = None
 
         # Run some checks
         # Needed to resolve platform
@@ -819,7 +833,7 @@ class PartitionForMultiFPGA(Transformation):
         # Start by gathering node groups that cannot be split (due to branching) TODO: MultiFPGA 2.0
         if self.verbosity.value > MFVerbosity.MEDIUM.value:
             log.info("Gathering inseparable node groups...")
-        inseperable_nodes = get_inseparable_nodes(model)
+        inseparable_nodes = get_inseparable_nodes(model)
 
         # Calculate resource estimates for the solver objective function (if needed)
         model = model.transform(GiveUniqueNodeNames())
@@ -832,7 +846,7 @@ class PartitionForMultiFPGA(Transformation):
             devices=self.devices,
             topology=self.topology,
             strategy=self.partitioning_strategy,
-            inseperable_nodes=inseperable_nodes,
+            inseparable_nodes=inseparable_nodes,
             nodes=len(model.graph.node),
             verbosity=self.verbosity,
             output_dir=self.output_dir,
@@ -852,10 +866,10 @@ class PartitionForMultiFPGA(Transformation):
         self._log_pre_solve_information(self.partitioner)
 
         # Actually try to solve the model
-        mapping = self.partitioner.solve(
+        self.mapping = self.partitioner.solve(
             solver_timeout=self.timeout,
         )
-        if mapping is None:
+        if self.mapping is None:
             raise FINNMultiFPGANoPartitionerSolutionError(
                 f"No feasible partitioning solution could be found for "
                 f"the given model and configuration. If you are sure "
@@ -873,14 +887,14 @@ class PartitionForMultiFPGA(Transformation):
 
         # Apply results back to the model
         # TODO: Warning for very low resource usage
-        model = model.transform(ApplyPartitioning(mapping))
+        model = model.transform(ApplyPartitioning(self.mapping))
 
         # Write results
         self.partitioner.write_results(self.output_dir / "partitioning.yaml")
 
         # Print results to console
         self._log_post_solve_information(
-            model, mapping, self.partitioner.get_resource_use_relative()
+            model, self.mapping, self.partitioner.get_resource_use_relative()
         )
 
         return model, False

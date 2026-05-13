@@ -56,10 +56,13 @@ from enum import Enum
 from mashumaro.mixins.json import DataClassJSONMixin
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path, PosixPath, PurePath
-from typing import Any, List, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, List, Literal, Optional, cast
 
 from finn.util.basic import alveo_default_platform, part_map
 from finn.util.exception import FINNConfigurationError
+
+if TYPE_CHECKING:
+    import mip
 
 
 class LogLevel(str, Enum):
@@ -257,6 +260,10 @@ class PartitioningConfiguration:
     # Number of seconds before the solver doing the partitioning
     # times out.
     partition_solver_timeout: int = 100
+
+    # The solver to apply to the partitioning model. If left to None,
+    # the default `mip` solver is used, with CBC as a fallback.
+    partition_solver: mip.GUROBI | mip.CBC | mip.HIGHS | None = None  # type: ignore
 
     # Determines how many synthesis processes can run in parallel. Keep in mind
     # that very roughly estimated, one synthesis should be able to use up to 100 GB RAM,
