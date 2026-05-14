@@ -29,6 +29,7 @@
 import pytest
 
 import numpy as np
+import os
 from onnx import TensorProto
 from onnx import helper as oh
 from qonnx.core.datatype import DataType
@@ -386,3 +387,127 @@ def test_elementwise_binary_operation_stitched_ip(
     else:
         # Compare the expected to the produced for exact equality
         assert np.all(o_produced == o_expected)
+
+
+@pytest.mark.fpgadataflow
+def test_elementwise_binary_operation_embedded_uram_prepare_ip_rejects_old_vivado(
+    monkeypatch,
+):
+    monkeypatch.setenv("XILINX_VIVADO", "/tools/Vivado/2022.2")
+    part = "xcvc1902-vsva2197-2MP-e-S"
+    op_type = "ElementwiseAdd"
+    lhs_dtype = "INT8"
+    rhs_dtype = "INT8"
+    out_dtype = "INT9"
+    lhs_shape = [1, 32]
+    rhs_shape = [1, 32]
+    model = create_elementwise_binary_operation_onnx(
+        op_type, lhs_dtype, rhs_dtype, out_dtype, lhs_shape, rhs_shape
+    )
+    model.set_initializer("in_y", gen_finn_dt_tensor(DataType[rhs_dtype], rhs_shape))
+
+    model = model.transform(InferDataTypes())
+    model = model.transform(InferShapes())
+    model = model.transform(InferElementwiseBinaryOperation())
+    inst = getCustomOp(model.graph.node[0])
+    inst.set_nodeattr("ram_style", "ultra")
+    inst.set_nodeattr("preferred_impl_style", "hls")
+    model = model.transform(SpecializeLayers(part))
+    model = model.transform(GiveUniqueNodeNames())
+    with pytest.raises(AssertionError, match="Vivado/Vitis HLS 2024.2"):
+        model.transform(PrepareIP(part, 10))
+
+
+@pytest.mark.fpgadataflow
+def test_elementwise_binary_operation_embedded_uram_prepare_ip_rejects_non_versal(
+    monkeypatch,
+):
+    monkeypatch.setenv("XILINX_VIVADO", "/tools/Vivado/2024.2")
+    part = "xczu7ev-ffvc1156-2-e"
+    op_type = "ElementwiseAdd"
+    lhs_dtype = "INT8"
+    rhs_dtype = "INT8"
+    out_dtype = "INT9"
+    lhs_shape = [1, 32]
+    rhs_shape = [1, 32]
+    model = create_elementwise_binary_operation_onnx(
+        op_type, lhs_dtype, rhs_dtype, out_dtype, lhs_shape, rhs_shape
+    )
+    model.set_initializer("in_y", gen_finn_dt_tensor(DataType[rhs_dtype], rhs_shape))
+
+    model = model.transform(InferDataTypes())
+    model = model.transform(InferShapes())
+    model = model.transform(InferElementwiseBinaryOperation())
+    inst = getCustomOp(model.graph.node[0])
+    inst.set_nodeattr("ram_style", "ultra")
+    inst.set_nodeattr("preferred_impl_style", "hls")
+    model = model.transform(SpecializeLayers(part))
+    model = model.transform(GiveUniqueNodeNames())
+    with pytest.raises(AssertionError, match="requires a Versal target"):
+        model.transform(PrepareIP(part, 10))
+
+
+@pytest.mark.fpgadataflow
+@pytest.mark.slow
+@pytest.mark.vivado
+def test_elementwise_binary_operation_uram_stitched_ip():
+    part = "xcvc1902-vsva2197-2MP-e-S"
+    op_type = "ElementwiseAdd"
+    lhs_dtype = "INT8"
+    rhs_dtype = "INT8"
+    out_dtype = "INT9"
+    lhs_shape = [1, 32]
+    rhs_shape = [1, 32]
+    pe = 4
+    model = create_elementwise_binary_operation_onnx(
+        op_type, lhs_dtype, rhs_dtype, out_dtype, lhs_shape, rhs_shape
+    )
+    context = {
+        "in_x": gen_finn_dt_tensor(DataType[lhs_dtype], lhs_shape),
+        "in_y": gen_finn_dt_tensor(DataType[rhs_dtype], rhs_shape),
+    }
+    model.set_initializer("in_y", context["in_y"])
+    o_expected = NUMPY_REFERENCES[op_type](context["in_x"], context["in_y"])
+
+    model = model.transform(InferDataTypes())
+    model = model.transform(InferShapes())
+    model = model.transform(InferElementwiseBinaryOperation())
+    inst = getCustomOp(model.graph.node[0])
+    inst.set_nodeattr("PE", pe)
+    inst.set_nodeattr("mem_mode", "internal_decoupled")
+    inst.set_nodeattr("ram_style", "ultra")
+    inst.set_nodeattr("preferred_impl_style", "hls")
+
+    model = model.transform(SpecializeLayers(part))
+    assert len(model.graph.node) == 1
+    assert model.graph.node[0].op_type == f"{op_type}_hls"
+
+    model = model.transform(MinimizeWeightBitWidth())
+    model = model.transform(MinimizeAccumulatorWidth())
+    model = model.transform(SetExecMode("rtlsim"))
+    model = model.transform(GiveUniqueNodeNames())
+    model = model.transform(PrepareIP(part, 10))
+
+    node = model.get_nodes_by_op_type(f"{op_type}_hls")[0]
+    inst = getCustomOp(node)
+    memstream_wrapper = os.path.join(
+        inst.get_nodeattr("code_gen_dir_ipgen"),
+        node.name + "_memstream_wrapper.v",
+    )
+    with open(memstream_wrapper, "r") as f:
+        assert 'parameter  RAM_STYLE = "ultra"' in f.read()
+
+    model = model.transform(HLSSynthIP())
+    model = model.transform(PrepareRTLSim())
+    o_produced = execute_onnx(model, {"in_x": context["in_x"]})[model.get_first_global_out()]
+    assert np.all(o_produced == o_expected)
+
+    model = model.transform(InsertAndSetFIFODepths(part, 10))
+    model = model.transform(PrepareIP(part, 10))
+    model = model.transform(HLSSynthIP())
+    model = model.transform(CreateStitchedIP(part, 10, vitis=False))
+    model.set_metadata_prop("exec_mode", "rtlsim")
+    o_produced = execute_onnx(model, {model.get_first_global_in(): context["in_x"]})[
+        model.get_first_global_out()
+    ]
+    assert np.all(o_produced == o_expected)

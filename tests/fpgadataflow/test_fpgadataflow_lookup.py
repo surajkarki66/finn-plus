@@ -53,6 +53,7 @@ from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
+from finn.util.basic import get_vivado_version
 
 export_onnx_path = "test_lookup.onnx"
 
@@ -146,6 +147,90 @@ def test_fpgadataflow_lookup(edt, embedding_cfg, exec_mode):
         model = model.transform(PrepareRTLSim())
     ret_sim = execute_onnx(model, {iname: itensor})
     assert (exp_out == ret_sim[oname]).all()
+
+
+@pytest.mark.fpgadataflow
+@pytest.mark.vivado
+@pytest.mark.slow
+def test_fpgadataflow_lookup_uram_rtlsim():
+    vivado_version = get_vivado_version()
+    fpga_part = "xcvc1902-vsva2197-2MP-e-S"
+    edt = DataType["INT8"]
+    num_embeddings = 4096
+    idt = DataType["UINT16"]
+    embedding_dim = 8
+    ishape = (1, 4)
+    eshape = (num_embeddings, embedding_dim)
+    embeddings = gen_finn_dt_tensor(edt, eshape)
+    model = make_lookup_model(embeddings, ishape, idt, edt)
+    iname = model.get_first_global_in()
+    oname = model.get_first_global_out()
+    itensor = np.asarray([[0, 1, num_embeddings - 2, num_embeddings - 1]], dtype=np.int64)
+    exp_out = np.take(embeddings, itensor, axis=0)
+
+    model = model.transform(InferLookupLayer())
+    model = model.transform(SpecializeLayers(fpga_part))
+    assert model.graph.node[0].op_type == "Lookup_hls"
+    inst = getCustomOp(model.graph.node[0])
+    inst.set_nodeattr("ram_style", "ultra")
+    assert inst.uram_estimation() > 0
+
+    model = model.transform(GiveUniqueNodeNames())
+    if vivado_version is not None and vivado_version < (2024, 2):
+        with pytest.raises(AssertionError, match="Vivado/Vitis HLS 2024.2"):
+            model.transform(PrepareIP(fpga_part, 10))
+        return
+
+    model = model.transform(PrepareIP(fpga_part, 10))
+    model = model.transform(HLSSynthIP())
+    model = model.transform(SetExecMode("rtlsim"))
+    model = model.transform(PrepareRTLSim())
+    ret_sim = execute_onnx(model, {iname: itensor})
+    assert (exp_out == ret_sim[oname]).all()
+
+
+@pytest.mark.fpgadataflow
+def test_fpgadataflow_lookup_uram_prepare_ip_rejects_old_vivado(monkeypatch):
+    monkeypatch.setenv("XILINX_VIVADO", "/tools/Vivado/2022.2")
+    fpga_part = "xcvc1902-vsva2197-2MP-e-S"
+    edt = DataType["INT8"]
+    num_embeddings = 4096
+    idt = DataType["UINT16"]
+    embedding_dim = 8
+    ishape = (1, 4)
+    eshape = (num_embeddings, embedding_dim)
+    embeddings = gen_finn_dt_tensor(edt, eshape)
+    model = make_lookup_model(embeddings, ishape, idt, edt)
+
+    model = model.transform(InferLookupLayer())
+    model = model.transform(SpecializeLayers(fpga_part))
+    inst = getCustomOp(model.graph.node[0])
+    inst.set_nodeattr("ram_style", "ultra")
+    model = model.transform(GiveUniqueNodeNames())
+    with pytest.raises(AssertionError, match="Vivado/Vitis HLS 2024.2"):
+        model.transform(PrepareIP(fpga_part, 10))
+
+
+@pytest.mark.fpgadataflow
+def test_fpgadataflow_lookup_uram_prepare_ip_rejects_non_versal(monkeypatch):
+    monkeypatch.setenv("XILINX_VIVADO", "/tools/Vivado/2024.2")
+    fpga_part = "xczu3eg-sbva484-1-e"
+    edt = DataType["INT8"]
+    num_embeddings = 4096
+    idt = DataType["UINT16"]
+    embedding_dim = 8
+    ishape = (1, 4)
+    eshape = (num_embeddings, embedding_dim)
+    embeddings = gen_finn_dt_tensor(edt, eshape)
+    model = make_lookup_model(embeddings, ishape, idt, edt)
+
+    model = model.transform(InferLookupLayer())
+    model = model.transform(SpecializeLayers(fpga_part))
+    inst = getCustomOp(model.graph.node[0])
+    inst.set_nodeattr("ram_style", "ultra")
+    model = model.transform(GiveUniqueNodeNames())
+    with pytest.raises(AssertionError, match="requires a Versal target"):
+        model.transform(PrepareIP(fpga_part, 10))
 
 
 @pytest.mark.fpgadataflow

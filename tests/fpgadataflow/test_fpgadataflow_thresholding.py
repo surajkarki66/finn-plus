@@ -55,7 +55,7 @@ from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
 from finn.transformation.fpgadataflow.set_fifo_depths import InsertAndSetFIFODepths
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
-from finn.util.basic import make_build_dir
+from finn.util.basic import is_versal, make_build_dir
 
 test_fpga_part = "xczu3eg-sbva484-1-e"
 target_clk_ns = 5
@@ -362,7 +362,7 @@ def test_fpgadataflow_thresholding(
     ],
 )
 @pytest.mark.parametrize("fold", [-1, 1, 2])
-@pytest.mark.parametrize("ram_style", ["distributed", "block"])
+@pytest.mark.parametrize("ram_style", ["distributed", "block", "ultra"])
 @pytest.mark.parametrize("part", ["xcvc1902-vsva2197-2MP-e-S", "xczu7ev-ffvc1156-2-e"])
 @pytest.mark.fpgadataflow
 @pytest.mark.vivado
@@ -370,6 +370,9 @@ def test_fpgadataflow_thresholding(
 def test_fpgadataflow_thresholding_stitched_ip(
     num_input_channels, num_input_vecs, activation, idt_tdt_cfg, fold, ram_style, part
 ):
+    if ram_style == "ultra" and not is_versal(part):
+        pytest.skip("URAM threshold memstream initialization requires a Versal target")
+
     input_data_type, threshold_data_type = idt_tdt_cfg
     num_steps = activation.get_num_possible_values() - 1
 
