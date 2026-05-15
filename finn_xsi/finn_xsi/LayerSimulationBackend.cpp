@@ -35,7 +35,7 @@ enum class SimulationState { IDLE, CONFIGURED, RUNNING, FINISHED, ERROR };
 class SimulationController {
      private:
     SingleNodeSimulation<InstreamCount, OutstreamCount, RTLSimConfig::LoggingEnabled, RTLSimConfig::NodeIndex, RTLSimConfig::TotalNodes, RTLSimConfig::IsInputNode,
-                         RTLSimConfig::IsOutputNode>& sim;
+                         RTLSimConfig::IsOutputNode, RTLSimConfig::preciseTimeout>& sim;
     std::atomic<SimulationState> state{SimulationState::IDLE};
     std::atomic<uint64_t> current_cycles{0};
     std::atomic<uint64_t> current_samples{0};
@@ -48,7 +48,7 @@ class SimulationController {
 
      public:
     explicit SimulationController(SingleNodeSimulation<InstreamCount, OutstreamCount, RTLSimConfig::LoggingEnabled, RTLSimConfig::NodeIndex, RTLSimConfig::TotalNodes,
-                                                       RTLSimConfig::IsInputNode, RTLSimConfig::IsOutputNode>& simulation)
+                                                       RTLSimConfig::IsInputNode, RTLSimConfig::IsOutputNode, RTLSimConfig::preciseTimeout>& simulation)
         : sim(simulation) {}
 
     void configure(const std::vector<std::size_t>& depths, const std::vector<std::size_t>& expected_first_valid_cycles, std::size_t maxCycles) {
@@ -340,7 +340,7 @@ int main(int argc, const char* argv[]) {
 
         // Construct simulation
         SingleNodeSimulation<InstreamCount, OutstreamCount, RTLSimConfig::LoggingEnabled, RTLSimConfig::NodeIndex, RTLSimConfig::TotalNodes, RTLSimConfig::IsInputNode,
-                             RTLSimConfig::IsOutputNode>
+                             RTLSimConfig::IsOutputNode, RTLSimConfig::preciseTimeout>
             sim(RTLSimConfig::kernel_libname, RTLSimConfig::design_libname, "xsim_log_file.txt", "trace_file.txt", RTLSimConfig::istream_descs, RTLSimConfig::ostream_descs,
                 RTLSimConfig::inputInterfaceNames, RTLSimConfig::outputInterfaceNames, 2);
 

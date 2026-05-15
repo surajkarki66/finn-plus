@@ -52,7 +52,7 @@ output reg                   s_axi_rlast,
 input                        s_axi_rready
 );
 
-parameter integer LATENCY = 1;
+parameter integer LATENCY = 100;
 
 localparam integer SHIFT_W = ({{ DATA_WIDTH }} <= 1) ? 1 : $clog2({{ DATA_WIDTH }} / 8);
 localparam integer LAT_CNT_W = (LATENCY <= 1) ? 1 : $clog2(LATENCY + 1);

@@ -119,11 +119,15 @@ class Simulation:
         clk_ns: float,
         functional_sim: bool,
         workers: int | None = None,  # noqa: ARG002
+        performance_sim: bool = False,
     ) -> None:
         """Create a new simulation instance. Read simulation binary paths
         from the simulation_binaries metadata prop field."""
         self.simulation_type = simulation_type
         self.model = model
+        self.model = self.model.transform(
+            BuildSimulation(fpgapart, clk_ns, functional_sim, performance_sim)
+        )
         sim_binaries_str = self.model.get_metadata_prop("simulation_binaries")
 
         if sim_binaries_str is None:
@@ -132,7 +136,12 @@ class Simulation:
                 "sure to run the BuildSimulation transformation beforehand."
             )
         sim_binaries: list[Path] = [Path(p) for p in str(sim_binaries_str).split("\n")]
-        if len(sim_binaries) != len(self.model.graph.node):
+        nodes = (
+            [n for n in self.model.graph.node if "FIFO" not in n.op_type]
+            if performance_sim
+            else self.model.graph.node
+        )
+        if len(sim_binaries) != len(nodes):
             raise FINNUserError(
                 "The number of found simulation binaries does not match the number "
                 "of nodes in the graph. Make sure to run BuildSimulation just "
@@ -142,7 +151,6 @@ class Simulation:
             raise FINNUserError(
                 "Simulation binary data points to invalid paths. Please rerun BuildSimulation."
             )
-        self.model = self.model.transform(BuildSimulation(fpgapart, clk_ns, functional_sim))
         self.binaries: dict[int, Path] = {i: sim_binaries[i] for i in range(len(sim_binaries))}
         match simulation_type:
             case SimulationType.NODE_BASED_CONNECTED:
@@ -186,14 +194,7 @@ class ApplySimulatedFIFOSizes(Transformation):
         self.cfg = cfg
         self.max_qsrl_depth = max_qsrl_depth
         self.vivado_ram_style = vivado_ram_style
-        if fifo_config is None:
-            self.path = Path(cfg.output_dir) / "fifo_config.json"
-        else:
-            self.path = fifo_config
-
-        self.fifo_depths: FIFODepthConfig = []
-        with self.path.open() as f:
-            self.fifo_depths = cast("FIFODepthConfig", json.load(f))
+        self.fifo_config = fifo_config
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         """Apply FIFO Simulation Depths to the model."""
@@ -203,6 +204,20 @@ class ApplySimulatedFIFOSizes(Transformation):
                 "been inserted into the graph. Skipping insertion of FIFOs."
             )
             return model, False
+
+        if self.fifo_config is None:
+            p = model.get_metadata_prop("fifo_data")
+            if p == "" or p is None:
+                raise FINNInternalError(
+                    "FIFO sizing simulation was not run before inserting simulated FIFO sizes!"
+                )
+            self.path = Path(p)
+        else:
+            self.path = self.fifo_config
+
+        self.fifo_depths: FIFODepthConfig = []
+        with self.path.open() as f:
+            self.fifo_depths = cast("FIFODepthConfig", json.load(f))
 
         if len(model.graph.node) != len(self.fifo_depths):
             raise FINNUserError(

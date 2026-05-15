@@ -566,13 +566,6 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     #: MultiThreshold nodes and a warning is raised instead.
     max_multithreshold_bit_width: int = 8
 
-    #: Control the number of input frames for rtlsim performance measurement.
-    rtlsim_batch_size: int = 1
-
-    #: If set to True, FIFOs with impl_style=vivado will be kept during
-    #: rtlsim, otherwise they will be replaced by RTL implementations.
-    rtlsim_use_vivado_comps: bool = True
-
     #: If set to True, the FINN compiler tries to create an MLO design based on
     #: loop_body_hierarchy and loop_body_range
     mlo: bool = False

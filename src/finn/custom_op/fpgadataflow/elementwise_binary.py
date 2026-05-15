@@ -27,15 +27,16 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import numpy as np
-
+from typing import cast
 
 # Helper for creating ONNX nodes
-from onnx import helper as oh
+from onnx import NodeProto, helper as oh
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 
 from finn.custom_op.fpgadataflow import register_custom_op
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
+from finn.util.exception import FINNInternalError
 
 # FINN logging
 from finn.util.logging import log
@@ -135,18 +136,18 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Shape attribute as property for convenience
     @property
-    def lhs_shape(self):
-        return self.get_nodeattr("lhs_shape")
+    def lhs_shape(self) ->np.ndarray:
+        return cast("np.ndarray", self.get_nodeattr("lhs_shape"))
 
     # Shape attribute as property for convenience
     @property
-    def rhs_shape(self):
-        return self.get_nodeattr("rhs_shape")
+    def rhs_shape(self) ->np.ndarray:
+        return cast("np.ndarray", self.get_nodeattr("rhs_shape"))
 
     # Shape attribute as property for convenience
     @property
-    def out_shape(self):
-        return self.get_nodeattr("out_shape")
+    def out_shape(self) ->np.ndarray:
+        return cast("np.ndarray", self.get_nodeattr("out_shape"))
 
     # Style attribute as property for convenience
     @property
@@ -171,27 +172,35 @@ class ElementwiseBinaryOperation(HWCustomOp):
     # Makes an operation compatible with the output shape for shape inference
     #   Note: Propagates shape forward, i.e., never asks for the shape of the
     #   output, even if it seems easier.
-    def make_shape_compatible_op(self, model: ModelWrapper):
+    def make_shape_compatible_op(self, model: ModelWrapper) -> NodeProto:
         # Get the node wrapped by this custom op
         node = self.onnx_node
         # There must be exactly two inputs to the binary operation
-        assert len(node.input) == 2, f"Binary operation {node.name} requires exactly two inputs"
+        if len(node.input) != 2:
+            raise FINNInternalError(f"Binary operation {node.name} requires exactly two inputs")
         # Validate input shapes match what is stored as attributes
-        assert (
-            model.get_tensor_shape(node.input[0]) == self.lhs_shape
-        ), f"Input shape mismatch: {node.name} {node.input[0]}"
-        assert (
-            model.get_tensor_shape(node.input[1]) == self.rhs_shape
-        ), f"Input shape mismatch: {node.name} {node.input[1]}"
+        if model.get_tensor_shape(node.input[0]) != self.lhs_shape:
+            raise FINNInternalError(
+                f"Input shape mismatch: {node.name} {node.input[0]}. "
+                f"Expected {self.lhs_shape}, got {model.get_tensor_shape(node.input[0])}"
+            )
+        if model.get_tensor_shape(node.input[1]) != self.rhs_shape:
+            raise FINNInternalError(
+                f"Input shape mismatch: {node.name} {node.input[1]}. "
+                f"Expected {self.rhs_shape}, got {model.get_tensor_shape(node.input[1])}"
+            )
         # Validate broadcasting of inputs to the output shape
-        assert (
-            list(np.broadcast_shapes(self.lhs_shape, self.rhs_shape)) == self.out_shape
-        ), f"Shape broadcast mismatch: {node.name}"
+        if list(np.broadcast_shapes(self.lhs_shape, self.rhs_shape)) != self.out_shape:
+            raise FINNInternalError(
+                f"Shape broadcast mismatch: {node.name}. "
+                f"Expected {self.out_shape}, got "
+                f"{list(np.broadcast_shapes(self.lhs_shape, self.rhs_shape))}"
+            )
         # Simulate behavior via the standard ONNX add operation
         return oh.make_node("Add", node.input, node.output)
 
     # Infers the datatype of the node output
-    def infer_node_datatype(self, model: ModelWrapper):
+    def infer_node_datatype(self, model: ModelWrapper) -> None:
         # Get the node wrapped by this custom op
         node = self.onnx_node
         # Test for changing left-hand-side input datatype
@@ -213,7 +222,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
         # Force the output data type stored as a node attribute
         model.set_tensor_datatype(node.output[0], self.out_dtype)
 
-    def execute_node(self, context, graph):
+    def execute_node(self, context, graph) -> None:
         # Get the node wrapped by this custom op
         node = self.onnx_node
         # Get the inputs out of the execution context
@@ -326,9 +335,9 @@ class ElementwiseBinaryOperation(HWCustomOp):
         if not all([self.lhs_dtype.is_integer(), self.rhs_dtype.is_integer()]):
             # Check the annotated tensor data type corresponds to the stored
             # attribute
-            assert (
-                model.get_tensor_datatype(self.onnx_node.output[0]) == self.out_dtype
-            ), f"Output type mismatch for {self.onnx_node.name}"
+            assert model.get_tensor_datatype(self.onnx_node.output[0]) == self.out_dtype, (
+                f"Output type mismatch for {self.onnx_node.name}"
+            )
             # Exit here, returning the not-minimized data type
             return self.out_dtype
         # Call the output type derivation specialized by the concrete operator
@@ -901,4 +910,4 @@ class ElementwiseMax(ElementwiseBinaryOperation):
         else:
             rhs_intbits = self.rhs_dtype.bitwidth()
         out_intbits = max(lhs_intbits, rhs_intbits)
-        return DataType[f"FIXED<{out_fracbits+out_intbits},{out_intbits}>"]
+        return DataType[f"FIXED<{out_fracbits + out_intbits},{out_intbits}>"]

@@ -294,7 +294,7 @@ class CreateStitchedIP(Transformation):
                 self.connect_cmds.extend(
                     [
                         f"make_bd_intf_pins_external "
-                        f"[get_bd_intf_pins {inst_name}/{aximm_intf_name[0][0]}]"
+                        f"[get_bd_intf_pins {inst_name}/{aximm_intf_name[0][0]}]",
                         f"set_property name {ext_if_name} [get_bd_intf_ports m_axi_gmem_0]",
                         "assign_bd_address",
                         f"set_property offset 0 [get_bd_addr_segs {{{seg_name}}}]",

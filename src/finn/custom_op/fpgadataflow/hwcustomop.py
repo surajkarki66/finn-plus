@@ -121,14 +121,6 @@ class HWCustomOp(CustomOp):
             "inFIFODepths": ("ints", False, [2]),
             "outFIFODepths": ("ints", False, [2]),
             "output_hook": ("s", False, ""),
-            # accumulated characteristic function over two periods
-            "io_chrc_in": ("t", False, np.asarray([], dtype=np.int32)),
-            "io_chrc_out": ("t", False, np.asarray([], dtype=np.int32)),
-            # the period for which the characterization was run
-            "io_chrc_period": ("i", False, 0),
-            # amount of zero padding inserted during chrc.
-            "io_chrc_pads_in": ("ints", False, []),
-            "io_chrc_pads_out": ("ints", False, []),
             "mlo_max_iter": ("i", False, 0),
         }
 

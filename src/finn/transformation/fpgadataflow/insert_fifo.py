@@ -35,17 +35,17 @@ inserts StreamingFIFO nodes where appropriate.
 
 import numpy as np
 import numpy.typing as npt
-from onnx import helper as oh
+from collections.abc import Sequence
 from onnx import NodeProto
-from finn.util.basic import getHWCustomOp
+from onnx import helper as oh
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
+from typing import cast
 
+from finn.util.basic import getHWCustomOp
+from finn.util.exception import FINNInternalError
 from finn.util.fpgadataflow import is_fpgadataflow_node
 from finn.util.logging import log
-from finn.util.exception import FINNInternalError
-from typing import cast
-from collections.abc import Sequence
 
 
 class InsertFIFO(Transformation):

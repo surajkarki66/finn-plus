@@ -34,6 +34,7 @@ from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import getHWCustomOp, launch_process_helper, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
+from jinja2 import Environment
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -52,11 +53,14 @@ class SimulationType(str, Enum):
 class SimulationBuilder:
     """Build simulations in FINN."""
 
-    def __init__(self, model: ModelWrapper, fpgapart: str, clk_ns: float) -> None:
+    def __init__(
+        self, model: ModelWrapper, fpgapart: str, clk_ns: float, performance_sim: bool = False
+    ) -> None:
         """Create a new simulation instance."""
         self.model = model
         self.fpgapart = fpgapart
         self.clk_ns = clk_ns
+        self.performance_sim = performance_sim
 
     def _create_existing_initializer_input(
         self,
@@ -185,6 +189,9 @@ class SimulationBuilder:
         Args:
             by_node: If int, used as the index of the specified node. If string, assumed to be
                         the name of the node.
+            performance_sim: Specifies if the simulation is used for FIFO sizing or performance
+                        simulation. In the case of a performance simulation, FIFOs are already
+                        in the graph and need to be skipped.
 
         Returns:
             ModelWrapper: The isolated-node modelwrapper.
@@ -256,29 +263,100 @@ class SimulationBuilder:
         outputs_node: list[ValueInfoProto] = []
         nodes_graph: list[NodeProto] = []
 
-        preds_list: list | None = self.model.find_direct_predecessors(target_node)
-        succs_list: list | None = self.model.find_direct_successors(target_node)
+        def _find_first_non_fifo_pred(pred: NodeProto) -> NodeProto | None:
+            if "FIFO" in pred.op_type:
+                # Replace FIFOs with their predecessor
+                pred_fifo = self.model.find_direct_predecessors(pred)
+                if pred_fifo is not None:
+                    if len(pred_fifo) > 1:
+                        raise FINNInternalError(
+                            f"FIFOs are expected to have exactly one predecessor, "
+                            f"but found multiple: {pred_fifo}"
+                        )
+                    if "FIFO" in pred_fifo[0].op_type:
+                        return _find_first_non_fifo_pred(pred_fifo[0])
+                    return pred_fifo[0]
+                if get_by_name(self.model.graph.input, pred.input[0]) is not None:
+                    return None  # Reached the end of the graph, return None to indicate graph input
+            return pred
 
-        num_preds = len(preds_list) if preds_list is not None else 0
-        num_succs = len(succs_list) if succs_list is not None else 0
+        def _find_first_non_fifo_succ(succ: NodeProto) -> NodeProto | None:
+            if "FIFO" in succ.op_type:
+                # Replace FIFOs with their successor
+                succ_fifo = self.model.find_direct_successors(succ)
+                if succ_fifo is not None:
+                    if len(succ_fifo) > 1:
+                        raise FINNInternalError(
+                            f"FIFOs are expected to have exactly one successor, "
+                            f"but found multiple: {succ_fifo}"
+                        )
+                    if "FIFO" in succ_fifo[0].op_type:
+                        return _find_first_non_fifo_succ(succ_fifo[0])
+                    return succ_fifo[0]
+                if get_by_name(self.model.graph.output, succ.output[0]) is not None:
+                    return (
+                        None  # Reached the end of the graph, return None to indicate graph output
+                    )
+            return succ
+
+        preds_list: list[NodeProto] | None = self.model.find_direct_predecessors(target_node)
+        succs_list: list[NodeProto] | None = self.model.find_direct_successors(target_node)
+
+        preds = []
+        if preds_list is not None:
+            for pred in preds_list:
+                preds.append(_find_first_non_fifo_pred(pred))
+        succs = []
+        if succs_list is not None:
+            for succ in succs_list:
+                succs.append(_find_first_non_fifo_succ(succ))
+        preds_list = [x for x in preds if x is not None]
+        succs_list = [x for x in succs if x is not None]
+
+        num_preds = len(preds_list)
+        num_succs = len(succs_list)
 
         input_node = False
         output_node = False
+
+        def _get_first_non_fifo_input(node: NodeProto, inp: str) -> str:
+            """Return the first output by name that is not produced by a FIFO.
+            If the input is not produced by a FIFO, return the input itself."""
+            pred = self.model.find_direct_predecessors(node)
+            if pred is None:
+                return inp
+            for p in pred:
+                if inp in p.output and "FIFO" in p.op_type:
+                    fifo_input = p.input[0]  # FIFOs are expected to have exactly one input
+                    return _get_first_non_fifo_input(p, fifo_input)
+            return inp
+
+        def _get_first_non_fifo_output(node: NodeProto, outp: str) -> str:
+            """Return the first output by name that is not consumed by a FIFO.
+            If the output is not consumed by a FIFO, return the output itself."""
+            succ = self.model.find_direct_successors(node)
+            if succ is None:
+                return outp
+            for s in succ:
+                if outp in s.input and "FIFO" in s.op_type:
+                    fifo_output = s.output[0]  # FIFOs are expected to have exactly one output
+                    return _get_first_non_fifo_output(s, fifo_output)
+            return outp
 
         # Set correct input/output count for input and output nodes, since they have no pred/succ.
         if num_preds == 0:
             inputs = self.model.graph.input
             for i in range(len(target_node.input)):
-                ret = get_by_name(inputs, target_node.input[i])  # Check that node is graph input
-                if ret is not None and (
-                    not is_mlo_node or target_node.input[i] not in mlo_parameter_input_names
-                ):
+                inp = _get_first_non_fifo_input(target_node, target_node.input[i])
+                ret = get_by_name(inputs, inp)  # Check that node is graph input
+                if ret is not None and (not is_mlo_node or inp not in mlo_parameter_input_names):
                     num_preds += 1
                     input_node = True
         if num_succs == 0:
             outputs = self.model.graph.output
             for i in range(len(target_node.output)):
-                ret = get_by_name(outputs, target_node.output[i])  # Check that node is graph output
+                out = _get_first_non_fifo_output(target_node, target_node.output[i])
+                ret = get_by_name(outputs, out)  # Check that node is graph output
                 if ret is not None:
                     num_succs += 1
                     output_node = True
@@ -297,6 +375,10 @@ class SimulationBuilder:
         converted_initializer_input_indices: list[int] = []
         for i in range(num_inputs):
             inp_name = target_node.input[i]
+            inp_name = _get_first_non_fifo_input(
+                target_node, inp_name
+            )  # Replace FIFO-produced inputs with their predecessor's input,
+            # this will skip all FIFOs in the isolation
             is_mlo_parameter_input = is_mlo_node and inp_name in mlo_parameter_input_names
             init_vals_only = self.model.get_initializer(inp_name)
             if init_vals_only is not None or is_mlo_parameter_input:
@@ -388,6 +470,12 @@ class SimulationBuilder:
         if "mlo_max_iter" in params:
             del params["mlo_max_iter"]
             params_changed = True
+        if "runtime_writeable_weights" in params and params["runtime_writeable_weights"] == 1:
+            params["runtime_writeable_weights"] = 0
+            params_changed = True
+        if "dynamic_mode" in params and params["dynamic_mode"] == 1:
+            params["dynamic_mode"] = 0
+            params_changed = False
         if params_changed:
             params["code_gen_dir_ipgen"] = ""
             params["ipgen_path"] = ""
@@ -599,6 +687,7 @@ class SimulationBuilder:
         ) = self._get_stream_descriptions(model)
         template_dict = {
             "TIMEOUT_CYCLES": timeout_cycles,
+            "PRECISE_TIMEOUT": str(self.performance_sim).lower(),
             # name of the top-level HDL module
             "TOP_MODULE_NAME": top_module_name,
             # top-level AXI stream descriptors
@@ -632,8 +721,8 @@ class SimulationBuilder:
 
         fifosim_config_fname = Path(finnxsi_dir) / "rtlsim_config.hpp.template"
         fsim_config = fifosim_config_fname.read_text()
-        for key, val in template_dict.items():
-            fsim_config = fsim_config.replace(f"@{key}@", str(val))
+        env = Environment()
+        fsim_config = env.from_string(fsim_config).render(**template_dict)
         # Write the config to the simulation directory
         rtlsim_config = Path(sim_base) / "rtlsim_config.hpp"
         rtlsim_config.write_text(fsim_config)
@@ -676,9 +765,6 @@ class SimulationBuilder:
         Returns:
             Path: The path to the simulation binary (shell script).
         """
-        # TODO: Check if something is an output node instead of checking the node index
-        # TODO: Requires changes in the C++ code as well
-
         # Check that the relevant data exists
         wrapper_filename = node_model.get_metadata_prop("wrapper_filename")
         if wrapper_filename is None or not Path(wrapper_filename).exists():
@@ -771,7 +857,12 @@ class SimulationBuilder:
                 silent=with_live_display,
             )
 
-        total_nodes = len(self.model.graph.node)
+        nodes = (
+            [n for n in self.model.graph.node if "FIFO" not in n.op_type]
+            if self.performance_sim
+            else self.model.graph.node
+        )
+        total_nodes = len(nodes)
         log.info(f"[BuildSimulation] Preparing to build {total_nodes} nodes for the simulation.")
         futures: dict[int, Future] = {}
         built_nodes = 0
@@ -856,8 +947,8 @@ class SimulationBuilder:
 
             synth_workers = min(
                 synth_workers,
-                len(self.model.graph.node),
-                int(os.environ.get("NUM_DEFAULT_WORKERS", len(self.model.graph.node))),
+                len(nodes),
+                int(os.environ.get("NUM_DEFAULT_WORKERS", len(nodes))),
             )
             log.info(
                 "[BuildSimulation] SLURM job detected, using "
@@ -878,13 +969,22 @@ class SimulationBuilder:
         # Build (stitched IP, cmake, make) all sims in parallel and return paths to
         # the compiled executables
         log.info("[BuildSimulation] Starting the build process.")
+        fifos = self.model.get_nodes_by_op_type("StreamingFIFO")
+        fifos.extend(self.model.get_nodes_by_op_type("StreamingFIFO_rtl"))
+        if len(fifos) != 0 and not self.performance_sim:
+            raise FINNUserError(
+                "FIFOs detected in model during FIFO sizing. "
+                "Did you call the steps in the correct order?"
+            )
         with ThreadPoolExecutor(max_workers=synth_workers) as pool:
-            for i in range(total_nodes):
+            for i in range(len(self.model.graph.node)):
                 node_name = self.model.graph.node[i].name
+                if "FIFO" in node_name:
+                    continue
                 futures[i] = pool.submit(
                     _build,
                     i,
-                    total_nodes - 1,
+                    len(self.model.graph.node) - 1,
                     Path(make_build_dir(f"rtlsim_{node_name}_")),
                 )
                 futures[i].add_done_callback(_callback_progress(node_name))
@@ -923,15 +1023,13 @@ class BuildSimulation(Transformation):
     If simulation binaries already exist, enter their directory and only re-compile."""
 
     def __init__(
-        self,
-        fpgapart: str,
-        clk_ns: float,
-        functional_sim: bool,
+        self, fpgapart: str, clk_ns: float, functional_sim: bool, performance_sim: bool = False
     ) -> None:
         """Create a new BuildSimulation transform."""
         self.functional_sim = functional_sim
         self.fpgapart = fpgapart
         self.clk_ns = clk_ns
+        self.performance_sim = performance_sim
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         """Build / compile the model. Modifies the model."""
@@ -941,17 +1039,25 @@ class BuildSimulation(Transformation):
         needs_rebuild = True
         sim_binaries = self.model.get_metadata_prop("simulation_binaries")
 
+        if self.performance_sim:
+            log.info("[BuildSimulation] Performance simulation mode enabled.")
+
         # 1. Check if binary paths are saved in the model
         if sim_binaries is not None:
             sim_binaries = sim_binaries.split("\n")
 
             # 2. Check that the model size hasn't changed since creating the binaries. Otherwise
             # we should rebuild.
-            if len(sim_binaries) != len(self.model.graph.node):
+            nodes = (
+                [n for n in self.model.graph.node if "FIFO" not in n.op_type]
+                if self.performance_sim
+                else self.model.graph.node
+            )
+            if len(sim_binaries) != len(nodes):
                 log.info(
                     f"[BuildSimulation] Found existing binaries, but number ({len(sim_binaries)}) "
                     f"does not match number of nodes in the graph "
-                    f"({len(self.model.graph.node)}). Rebuilding..."
+                    f"({len(nodes)}). Rebuilding..."
                 )
             else:
                 log.info("Existing simulations found. Re-running only CMake/Make..")
@@ -963,8 +1069,12 @@ class BuildSimulation(Transformation):
         # This creates both the isolated and connected binaries in one go.
         if needs_rebuild:
             log.info("[BuildSimulation] Starting model preparation.")
-            self._prepare_model()
-            self.builder = SimulationBuilder(self.model, self.fpgapart, self.clk_ns)
+            # For rtlsim performance, we assume, that we already have a complete model.
+            if not self.performance_sim:
+                self._prepare_model()
+            self.builder = SimulationBuilder(
+                self.model, self.fpgapart, self.clk_ns, self.performance_sim
+            )
             with contextlib.suppress(AttributeError):
                 sys.stdout = sys.stdout.console  # type: ignore
 

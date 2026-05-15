@@ -105,7 +105,7 @@ struct CommData {
 //                      │         ready            ready       │
 //                      │                  (sim)               │
 //                      └──────────────────────────────────────┘
-template<size_t IStreamsSize, size_t OStreamsSize, bool LoggingEnabled, size_t NodeIndex, size_t TotalNodes, bool FirstNode, bool LastNode>
+template<size_t IStreamsSize, size_t OStreamsSize, bool LoggingEnabled, size_t NodeIndex, size_t TotalNodes, bool FirstNode, bool LastNode, bool PreciseTimeout>
 class SingleNodeSimulation : public Simulation<IStreamsSize, OStreamsSize, LoggingEnabled> {
     using ConsumingInterface = InterprocessCommunicationChannel<CommData, CommData, true>;
     using ProducingInterface = InterprocessCommunicationChannel<CommData, CommData, false>;
@@ -275,9 +275,11 @@ class SingleNodeSimulation : public Simulation<IStreamsSize, OStreamsSize, Loggi
         while (!std::all_of(this->ostreams.begin(), this->ostreams.end(), [](const M_AXIS_Control& stream) { return stream.stableState.is_stable(); }) & !stoken.stop_requested() &
                (cyclesRun <= max_cycles) & !timeout) {
             timeout |= runSingleCycle(stoken);
-            timeout |= runSingleCycle(stoken);
-            timeout |= runSingleCycle(stoken);
-            timeout |= runSingleCycle(stoken);
+            if constexpr (!PreciseTimeout) {
+                timeout |= runSingleCycle(stoken);
+                timeout |= runSingleCycle(stoken);
+                timeout |= runSingleCycle(stoken);
+            }
         }
         return timeout || cyclesRun > max_cycles;
     }

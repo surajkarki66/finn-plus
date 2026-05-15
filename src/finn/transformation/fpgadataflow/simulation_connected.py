@@ -206,9 +206,9 @@ class NodeConnectedSimulationController(SimulationController):
                                 cycles_results[sim_name] = cycles
                                 samples_results[sim_name] = samps
                                 intervals_results[sim_name] = intervals
-                                fifo_cycles_until_first_valid_results[
-                                    sim_name
-                                ] = fifo_cycles_until_first_valid
+                                fifo_cycles_until_first_valid_results[sim_name] = (
+                                    fifo_cycles_until_first_valid
+                                )
                                 timeout_result = timeout_result or timeout
                         except Exception as e:  # noqa
                             self.console.log(f"Simulation failed: {e}")
@@ -243,9 +243,9 @@ class NodeConnectedSimulationController(SimulationController):
                             ) = result
                             # Only update if not already collected
                             if sim_name not in fifo_results:
-                                fifo_cycles_until_first_valid_results[
-                                    sim_name
-                                ] = fifo_cycles_until_first_valid
+                                fifo_cycles_until_first_valid_results[sim_name] = (
+                                    fifo_cycles_until_first_valid
+                                )
                                 fifo_depths[sim_name] = fifo_depth
                                 fifo_results[sim_name] = fifo_util
                                 cycles_results[sim_name] = cycles
@@ -512,10 +512,14 @@ class NodeConnectedSimulation(Simulation):
         functional_sim: bool,
         workers: int | None = None,
         max_qsrl_depth: int = 256,
+        performance_sim: bool = False,
     ) -> None:
         """Initialize node-connected simulation."""
-        super().__init__(model, simulation_type, fpgapart, clk_ns, functional_sim, workers)
+        super().__init__(
+            model, simulation_type, fpgapart, clk_ns, functional_sim, workers, performance_sim
+        )
         self.max_qsrl_depth = max_qsrl_depth
+        self.performance_sim = performance_sim
 
     def simulate(
         self,
@@ -533,7 +537,11 @@ class NodeConnectedSimulation(Simulation):
                 f"does not match provided simulation type "
                 f"{self.simulation_type}"
             )
-        names = [node.name for node in self.model.graph.node]
+        names = (
+            [node.name for node in self.model.graph.node if "FIFO" not in node.op_type]
+            if self.performance_sim
+            else [node.name for node in self.model.graph.node]
+        )
         initial_depth: Any = [[depth]] * len(self.binaries) if isinstance(depth, int) else depth
 
         # For BRAM FIFOs (depth > max_qsrl_depth), hardware loses BRAM_FIFO_PIPELINE_OVERHEAD
@@ -609,7 +617,6 @@ class RunLayerParallelSimulation(Transformation):  # noqa
         if minimization_orders is not None:
             self.minimization_orders = minimization_orders
         else:
-            # TODO: Set to ALL search orders
             self.minimization_orders = [MinimizationOrder.NODE_ORDER]
 
         self.final_depths: dict[MinimizationOrder, list[list[int]] | None] = dict.fromkeys(
@@ -692,6 +699,8 @@ class RunLayerParallelSimulation(Transformation):  # noqa
         )
         model = sim.model  # TODO:clean up
 
+        work_folder = cast("Path", make_build_dir("fifo_results_", True))
+
         # Create empty table for datapoints that will be collected
         # First create as a nested dict, since not all data is avilable at the same time
         # It is then flattened when creating the dataframe, so that node and stream are columns too
@@ -716,20 +725,14 @@ class RunLayerParallelSimulation(Transformation):  # noqa
                     df_data[node.name][-1][f"simulation_time_{min_order.name}"] = -1
                     df_data[node.name][-1][f"minimization_iterations_{min_order.name}"] = -1
 
-        # TODO: The final depths contained a lot of -1 (default values).
-        # Did we need to write the initial depths into there?
-        # Or in case of minimization skip we likely need to write the values still.
-
         # Running the initial simulation
         log.info("Running initial node-connected simulation.")
         initial_fifo_depths, _ = sim.simulate()
 
         # Store the initial sizes as a report
-        initial_sizes_path = (
-            Path(self.cfg.output_dir) / "report" / "initial_fifo_sizes_sim_connected.json"
-        )
+        initial_sizes_path = work_folder / "initial_fifo_sizes_sim_connected.json"
         initial_sizes_path.write_text(json.dumps(initial_fifo_depths, indent=4))
-        log.info(f"Wrote initial sizes to: {initial_sizes_path}")
+        log.debug(f"Wrote initial sizes to: {initial_sizes_path}")
 
         # Store initial sizes in dataframe as well
         for layerdata in initial_fifo_depths:
@@ -888,7 +891,7 @@ class RunLayerParallelSimulation(Transformation):  # noqa
         model = store_fifo_data(
             model,
             df,
-            Path(self.cfg.output_dir) / "report" / "fifo_data.csv",
+            work_folder / "fifo_data.csv",
             delete_existing=False,
             store_html=True,
         )
@@ -922,18 +925,8 @@ class RunLayerParallelSimulation(Transformation):  # noqa
                 if fifo_depths[node_idx][fifo_idx] > self.max_qsrl_depth:
                     bw = bit_widths[node_idx][fifo_idx]
                     blocks = calculate_bram_blocks(fifo_depths[node_idx][fifo_idx], bw)
-                    # if len(fifo_depths[i]) > 1:
-                    #     blocks_plus_one = self._get_valid_block_counts(
-                    #         blocks + 1, blocks + 1000, bw
-                    #     )
-                    #     _, max_d = calculate_bram_depth_range(blocks_plus_one[0], bw)
-                    # else:
                     _, max_d = calculate_bram_depth_range(blocks, bw)
                     fifo_depths[node_idx][fifo_idx] = max_d
-
-        log.info("Final FIFO depths:")
-        for node_idx in range(len(fifo_depths)):
-            log.info(f"{node_idx}: {fifo_depths[node_idx]}")
 
         log.info("Running final end-to-end validation simulation with minimised FIFO depths...")
         validation_data, validation_timeout = sim.simulate(
@@ -959,14 +952,14 @@ class RunLayerParallelSimulation(Transformation):  # noqa
         log.info("Final validation simulation passed - minimised depths are correct.")
 
         # Write back results. By default write to output_dir / "fifo_config.json"
-        writeback_path = Path(self.cfg.output_dir) / "fifo_config.json"
-        assert len(fifo_depths) == len(model.graph.node)
+        writeback_path = work_folder / "fifo_config.json"
         json_results = []
         for node_idx, node in enumerate(model.graph.node):
             json_results.append({"node": node.name, "depths": fifo_depths[node_idx]})
         with writeback_path.open("w") as f:
             json.dump(json_results, f)
         log.info(f"Wrote results back to {writeback_path}")
+        model.set_metadata_prop("fifo_data", str(writeback_path))
 
         return model, False
 

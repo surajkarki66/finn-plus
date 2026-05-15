@@ -49,31 +49,32 @@ from finn.util.data_packing import to_external_tensor
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
 
+from pathlib import Path
 
-def update_bitfile_path_after_copy(bitfile_path: str, json_path: str) -> None:
+def update_bitfile_path_after_copy(bitfile_path: Path, json_path: Path) -> None:
     """Update the xclbinPath in the JSON configuration to point to the new bitfile location.
 
     Args:
-        json_path (str): Path to the JSON configuration file
-        bitfile_path (str): New path to the bitfile (.xclbin)
+        json_path (Path): Path to the JSON configuration file
+        bitfile_path (Path): New path to the bitfile (.xclbin)
     """
-    if json_path is None or not os.path.exists(json_path):
+    if json_path is None or not json_path.exists():
         raise FINNInternalError("JSON configuration file does not exist or is not specified.")
-    if bitfile_path is None or not os.path.exists(bitfile_path):
+    if bitfile_path is None or not bitfile_path.exists():
         raise FINNInternalError("Bitfile path does not exist or is not specified.")
-    if not json_path.endswith(".json"):
+    if not json_path.suffix == ".json":
         raise FINNInternalError("Provided path is not a JSON file.")
 
     # Read the current JSON configuration
-    with open(json_path) as f:
+    with json_path.open() as f:
         data = json.load(f)
 
     # Update the xclbinPath for each device in the configuration
     for device_config in data:
-        device_config["xclbinPath"] = os.path.abspath(bitfile_path)
+        device_config["xclbinPath"] = bitfile_path.resolve().as_posix()
 
     # Write the updated configuration back to the file
-    with open(json_path, "w") as f:
+    with json_path.open("w") as f:
         json.dump(data, f, indent=4)
 
 

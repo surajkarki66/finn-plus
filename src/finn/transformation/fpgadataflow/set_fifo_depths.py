@@ -29,18 +29,20 @@
 
 """Transformations for inserting and setting the size of FIFOs in FINN dataflow graphs."""
 
-from finn.util.exception import FINNUserError
+import json
 from onnx import TensorProto, helper
+from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
-from finn.util.basic import getHWCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveReadableTensorNames, SortGraph
 from typing import Literal, cast
-from pathlib import Path
-import json
 
+from finn.util.basic import getHWCustomOp
+from finn.util.exception import FINNUserError
 from finn.util.logging import log
+
+from onnx import NodeProto
 
 
 class ApplyFIFODepthsFromFile(Transformation):
@@ -57,7 +59,7 @@ class ApplyFIFODepthsFromFile(Transformation):
         with self.fifo_config_file.open() as f:
             fifo_info = json.load(f)
 
-        #JSON file format:
+        # JSON file format:
         # {
         # "fifo_depths": {
         #     "StreamingFIFO_rtl_0": 2,
@@ -83,70 +85,90 @@ class ApplyFIFODepthsFromFile(Transformation):
         graph_modified = False
         for node in fifo_nodes:
             if node.name not in fifo_info["fifo_depths"]:
-                raise FINNUserError(
-                    f"FIFO node {node.name} not found in configuration file"
-                )
+                raise FINNUserError(f"FIFO node {node.name} not found in configuration file")
             n_inst = getHWCustomOp(node)
             depth = fifo_info["fifo_depths"][node.name]
+            old_depth = n_inst.get_nodeattr("depth")
+            if depth == old_depth:
+                continue
             impl_style = fifo_info["impl_style"][node.name]
             ram_style = fifo_info["ram_style"][node.name]
             n_inst.set_nodeattr("depth", depth)
             n_inst.set_nodeattr("impl_style", impl_style)
             n_inst.set_nodeattr("ram_style", ram_style)
+
+            producer = model.find_producer(node.input[0])
+            if producer is not None:
+                prod_node = getHWCustomOp(producer)
+                out_fifo_depths = cast("list[int]", prod_node.get_nodeattr("outFIFODepths"))
+                succ = cast("list[NodeProto]", model.find_direct_successors(producer))
+                num_succ = len(succ)
+                if len(out_fifo_depths) != num_succ:
+                    out_fifo_depths = [0] * num_succ
+                for i, s in enumerate(succ):
+                    if s.name == node.name:
+                        out_fifo_depths[i] = depth
+                prod_node.set_nodeattr(
+                    "outFIFODepths", cast("list[int|str|float]", out_fifo_depths)
+                )
+
             graph_modified = True
         return (model, graph_modified)
 
-def get_fifo_split_configs(depth: int, max_qsrl_depth: int = 256, max_vivado_depth: int = 32768
-    ) -> list[tuple[int, str]]:
-        """Break non-power-of-2 sized FIFO depths into several ones."""
 
-        def floor_pow2(x: int) -> int:
-            """Return the largest power of 2 less than or equal to x."""
-            if (x & (x - 1) == 0) and x != 0:
-                return x
-            return 1 << ((x - 1).bit_length() - 1)
+def get_fifo_split_configs(
+    depth: int, max_qsrl_depth: int = 256, max_vivado_depth: int = 32768
+) -> list[tuple[int, str]]:
+    """Break non-power-of-2 sized FIFO depths into several ones."""
 
-        def decompose_pow2(x: int) -> list[int]:
-            """Decompose x into a sum of powers of 2,
-            with each power of 2 no larger than max_qsrl_depth.
-            """
-            if x <= max_qsrl_depth:
-                return [x]
-            r = floor_pow2(x)
-            if x == r:
-                return [x]
-            return [r, *decompose_pow2(x - r)]
+    def floor_pow2(x: int) -> int:
+        """Return the largest power of 2 less than or equal to x."""
+        if (x & (x - 1) == 0) and x != 0:
+            return x
+        return 1 << ((x - 1).bit_length() - 1)
 
-        ret = []
-        # trivial case: for small FIFOs, return as-is with rtl style
-        if depth <= max_qsrl_depth:
-            return [(depth, "rtl")]
-        # first pass: ensure max depth is respected
-        # (restricted by Vivado AXIS infra IP)
-        remainder = depth
-        while remainder != 0:
-            if remainder > max_vivado_depth:
-                ret.append(max_vivado_depth)
-                remainder -= max_vivado_depth
-            else:
-                ret.append(remainder)
-                remainder = 0
-        # second pass: break non-power-of-2 sized FIFOs
-        # into several ones
+    def decompose_pow2(x: int) -> list[int]:
+        """Decompose x into a sum of powers of 2,
+        with each power of 2 no larger than max_qsrl_depth.
+        """
+        if x <= max_qsrl_depth:
+            return [x]
+        r = floor_pow2(x)
+        if x == r:
+            return [x]
+        return [r, *decompose_pow2(x - r)]
 
-        ret_pass2 = list(map(decompose_pow2, ret))
-        # unpack list of lists
-        ret_pass2 = [x for dec_list in ret_pass2 for x in dec_list]
+    ret = []
+    # trivial case: for small FIFOs, return as-is with rtl style
+    if depth <= max_qsrl_depth:
+        return [(depth, "rtl")]
+    # first pass: ensure max depth is respected
+    # (restricted by Vivado AXIS infra IP)
+    remainder = depth
+    while remainder != 0:
+        if remainder > max_vivado_depth:
+            ret.append(max_vivado_depth)
+            remainder -= max_vivado_depth
+        else:
+            ret.append(remainder)
+            remainder = 0
+    # second pass: break non-power-of-2 sized FIFOs
+    # into several ones
 
-        # finally, add impl_style to each split FIFO
-        ret_final = []
-        for cand_depth in ret_pass2:
-            if cand_depth <= max_qsrl_depth:
-                ret_final.append((max(2, cand_depth), "rtl"))
-            else:
-                ret_final.append((cand_depth, "vivado"))
+    ret_pass2 = list(map(decompose_pow2, ret))
+    # unpack list of lists
+    ret_pass2 = [x for dec_list in ret_pass2 for x in dec_list]
 
-        return ret_final
+    # finally, add impl_style to each split FIFO
+    ret_final = []
+    for cand_depth in ret_pass2:
+        if cand_depth <= max_qsrl_depth:
+            ret_final.append((max(2, cand_depth), "rtl"))
+        else:
+            ret_final.append((cand_depth, "vivado"))
+
+    return ret_final
+
 
 class SplitLargeFIFOs(Transformation):
     """Split large FIFOs before implementation, for two reasons.
@@ -175,9 +197,7 @@ class SplitLargeFIFOs(Transformation):
             if node.op_type == ("StreamingFIFO_rtl"):
                 n_inst = getHWCustomOp(node)
                 depth = cast("int", n_inst.get_nodeattr("depth"))
-                cfgs = get_fifo_split_configs(
-                    depth, self.max_qsrl_depth, self.max_vivado_depth
-                )
+                cfgs = get_fifo_split_configs(depth, self.max_qsrl_depth, self.max_vivado_depth)
                 if len(cfgs) > 1:
                     fld_shape = n_inst.get_folded_output_shape()
                     n_shape = n_inst.get_normal_output_shape()
