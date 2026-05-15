@@ -27,41 +27,65 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as np
-import os
-import shlex
-import subprocess
-import sys
-from pathlib import Path
-from qonnx.custom_op.registry import getCustomOp
-from subprocess import CalledProcessError
+from collections.abc import Callable
 
-from finn import xsi
+from finn_xsi.sim_engine import SimEngine
+import numpy as np
+from pathlib import Path
+from finn.util.basic import getHWCustomOp
+
+from finn import xsi as finnxsi
 from finn.util.basic import (
     get_liveness_threshold_cycles,
-    get_vivado_root,
-    launch_process_helper,
     make_build_dir,
 )
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
-from finn.util.exception import FINNConfigurationError, FINNError, FINNInternalError, FINNUserError
-from finn.util.logging import log
 
-finnxsi = xsi if xsi.is_available() else None
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from qonnx.core.datatype import BaseDataType
+    from qonnx.core.modelwrapper import ModelWrapper
+
+from finn.util.exception import FINNUserError
+
+from ast import literal_eval
 
 
-def prep_rtlsim_io_dict(model, execution_context):
+def prep_rtlsim_io_dict(
+    model: "ModelWrapper", execution_context: dict[str, np.ndarray]
+) -> tuple[
+    dict[str, dict[str, list[int]]],
+    dict[str, list[tuple[str, int]] | list[str]],
+    dict[str, int] | int,
+    list[tuple[int, "BaseDataType", tuple[int, ...], tuple[int, ...]]],
+    int,
+]:
     """Prepare the input/output dictionary for RTLSim execution."""
     # extract i/o info to prepare io_dict
     io_dict = {"inputs": {}, "outputs": {}}
-    if_dict = eval(model.get_metadata_prop("vivado_stitch_ifnames"))
+    if_names = model.get_metadata_prop("vivado_stitch_ifnames")
+    if if_names is None:
+        raise FINNUserError(
+            "Vivado stitch interface names not found in model metadata. "
+            "Did you run step_create_stitched_ip first?"
+        )
+    if_dict: dict[str, list[tuple[str, int]] | list[str]] = literal_eval(if_names)
     # go over and prepare inputs
+    batchsize = None
+    first_node = None
+    if_name = None
     for i, i_vi in enumerate(model.graph.input):
         i_name = i_vi.name
         i_tensor = execution_context[i_name]
         i_dt = model.get_tensor_datatype(i_name)
         first_node_onnx = model.find_consumer(i_name)
-        first_node = getCustomOp(first_node_onnx)
+        if first_node_onnx is None:
+            raise FINNUserError(
+                f"Input {i_name} has no consumer node in the model. "
+                f"Check that the inputs are all properly connected."
+            )
+        first_node = getHWCustomOp(first_node_onnx)
         node_inp_ind = list(first_node_onnx.input).index(i_name)
         if node_inp_ind == 0:
             # default node input (input 0)
@@ -90,8 +114,14 @@ def prep_rtlsim_io_dict(model, execution_context):
         if_name = if_dict["s_axis"][i][0]
         io_dict["inputs"][if_name] = packed_input
     # go over outputs to determine how many values will be produced
-    num_out_values = {}
-    o_tensor_info = []
+    num_out_values: dict[str, int] | int = {}
+    o_tensor_info: list[tuple[int, BaseDataType, tuple[int, ...], tuple[int, ...]]] = []
+    if first_node is None or batchsize is None or if_name is None:
+        raise FINNUserError(
+            "No consumer node found for first input. "
+            "Cannot determine output stream widths and number of output values. "
+            "Check that the inputs are all properly connected and consumed by a node."
+        )
     for o, o_vi in enumerate(model.graph.output):
         # output in io_dict just needs an empty list
         if_name = if_dict["m_axis"][o][0]
@@ -99,8 +129,20 @@ def prep_rtlsim_io_dict(model, execution_context):
         # extract output shape
         o_name = o_vi.name
         o_shape = model.get_tensor_shape(o_name)
+        if o_shape is None:
+            raise FINNUserError(
+                f"Shape of output {o_name} is not known. "
+                f"Cannot determine number of output values. "
+                f"Check that the model is properly inferred and shapes are known."
+            )
         o_dt = model.get_tensor_datatype(o_name)
-        last_node = getCustomOp(model.find_producer(o_name))
+        last_node_onnx = model.find_producer(o_name)
+        if last_node_onnx is None:
+            raise FINNUserError(
+                f"Output {o_name} has no producer node in the model. "
+                f"Check that the outputs are all properly connected."
+            )
+        last_node = getHWCustomOp(last_node_onnx)
         o_folded_shape = last_node.get_folded_output_shape()
         # override batch size from actual input
         o_shape = list(o_shape)
@@ -121,247 +163,37 @@ def prep_rtlsim_io_dict(model, execution_context):
     return io_dict, if_dict, num_out_values, o_tensor_info, batchsize
 
 
-def file_to_basename(x: str | Path) -> str:
-    """Given a path return it's name (basename), without any symlinks."""
-    # return str(Path(x).resolve())
-    return os.path.basename(os.path.realpath(x))
-
-
-def rtlsim_exec_cppxsi(
-    model,
-    execution_context,
-    is_single_node: bool,
-    total_nodes: int = 1,
-    current_node_index: int | None = None,
-    previous_node_name: str | None = None,
-    dummy_data_mode=False,
-    timeout_cycles=None,
-    throttle_cycles=0,
-):
-    """Use XSI C++ rtl simulation to execute given model with stitched IP.
-    The dummy_data_mode flag controls whether the simulation is driven by
-    dummy data or real data. The execution_context parameter must be formatted
-    according to whether dummy or real data is used.
-    Example with dummy_data = True:
-        execution_context = {
-            "inputs" : {"<name_of_input_stream>" : <number_of_transactions>},
-            "outputs" : {"<name_of_output_stream>" : <number_of_transactions>},
-        }
-    Example with dummy_data = False:
-        execution_context = {
-            "<tensor_name>" : <np.ndarray>
-        }.
-
-    If timeout_cycles is not None, the default value from get_liveness_threshold_cycles
-    will be used.
-    throttle_cycles will be used to pause the input stream every time an input frame is finished.
-    """
-    # TODO: support running functional rtlsim with real I/O data
-    # TODO: support running with multiple inputs/outputs
-    if timeout_cycles is None:
-        timeout_cycles = get_liveness_threshold_cycles()
-
-    assert dummy_data_mode, "Only dummy_data_mode=True is supported for now"
-    if finnxsi is None:
-        raise FINNConfigurationError("Cannot execute RTLSIM since finn_xsi is not available!")
-
-    # ensure stitched ip project already exists
-    assert os.path.isfile(
-        model.get_metadata_prop("wrapper_filename")
-    ), """The
-    file name from metadata property "wrapper_filename" doesn't exist."""
-    assert os.path.isdir(
-        model.get_metadata_prop("vivado_stitch_proj")
-    ), """The
-    directory from metadata property "vivado_stitch_proj" doesn't exist"""
-    trace_file = model.get_metadata_prop("rtlsim_trace")
-    if not dummy_data_mode:
-        # ignore last value which would be batchsize
-        io_dict, if_dict, num_out_values, o_tensor_info = prep_rtlsim_io_dict(
-            model, execution_context
-        )[:-1]
-
-    # prepare rtlsim compiled object (unless it already exists)
-    rtlsim_so = model.get_metadata_prop("rtlsim_so")
-    top_module_file_name = file_to_basename(model.get_metadata_prop("wrapper_filename"))
-    top_module_name = top_module_file_name.strip(".v")
-    if (rtlsim_so is None) or (not os.path.isfile(rtlsim_so)):
-        vivado_stitch_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
-        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt") as f:
-            all_verilog_srcs = f.read().split()
-        rtlsim_name = model.graph.node[0].name if is_single_node else top_module_name
-        single_src_dir = make_build_dir("rtlsim_" + rtlsim_name + "_")
-        debug = not (trace_file is None or trace_file == "")
-        rtlsim_so = finnxsi.compile_sim_obj(
-            top_module_name, all_verilog_srcs, single_src_dir, debug=debug, behav=True
-        )
-        # save generated lib filename in attribute
-        model.set_metadata_prop("rtlsim_so", rtlsim_so[0] + "/" + rtlsim_so[1])
-        sim_base, sim_rel = rtlsim_so
-        # pass in correct tracefile from attribute
-        if trace_file == "default":
-            trace_file = top_module_file_name + ".wdb"
-    else:
-        sim_base, sim_rel = rtlsim_so.split("xsim.dir")
-        sim_rel = "xsim.dir" + sim_rel
-
-    # TODO: There has to be a better solution than using the relative path
-
-    # 1. Assume we are in a git repository
-    finnxsi_dir = Path(__file__).parent.parent.parent.parent / "finn_xsi" / "finn_xsi"
-    fifosim_config_fname = finnxsi_dir / "rtlsim_config.hpp.template"
-
-    # 2. We have to assume that we are in site-packages/finn/core
-    if not fifosim_config_fname.exists():
-        finnxsi_dir = Path(__file__).parent.parent.parent / "finn_xsi"
-        fifosim_config_fname = finnxsi_dir / "rtlsim_config.hpp.template"
-
-        # Where are we?
-        if not fifosim_config_fname.exists():
-            raise FINNInternalError("The finn_xsi directory could not be found. Stopping here.")
-
-    instream_iters = []
-    outstream_iters = []
-    for top_inp in model.graph.input:
-        iname = top_inp.name
-        first_node = model.find_consumer(iname)
-        assert first_node is not None, "Failed to find consumer for " + iname
-        fnode_inst = getCustomOp(first_node)
-        top_ind = list(first_node.input).index(iname)
-        ishape_folded = fnode_inst.get_folded_input_shape(ind=top_ind)
-        instream_iters.append(np.prod(ishape_folded[:-1]))
-    for top_out in model.graph.output:
-        oname = top_out.name
-        last_node = model.find_producer(oname)
-        assert last_node is not None, "Failed to find producer for " + oname
-        lnode_inst = getCustomOp(last_node)
-        top_ind = list(last_node.output).index(oname)
-        oshape_folded = lnode_inst.get_folded_output_shape(ind=top_ind)
-        outstream_iters.append(np.prod(oshape_folded[:-1]))
-
-    # retrieve the number of inputs from execution_context
-    n_inferences = execution_context[model.get_first_global_in()]
-    ifnames = model.get_metadata_prop("vivado_stitch_ifnames")
-    assert (
-        ifnames is not None
-    ), "Couldn't find stitched-IP interface names, did you run IP stitching first?"
-    ifnames = eval(ifnames)
-    if "aximm" in ifnames.keys() and ifnames["aximm"] != []:
-        assert (
-            False
-        ), f"cppxsi sim doesn't know how to handle full AXI MM interfaces: {ifnames['aximm']}"
-    instream_names = [x[0] for x in ifnames["s_axis"]]
-    outstream_names = [x[0] for x in ifnames["m_axis"]]
-    instream_descrs = [
-        (instream_names[i], instream_iters[i], instream_iters[i] + throttle_cycles)
-        for i in range(len(instream_names))
-    ]
-    instream_descrs_str = str(instream_descrs).replace("[", "").replace("]", "")
-    instream_descrs_str = instream_descrs_str.replace("(", "{").replace(")", "}")
-    instream_descrs_str = instream_descrs_str.replace("'", '"')
-
-    outstream_descrs = [
-        (outstream_names[i], outstream_iters[i], outstream_iters[i])
-        for i in range(len(outstream_names))
-    ]
-    outstream_descrs_str = str(outstream_descrs).replace("[", "").replace("]", "")
-    outstream_descrs_str = outstream_descrs_str.replace("(", "{").replace(")", "}")
-    outstream_descrs_str = outstream_descrs_str.replace("'", '"')
-
-    # fill in the template arguments for sim config
-    template_dict = {
-        # number of inferences
-        "N_INFERENCES": n_inferences,
-        # max number of cycles to wait for output activity before timeout
-        "TIMEOUT_CYCLES": timeout_cycles,
-        # name of the top-level HDL module
-        "TOP_MODULE_NAME": top_module_name,
-        # top-level AXI stream descriptors
-        "ISTREAM_DESC": instream_descrs_str,
-        "ISTREAM_LEN": len(instream_names),
-        "OSTREAM_DESC": outstream_descrs_str,
-        "OSTREAM_LEN": len(outstream_names),
-        # control tracing and trace filename
-        "TRACE_FILE": "nullptr" if trace_file is None else f'"{trace_file}"',
-        # sim kernel .so to use (depends on Vivado version)
-        "SIMKERNEL_SO": finnxsi.get_simkernel_so(),
-        # log file for xsi (not the sim driver)
-        "XSIM_LOG_FILE": '"xsi.log"',
-        # Node name in case of single-node simulation
-        "NODE_NAME": model.graph.node[0].name,
-        # Previous node name (for single node simulation)
-        "PREVIOUS_NODE_NAME": "std::nullopt"
-        if previous_node_name is None
-        else f'"{previous_node_name}"',
-        "NODE_INDEX": current_node_index if is_single_node else 0,
-        "TOTAL_NODES": total_nodes,
-    }
-
-    fifosim_config_fname = Path(finnxsi_dir) / "rtlsim_config.hpp.template"
-    fsim_config = fifosim_config_fname.read_text()
-    for key, val in template_dict.items():
-        fsim_config = fsim_config.replace(f"@{key}@", str(val))
-
-    # Write the config to the simulation directory
-    rtlsim_config = Path(sim_base) / "rtlsim_config.hpp"
-    rtlsim_config.write_text(fsim_config)
-
-    # Building the whole simulation
-    # Running CMake first
-    cmake_call = f"{sys.executable} -m cmake -S {finnxsi_dir} -B {sim_base}"
-    log.info(f"Running cmake on RTLSIM Wrapper in {sim_base}")
-    try:
-        launch_process_helper(
-            shlex.split(cmake_call), cwd=finnxsi_dir, print_stdout=True, proc_env=os.environ.copy()
-        )
-    except CalledProcessError as e:
-        raise FINNError(f"Failed to run cmake in {sim_base}") from e
-
-    # Calling make to actually build the simulation
-    makefile = Path(sim_base) / "Makefile"
-    if not makefile.exists():
-        raise FINNUserError(f"Failed to create Makefile in {sim_base}!")
-    try:
-        launch_process_helper(["make"], proc_env=os.environ.copy(), cwd=sim_base)
-    except CalledProcessError as e:
-        raise FINNUserError(f"Failed to create executable in {sim_base}!") from e
-
-    # TODO: Fix name for general rtlsim
-    simulation_executable = Path(sim_base) / "LayerSimulationBackend"
-    assert simulation_executable.exists()
-
-    # Prepare the script to run the simulation
-    # (important to specify LD_LIBRARY_PATH here for XSI to work correctly)
-    runsim = Path(sim_base) / "run_fifosim.sh"
-    ld_library_path = get_vivado_root() + "/lib/lnx64.o"
-    runsim.write_text(f"LD_LIBRARY_PATH={ld_library_path}:$LD_LIBRARY_PATH {simulation_executable}")
-
-    # Actually run the simulation
-    subprocess.run(
-        ["bash", runsim.name], cwd=sim_base, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-
-    # parse results file and return dict
-    # TODO
-    return {}
-
-
-def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None):
+def rtlsim_exec_finnxsi(
+    model: "ModelWrapper",
+    execution_context: dict[str, np.ndarray],
+    pre_hook: Callable[[SimEngine], None] | None = None,
+    post_hook: Callable[[SimEngine], None] | None = None,
+) -> None:
     """Use finnxsi to execute given model with stitched IP. The execution
     context contains the input values. Hook functions can be optionally
     specified to observe/alter the state of the circuit
     - pre_hook : hook function to be called before sim start (after reset)
-    - post_hook : hook function to be called after sim end
+    - post_hook : hook function to be called after sim end.
     """
     # ensure stitched ip project already exists
-    assert os.path.isfile(
-        model.get_metadata_prop("wrapper_filename")
-    ), """The
-    file name from metadata property "wrapper_filename" doesn't exist."""
-    assert os.path.isdir(
-        model.get_metadata_prop("vivado_stitch_proj")
-    ), """The
-    directory from metadata property "vivado_stitch_proj" doesn't exist"""
+    wrapper_filename = model.get_metadata_prop("wrapper_filename")
+    if wrapper_filename is None:
+        wrapper_filename = ""
+    wrapper_filename = Path(wrapper_filename)
+    if not wrapper_filename.is_file():
+        raise FINNUserError(
+            f"Wrapper file {wrapper_filename} doesn't exist. "
+            f"Did you run step_create_stitched_ip first?"
+        )
+    vivado_stitch_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
+    if vivado_stitch_proj_dir is None:
+        vivado_stitch_proj_dir = ""
+    vivado_stitch_proj_dir = Path(vivado_stitch_proj_dir)
+    if not vivado_stitch_proj_dir.is_dir():
+        raise FINNUserError(
+            f"Directory {vivado_stitch_proj_dir} doesn't exist. "
+            f"Did you run step_create_stitched_ip first?"
+        )
     trace_file = model.get_metadata_prop("rtlsim_trace")
     io_dict, if_dict, num_out_values, o_tensor_info, batchsize = prep_rtlsim_io_dict(
         model, execution_context
@@ -369,19 +201,18 @@ def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None)
 
     # prepare rtlsim model
     rtlsim_so = model.get_metadata_prop("rtlsim_so")
-    if (rtlsim_so is None) or (not os.path.isfile(rtlsim_so)):
-        vivado_stitch_proj_dir = model.get_metadata_prop("vivado_stitch_proj")
-        with open(vivado_stitch_proj_dir + "/all_verilog_srcs.txt") as f:
+    if (rtlsim_so is None) or (not Path(rtlsim_so).is_file()):
+        with (vivado_stitch_proj_dir / "all_verilog_srcs.txt").open() as f:
             all_verilog_srcs = f.read().split()
-        top_module_file_name = file_to_basename(model.get_metadata_prop("wrapper_filename"))
+        top_module_file_name = wrapper_filename.name
         top_module_name = top_module_file_name.strip(".v")
-        single_src_dir = make_build_dir("rtlsim_" + top_module_name + "_")
+        single_src_dir = Path(make_build_dir("rtlsim_" + top_module_name + "_"))
         debug = not (trace_file is None or trace_file == "")
         rtlsim_so = finnxsi.compile_sim_obj(
             top_module_name, all_verilog_srcs, single_src_dir, debug=debug
         )
         # save generated lib filename in attribute
-        model.set_metadata_prop("rtlsim_so", rtlsim_so[0] + "/" + rtlsim_so[1])
+        model.set_metadata_prop("rtlsim_so", str(rtlsim_so[0] / rtlsim_so[1]))
         sim_base, sim_rel = rtlsim_so
         # pass in correct tracefile from attribute
         if trace_file == "default":
@@ -390,7 +221,7 @@ def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None)
     else:
         sim_base, sim_rel = rtlsim_so.split("xsim.dir")
         sim_rel = "xsim.dir" + sim_rel
-        sim = finnxsi.load_sim_obj(sim_base, sim_rel, trace_file)
+        sim = finnxsi.load_sim_obj(Path(sim_base), Path(sim_rel), trace_file)
 
     # reset and call rtlsim, including any pre/post hooks
     finnxsi.reset_rtlsim(sim)
@@ -422,12 +253,17 @@ def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None)
     model.set_metadata_prop("cycles_rtlsim", str(n_cycles))
 
 
-def rtlsim_exec(model, execution_context, pre_hook=None, post_hook=None):
+def rtlsim_exec(
+    model: "ModelWrapper",
+    execution_context: dict[str, np.ndarray],
+    pre_hook: Callable[[SimEngine], None] | None = None,
+    post_hook: Callable[[SimEngine], None] | None = None,
+) -> None:
     """Use XSI to execute given model with stitched IP. The execution
     context contains the input values. Hook functions can be optionally
     specified to observe/alter the state of the circuit, receiving the
     sim object as their first argument:
     - pre_hook : hook function to be called before sim start (after reset)
-    - post_hook : hook function to be called after sim end
+    - post_hook : hook function to be called after sim end.
     """
     rtlsim_exec_finnxsi(model, execution_context, pre_hook, post_hook)

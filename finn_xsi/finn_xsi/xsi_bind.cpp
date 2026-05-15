@@ -34,6 +34,9 @@ namespace {
 
 PYBIND11_MODULE(xsi, m) {
 
+	py::class_<Kernel, std::shared_ptr<Kernel>>(m, "Kernel")
+		.def(py::init<std::string const &>());
+
 	py::class_<Design, std::unique_ptr<Design, DesignDeleter>>(m, "Design")
 		.def(py::init([](
 			std::shared_ptr<Kernel> const &kernel,

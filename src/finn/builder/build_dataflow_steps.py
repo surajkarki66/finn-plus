@@ -407,54 +407,6 @@ def step_hw_ipgen(
 
     return model
 
-
-@register_build_dataflow_step()
-def step_build_simulation(
-    model: ModelWrapper,
-    cfg: DataflowBuildConfig,
-    parent_node: str | None = None,
-    performance_sim: bool = False,
-) -> ModelWrapper:
-    """Build the simulation binaries for isolated and connected simulations."""
-    if cfg.fifosim_save_waveform:
-        report_dir = Path(cfg.output_dir) / "report"
-        report_dir.mkdir(parents=True, exist_ok=True)
-        tracefile = (
-            f"{parent_node}_fifosim_trace.wdb" if parent_node is not None else "fifosim_trace.wdb"
-        )
-        model.set_metadata_prop("rtlsim_trace", str(report_dir.absolute()) + tracefile)
-
-    model = model.transform(
-        BuildSimulation(
-            cfg._resolve_fpga_part(),
-            cfg._resolve_hls_clk_period(),
-            cfg.functional_simulation,
-            performance_sim=performance_sim,
-        )
-    )
-    return model
-
-
-@register_build_dataflow_step()
-def step_size_fifo_connected(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Simulate layers connected and use the observed behaviour to size the FIFOs accordingly."""
-    model = model.transform(
-        RunLayerParallelSimulation(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period(), cfg)
-    )
-    return model
-
-
-@register_build_dataflow_step()
-def step_apply_fifosizes(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
-    """Apply the previously found FIFO sizes to the model."""
-    model = model.transform(ApplySimulatedFIFOSizes(cfg))
-    if cfg.split_large_fifos:
-        model = model.transform(SplitLargeFIFOs(max_qsrl_depth=256))
-    model = model.transform(GiveUniqueNodeNamesRecursive())
-    model = model.transform(GiveReadableTensorNames())
-    return model
-
-
 @register_build_dataflow_step()
 def step_set_fifo_depths(
     model: ModelWrapper, cfg: DataflowBuildConfig, parent_node: str | None = None
@@ -473,8 +425,29 @@ def step_set_fifo_depths(
             report_dir.mkdir(parents=True, exist_ok=True)
             model.set_metadata_prop("rtlsim_trace", str(report_dir.resolve() / "fifosim_trace.wdb"))
         if cfg.auto_fifo_strategy == AutoFIFOSizingMethod.DISTRIBUTED_SIMULATION:
-            model = step_build_simulation(model, cfg, parent_node=parent_node)
-            model = step_size_fifo_connected(model, cfg)
+            if cfg.fifosim_save_waveform:
+                report_dir = Path(cfg.output_dir) / "report"
+                report_dir.mkdir(parents=True, exist_ok=True)
+                tracefile = (
+                    f"{parent_node}_fifosim_trace.wdb"
+                    if parent_node is not None
+                    else "fifosim_trace.wdb"
+                )
+                model.set_metadata_prop("rtlsim_trace", str(report_dir.absolute()) + tracefile)
+
+            model = model.transform(
+                BuildSimulation(
+                    cfg._resolve_fpga_part(),
+                    cfg._resolve_hls_clk_period(),
+                    cfg.functional_simulation,
+                    performance_sim=False,
+                )
+            )
+            model = model.transform(
+                RunLayerParallelSimulation(
+                    cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period(), cfg
+                )
+            )
             model = model.transform(ApplySimulatedFIFOSizes(cfg))
         elif cfg.auto_fifo_strategy == AutoFIFOSizingMethod.LIVE_FIFO:
             hw_attrs = [

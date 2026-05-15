@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import Any
 from finn.util.logging import log
+from finn.util.exception import FINNUserError
 
 
 # Track if auto-install has been attempted
@@ -32,7 +33,6 @@ _auto_install_attempted = False
 # Cache for loaded modules
 _adapter_module: Any | None = None
 _sim_engine_module: Any | None = None
-_xsi_module: Any | None = None
 
 
 def is_available() -> bool:
@@ -98,7 +98,7 @@ def _attempt_auto_install() -> bool:
 
 def _load_modules() -> bool:
     """Load finn_xsi modules if available."""
-    global _adapter_module, _sim_engine_module, _xsi_module
+    global _adapter_module, _sim_engine_module
 
     if _adapter_module is not None:
         return True
@@ -118,9 +118,7 @@ def _load_modules() -> bool:
     try:
         import finn_xsi.adapter
         import finn_xsi.sim_engine
-        import xsi
 
-        _xsi_module = xsi
         _adapter_module = finn_xsi.adapter
         _sim_engine_module = finn_xsi.sim_engine
 
@@ -142,47 +140,19 @@ def _load_modules() -> bool:
                 sys.path.remove(str(xsi_path))
 
 
-# List of functions to wrap from finn_xsi.adapter
-_ADAPTER_FUNCTIONS = [
-    "locate_glbl",
-    "compile_sim_obj",
-    "get_simkernel_so",
-    "load_sim_obj",
-    "reset_rtlsim",
-    "close_rtlsim",
-    "rtlsim_multi_io",
-]
-
-
-def __getattr__(name: str) -> Any:
-    """Dynamically wrap finn_xsi.adapter functions."""
-    if name in _ADAPTER_FUNCTIONS:
-
-        def _wrapper(*args, **kwargs):
-            if not _load_modules():
-                raise ImportError("finn_xsi not available. Run: python -m finn.xsi.setup")
-            return getattr(_adapter_module, name)(*args, **kwargs)
-
-        _wrapper.__name__ = name
-        _wrapper.__doc__ = f"Wrapper for finn_xsi.adapter.{name}"
-        return _wrapper
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
-
-
-# SimEngine class wrapper
-class SimEngine:
-    """Wrapper for finn_xsi.sim_engine.SimEngine."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        """Create a new SimEngine."""
-        if not _load_modules():
-            raise ImportError("finn_xsi not available. Run: python -m finn.xsi.setup")
-        self._engine = _sim_engine_module.SimEngine(*args, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        """Get attribute of the given name."""
-        return getattr(self._engine, name)
-
-
 # Trigger auto-install at import time
-is_available()
+xsi_avail = is_available()
+
+if xsi_avail is False:
+    raise FINNUserError("XSI not available. Please run 'finn deps update' to install XSI.")
+
+from finn_xsi.sim_engine import SimEngine  # noqa
+from finn_xsi.adapter import ( #noqa
+    locate_glbl,
+    compile_sim_obj,
+    get_simkernel_so,
+    load_sim_obj,
+    reset_rtlsim,
+    close_rtlsim,
+    rtlsim_multi_io,
+)
