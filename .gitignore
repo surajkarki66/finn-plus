@@ -68,6 +68,7 @@ poetry.lock
 **/_deps
 finn_xsi/finn_xsi/unittests/*.cmake
 finn_xsi/finn_xsi/unittests/Makefile
+finn_xsi/finn_xsi/VERSION
 
 settings.yaml
 */.cache/*

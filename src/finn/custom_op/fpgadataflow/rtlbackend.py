@@ -43,14 +43,13 @@ if TYPE_CHECKING:
     from onnx import GraphProto
     from qonnx.core.modelwrapper import ModelWrapper
 
-from finn import xsi
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.util.basic import make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
 from finn.util.exception import FINNInternalError
 from finn.util.logging import log
 
-finnxsi = xsi if xsi.is_available() else None
+import finn.xsi as finnxsi
 
 
 class RTLBackend(HWCustomOp, ABC):
@@ -96,24 +95,26 @@ class RTLBackend(HWCustomOp, ABC):
             None
         """
 
-    def prepare_rtlsim(self) -> None:
+    def prepare_rtlsim(self, behav: bool) -> None:
         """Create a xsi emulation library for the RTL code generated for this node.
         Sets the rtlsim_so attribute to the path of the generated library.
 
         Returns:
             None
         """
-        import finn_xsi.adapter as finnxsi
-
         verilog_files = self.get_rtl_file_list(abspath=True)
-        single_src_dir = make_build_dir("rtlsim_" + self.onnx_node.name + "_")
+        single_src_dir = Path(make_build_dir("rtlsim_" + self.onnx_node.name + "_"))
         trace_file = self.get_nodeattr("rtlsim_trace")
         debug = not (trace_file is None or trace_file == "")
         ret = finnxsi.compile_sim_obj(
-            self.get_verilog_top_module_name(), verilog_files, single_src_dir, debug
+            self.get_verilog_top_module_name(),
+            [str(f) for f in verilog_files],
+            single_src_dir,
+            debug,
+            behav,
         )
         # save generated lib filename in attribute
-        self.set_nodeattr("rtlsim_so", ret[0] + "/" + ret[1])
+        self.set_nodeattr("rtlsim_so", str(ret[0] / ret[1]))
 
     def get_verilog_paths(self) -> list[str]:
         """Return path to code gen directory.
@@ -162,7 +163,9 @@ class RTLBackend(HWCustomOp, ABC):
         self.generate_hdl(model, fpgapart, clk)
 
     def execute_node(
-        self, context: dict[str, npt.NDArray], graph: "GraphProto"  # noqa: ARG002
+        self,
+        context: dict[str, npt.NDArray],
+        graph: "GraphProto",  # noqa: ARG002
     ) -> None:
         """Execute this node's RTL simulation.
 
@@ -246,9 +249,9 @@ class RTLBackend(HWCustomOp, ABC):
                 output = np.asarray([output], dtype=np.float32).reshape(*exp_oshape)
                 context[outp] = output
 
-                assert (
-                    context[outp].shape == exp_oshape
-                ), "Output shape doesn't match expected shape."
+                assert context[outp].shape == exp_oshape, (
+                    "Output shape doesn't match expected shape."
+                )
 
         else:
             raise Exception(

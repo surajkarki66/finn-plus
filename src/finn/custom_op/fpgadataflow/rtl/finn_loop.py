@@ -43,7 +43,6 @@ from qonnx.util.basic import get_by_name, qonnx_make_model, roundup_to_integer_m
 from typing import cast
 
 import finn.core.onnx_exec as oxe
-from finn import xsi
 from finn.analysis.fpgadataflow.dataflow_performance import dataflow_performance
 from finn.custom_op.fpgadataflow import templates
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
@@ -56,7 +55,7 @@ from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.mlo_sim import mlo_prehook_func_factory
 from finn.util.settings import get_settings
 
-finnxsi = xsi if xsi.is_available() else None
+import finn.xsi as finnxsi
 
 
 def collect_ip_dirs(model, ipstitch_path):

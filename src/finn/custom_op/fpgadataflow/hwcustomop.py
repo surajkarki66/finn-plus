@@ -36,7 +36,6 @@ import numpy as np
 import numpy.typing as npt
 from abc import abstractmethod
 from collections.abc import Sequence
-from finn_xsi.sim_engine import SimEngine
 from onnx import NodeProto
 from pathlib import Path
 from qonnx.core.datatype import BaseDataType
@@ -44,7 +43,6 @@ from qonnx.custom_op.base import CustomOp
 from qonnx.util.basic import roundup_to_integer_multiple
 from typing import TYPE_CHECKING, Any, cast
 
-from finn import xsi
 from finn.util.basic import get_liveness_threshold_cycles, is_versal
 from finn.util.exception import FINNInternalError
 from finn.util.settings import get_settings
@@ -53,7 +51,8 @@ if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
     from finn.transformation.fpgadataflow.loop_rolling import LoopBodyInputType
 
-finnxsi = xsi if xsi.is_available() else None
+import finn.xsi as finnxsi
+from finn.xsi import SimEngine
 
 
 class HWCustomOp(CustomOp):
@@ -180,25 +179,24 @@ class HWCustomOp(CustomOp):
 
     def get_rtlsim(self) -> SimEngine:
         """Return a xsi wrapper for the emulation library for this node."""
-        import finn_xsi.adapter as finnxsi
-
-        # without finnxsi dependency
-
-        rtlsim_so = self.get_nodeattr("rtlsim_so")
-        if type(rtlsim_so) is not str:
-            raise FINNInternalError(
-                f"rtlsim_so attribute not set correctly in {self.onnx_node.name}, cannot get rtlsim"
-            )
-        if not Path(rtlsim_so).is_file():
+        rtlsim_so = Path(cast("str", self.get_nodeattr("rtlsim_so")))
+        if not rtlsim_so.is_file():
             raise FINNInternalError(
                 f"rtlsim_so attribute points to non-existent file in {self.onnx_node.name}, "
                 "cannot get rtlsim"
             )
 
-        sim_base, sim_rel = rtlsim_so.split("xsim.dir")
-        sim_rel = "xsim.dir" + sim_rel
+        rtlsim_parts = rtlsim_so.parts
+        try:
+            xsim_idx = rtlsim_parts.index("xsim.dir")
+        except ValueError as exc:
+            raise FINNInternalError(
+                f"rtlsim_so path does not contain xsim.dir for {self.onnx_node.name}"
+            ) from exc
+        sim_base = Path(*rtlsim_parts[:xsim_idx])
+        sim_rel = Path(*rtlsim_parts[xsim_idx:])
         # pass in correct tracefile from attribute
-        tracefile = self.get_nodeattr("rtlsim_trace")
+        tracefile = cast("str", self.get_nodeattr("rtlsim_trace"))
         if tracefile == "default":
             tracefile = self.onnx_node.name + ".wdb"
         sim = finnxsi.load_sim_obj(sim_base, sim_rel, tracefile)
@@ -212,9 +210,6 @@ class HWCustomOp(CustomOp):
             sim: The RTL simulation object to close.
 
         """
-        import finn_xsi.adapter as finnxsi
-
-        # without finnxsi dependency
         finnxsi.close_rtlsim(sim)
 
     def node_res_estimation(self, fpgapart: str) -> dict[str, int | float]:
@@ -301,16 +296,10 @@ class HWCustomOp(CustomOp):
 
     def reset_rtlsim(self, sim: SimEngine) -> None:
         """Set reset input in finnxsi to zero, toggle the clock and set it back to one."""
-        import finn_xsi.adapter as finnxsi
-
-        # without finnxsi dependency
         finnxsi.reset_rtlsim(sim)
 
     def rtlsim_multi_io(self, sim: SimEngine, io_dict: dict[str, Any], sname: str = "_V") -> None:
         """Run rtlsim for this node, supports multiple i/o streams."""
-        import finn_xsi.adapter as finnxsi
-
-        # without finnxsi dependency
         num_out_values = self.get_number_output_values()
         # Use the larger of expected cycles or liveness threshold
         exp_cycles = self.get_exp_cycles()

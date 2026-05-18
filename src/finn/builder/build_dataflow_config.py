@@ -622,13 +622,15 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
                 shell flows and "alveo" for Vitis Alveo shell flows.
 
         Raises:
-            Exception: If the shell flow type is not recognized or supported.
+            FINNConfigurationError: If the shell flow type is not recognized or supported.
         """
         if self.shell_flow_type == ShellFlowType.VIVADO_ZYNQ:
             return "zynq-iodma"
         if self.shell_flow_type == ShellFlowType.VITIS_ALVEO:
             return "alveo"
-        raise Exception("Couldn't resolve driver platform for " + str(self.shell_flow_type))
+        raise FINNConfigurationError(
+            "Couldn't resolve driver platform for " + str(self.shell_flow_type)
+        )
 
     def _resolve_fpga_part(self) -> str:
         """Resolve the FPGA part identifier.
@@ -641,7 +643,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
             str: The FPGA part identifier (e.g., "xc7z020clg400-1").
 
         Raises:
-            Exception: If the FPGA part cannot be resolved from the board name or
+            FINNConfigurationError: If the FPGA part cannot be resolved from the board name or
                       if the board is not found in the part map.
         """
         if self.fpga_part is None:
@@ -688,7 +690,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
             str: The Vitis platform identifier (e.g., "xilinx_u250_xdma_201830_2").
 
         Raises:
-            Exception: If neither vitis_platform nor board is specified, or if the
+            FINNConfigurationError: If neither vitis_platform nor board is specified, or if the
                       platform cannot be resolved from the given information.
         """
         if self.vitis_platform is not None:
@@ -722,7 +724,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
                           if verification is enabled, None if verify_steps is None.
 
         Raises:
-            AssertionError: If either the input or expected output files cannot be found.
+            FINNConfigurationError: If either the input or expected output files cannot be found.
         """
         if self.verify_steps is None:
             return None

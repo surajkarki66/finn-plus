@@ -114,14 +114,14 @@ class HLSBackend(HWCustomOp, ABC):
         """Create a xsi emulation library for the RTL code generated
         for this node, sets the rtlsim_so attribute to its path."""
         verilog_files = self.get_all_verilog_filenames(abspath=True)
-        single_src_dir = make_build_dir("rtlsim_" + self.onnx_node.name + "_")
+        single_src_dir = Path(make_build_dir("rtlsim_" + self.onnx_node.name + "_"))
         trace_file = self.get_nodeattr("rtlsim_trace")
         debug = not (trace_file is None or trace_file == "")
         ret = finnxsi.compile_sim_obj(
             self.get_verilog_top_module_name(), verilog_files, single_src_dir, debug, behav
         )
         # save generated lib filename in attribute
-        self.set_nodeattr("rtlsim_so", ret[0] + "/" + ret[1])
+        self.set_nodeattr("rtlsim_so", str(ret[0] / ret[1]))
 
     def code_generation_ipgen(self, model: "ModelWrapper", fpgapart: str, clk: float) -> None:
         """Generate C++ code and TCL script for IP generation."""

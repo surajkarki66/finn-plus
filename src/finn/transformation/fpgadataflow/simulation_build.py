@@ -1,7 +1,7 @@
 """Build FINN Simulations."""
 
 import contextlib
-import finn_xsi.adapter as finnxsi
+import finn.xsi as finnxsi
 import numpy as np
 import onnx
 import os
@@ -592,13 +592,13 @@ class SimulationBuilder:
             all_verilog_srcs = (
                 (Path(vivado_stitched_proj) / "all_verilog_srcs.txt").read_text().split()
             )
-            sim_dir = (
+            sim_dir = Path(
                 make_build_dir(f"rtlsim_{model.graph.node[0].name}_")
                 if build_dir is None
                 else build_dir
             )
             sim_base, sim_rel = finnxsi.compile_sim_obj(
-                top_module_name, all_verilog_srcs, str(sim_dir), debug=debug
+                top_module_name, all_verilog_srcs, sim_dir, debug=debug
             )
             rtlsim_so = Path(sim_base) / Path(sim_rel)
             model.set_metadata_prop("rtlsim_so", str(rtlsim_so))

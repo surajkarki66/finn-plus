@@ -38,7 +38,6 @@ from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.general import GiveUniqueNodeNames
 from qonnx.util.basic import gen_finn_dt_tensor, qonnx_make_model
 
-from finn import xsi
 from finn.core.rtlsim_exec import rtlsim_exec
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
 from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
@@ -47,7 +46,7 @@ from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 
-finnxsi = xsi if xsi.is_available() else None
+import finn.xsi as finnxsi
 
 test_fpga_part = "xczu3eg-sbva484-1-e"
 target_clk_ns = 5

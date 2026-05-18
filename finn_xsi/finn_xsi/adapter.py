@@ -93,7 +93,7 @@ def compile_sim_obj(
 
     cmd_xelab = [
         "xelab",
-        "work." + "finn_design_wrapper",
+        "work." + top_module_name,
         "-relax",
         "-dll",
         "--O3",

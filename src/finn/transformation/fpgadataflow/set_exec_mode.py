@@ -1,3 +1,8 @@
+"""Set attribute exec_mode in all fpgadataflow nodes to specify which
+kind of execution should be used ("cppsim" or "rtlsim").
+Note that RTL components do not support cppsim. When cppsim is selected
+for RTL components, by default the execution of the HW op parent is
+executed."""
 # Copyright (C) 2020, Xilinx, Inc.
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 # All rights reserved.
@@ -27,6 +32,10 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from typing import Literal
+
+from finn.util.exception import FINNUserError
+from qonnx.core.modelwrapper import ModelWrapper
 import qonnx.custom_op.registry as registry
 from qonnx.transformation.base import Transformation
 
@@ -40,11 +49,13 @@ class SetExecMode(Transformation):
     for RTL components, by default the execution of the HW op parent is
     executed."""
 
-    def __init__(self, mode):
+    def __init__(self, mode:str) -> None:
+        """Construct the transformation."""
         super().__init__()
         self.mode = mode
 
-    def apply(self, model):
+    def apply(self, model: "ModelWrapper") -> tuple[ModelWrapper, Literal[False]]:
+        """Apply the transformation to the model."""
         for node in model.graph.node:
             op_type = node.op_type
             if is_hls_node(node) or is_rtl_node(node):
@@ -54,11 +65,12 @@ class SetExecMode(Transformation):
                     # set sim_mode accordingly to argument mode
                     inst.set_nodeattr("exec_mode", self.mode)
                     # ensure that sim_mode is now set
-                    assert (
-                        inst.get_nodeattr("exec_mode") != ""
-                    ), """Transformation
-                        was not successful. Node attribute "exec_mode" is not set"""
+                    if inst.get_nodeattr("exec_mode") == "":
+                        raise FINNUserError("""Transformation
+                        was not successful. Node attribute "exec_mode" is not set""")
                 except KeyError:
                     # exception if op_type is not supported
-                    raise Exception("Custom op_type %s is currently not supported." % op_type)
+                    raise FINNUserError(
+                        f"Custom op_type {op_type} is currently not supported."
+                    ) from None
         return (model, False)

@@ -26,6 +26,10 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from finn.builder.build_dataflow_config import DataflowBuildConfig
+from finn.transformation.fpgadataflow.simulation import ApplySimulatedFIFOSizes
+from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
+from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 import pytest
 
 import numpy as np
@@ -50,12 +54,29 @@ from finn.transformation.fpgadataflow.prepare_cppsim import PrepareCppSim
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
-from finn.transformation.fpgadataflow.set_fifo_depths import InsertAndSetFIFODepths
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 
 test_fpga_part = "xczu3eg-sbva484-1-e"
 target_clk_ns = 5
+
+def InsertAndSetFIFODepths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
+    cfg = DataflowBuildConfig()
+    model = model.transform(
+                BuildSimulation(
+                    fpga_part,
+                    clk_ns,
+                    True,
+                    performance_sim=False,
+                )
+            )
+    model = model.transform(
+                RunLayerParallelSimulation(
+                    fpga_part, clk_ns, cfg
+                )
+            )
+    model = model.transform(ApplySimulatedFIFOSizes(cfg))
+    return model
 
 
 def generate_edge_threshold_values(
@@ -427,7 +448,7 @@ def test_fpgadataflow_thresholding_stitched_ip(
     model = model.transform(MinimizeWeightBitWidth())
     model = model.transform(GiveUniqueNodeNames())
     # Run stitched-ip RTLsim to have memstream in the test loop
-    model = model.transform(InsertAndSetFIFODepths(part, target_clk_ns))
+    model = InsertAndSetFIFODepths(model, part, target_clk_ns)
     model = model.transform(PrepareIP(part, target_clk_ns))
     model = model.transform(HLSSynthIP())
     model = model.transform(CreateStitchedIP(part, target_clk_ns))

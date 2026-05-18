@@ -465,17 +465,6 @@ def prepare_finn(
         error(f"FINN ERROR: {e}")
         sys.exit(1)
 
-    # Even if we dont update deps, we still need to make xsi available
-    finn_xsi = Path(resolve_module_path("finn_xsi"))
-    os.environ["FINN_XSI"] = str(finn_xsi)
-    finn_xsi_so = finn_xsi / "xsi.so"
-    if not finn_xsi_so.exists():
-        error(f"finn_xsi was not found at {finn_xsi}")
-        sys.exit(1)
-    status(f"Loading finn_xsi from {finn_xsi}")
-    os.environ["PYTHONPATH"] = f"{os.environ['PYTHONPATH']}:{finn_xsi.absolute()}"
-    sys.path.append(str(finn_xsi))
-
     # Check synthesis tools
     set_synthesis_tools_paths()
 
@@ -485,9 +474,9 @@ def prepare_finn(
     if "LD_LIBRARY_PATH" not in os.environ.keys():
         os.environ["LD_LIBRARY_PATH"] = f"/lib/x86_64-linux-gnu/:{vivado_path}/lib/lnx64.o"
     else:
-        os.environ[
-            "LD_LIBRARY_PATH"
-        ] = f"/lib/x86_64-linux-gnu/:{vivado_path}/lib/lnx64.o:{os.environ['LD_LIBRARY_PATH']}"
+        os.environ["LD_LIBRARY_PATH"] = (
+            f"/lib/x86_64-linux-gnu/:{vivado_path}/lib/lnx64.o:{os.environ['LD_LIBRARY_PATH']}"
+        )
 
     # Automatically set XILINX_LOCAL_USER_DATA to avoid issues later on
     if "XILINX_LOCAL_USER_DATA" in os.environ and os.environ["XILINX_LOCAL_USER_DATA"] != "no":
@@ -603,9 +592,7 @@ def _build(
             sys.exit(1)
         else:
             model = mp
-    status(
-        f"Starting FINN build with config {flow_config.name} and model {model.name}!"
-    )  # type: ignore
+    status(f"Starting FINN build with config {flow_config.name} and model {model.name}!")  # type: ignore
     if finn_build_dir is not None:
         finn_build_dir = finn_build_dir.expanduser().absolute()
         finn_build_dir.mkdir(parents=True, exist_ok=True)
@@ -1046,13 +1033,8 @@ def update(
         flow_config=Path(),
         **get_function_args(),
     )
-    if force:
-        if settings.finn_deps.exists():
-            shutil.rmtree(settings.finn_deps)
-        finnxsi = resolve_module_path("finn_xsi")
-        so = Path(finnxsi) / "xsi.so"
-        if so.exists():
-            so.unlink()
+    if force and settings.finn_deps.exists():
+        shutil.rmtree(settings.finn_deps)
     prepare_finn(settings, accept_defaults or batch, batch, create_build_dir=False)
 
 

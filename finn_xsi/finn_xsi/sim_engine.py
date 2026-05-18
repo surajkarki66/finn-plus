@@ -57,7 +57,13 @@ class SimEngine:
         """Create a simulation engine bound to the given kernel and design."""
         top = xsi.Design(xsi.Kernel(kernel), design, log, wdb)
         clk = top.getPort("ap_clk")
-        clk2x = top.getPort("ap_clk2x")
+        for port in top.ports():
+            print(port.name())
+        # If clock pumping is disabled, set clk2x to None
+        try:
+            clk2x = top.getPort("ap_clk2x")
+        except RuntimeError:
+            clk2x = None
         for p in top.ports():
             if p.isInput():
                 p.clear().write_back()
@@ -97,7 +103,10 @@ class SimEngine:
     # Utility
     def get_bus_port(self, bus: str, suffix: str) -> "xsi.Port":
         """Return a port by bus name and suffix, trying lower/upper variants."""
-        port = self.top.getPort(bus + "_" + suffix.lower())
+        try:
+            port = self.top.getPort(bus + "_" + suffix.lower())
+        except RuntimeError:
+            port = None
         return port if port is not None else self.top.getPort(bus + "_" + suffix.upper())
 
     # ------------------------------------------------------------------------
@@ -136,7 +145,6 @@ class SimEngine:
 
             # Execute Cycle
             self.ticks += 1
-            print(f"Cycle {self.ticks}")
             strong = False
             for task in self.tasks:
                 # Tasks read signals and derive updates to schedule for after the clock cycle
@@ -193,9 +201,9 @@ class SimEngine:
             self, top: "SimEngine", istream: str, values: Generator[str], throttle: tuple
         ) -> None:
             """Bind to the stream ports and configure throttling."""
-            self.vld: xsi.Port = top.get_bus_port(istream, "tvalid")
-            self.rdy: xsi.Port = top.get_bus_port(istream, "tready")
-            self.dat: xsi.Port = top.get_bus_port(istream, "tdata")
+            self.vld: xsi.Port = top.get_bus_port(istream, "TVALID")
+            self.rdy: xsi.Port = top.get_bus_port(istream, "TREADY")
+            self.dat: xsi.Port = top.get_bus_port(istream, "TDATA")
             self.values = values
 
             self.throttle = throttle
@@ -249,9 +257,9 @@ class SimEngine:
         ) -> None:
             """Bind to the stream ports and prepare a buffer."""
             self.size = size
-            self.vld = top.get_bus_port(ostream, "tvalid")
-            self.rdy = top.get_bus_port(ostream, "tready")
-            self.dat = top.get_bus_port(ostream, "tdata")
+            self.vld = top.get_bus_port(ostream, "TVALID")
+            self.rdy = top.get_bus_port(ostream, "TREADY")
+            self.dat = top.get_bus_port(ostream, "TDATA")
             self.buf: list[str] = []
             self.watchdog = watchdog
 
@@ -289,8 +297,8 @@ class SimEngine:
 
         def __init__(self, sim: "SimEngine", stream: str) -> None:
             """Bind to the stream ports to trace handshakes."""
-            self.vld = sim.get_bus_port(stream, "tvalid")
-            self.rdy = sim.get_bus_port(stream, "tready")
+            self.vld = sim.get_bus_port(stream, "TVALID")
+            self.rdy = sim.get_bus_port(stream, "TREADY")
             self.trace = ""
 
         def __call__(self, sim: "SimEngine") -> dict[xsi.Port, str] | None:  # noqa: ARG002
