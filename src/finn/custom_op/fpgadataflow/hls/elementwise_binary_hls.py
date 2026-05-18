@@ -107,19 +107,28 @@ class ElementwiseBinaryOperation_hls(
         return lhs_embedded or rhs_embedded
 
     def _check_uram_codegen_support(self, model, fpgapart):
-        if self.get_nodeattr("ram_style") != "ultra" or not self._has_embedded_initializer(model):
+        if self.get_nodeattr("ram_style") != "ultra":
             return
-        assert is_versal(fpgapart), (
-            "ElementwiseBinaryOperation_hls with embedded URAM constants requires "
-            "a Versal target. Use internal_decoupled memory mode or a non-URAM "
-            "ram_style for non-Versal targets."
-        )
-        vivado_version = get_vivado_version()
-        assert vivado_version is None or vivado_version >= (2024, 2), (
-            "ElementwiseBinaryOperation_hls with embedded URAM constants requires "
-            "Vivado/Vitis HLS 2024.2 or newer because older HLS versions cannot "
-            "initialize URAM-backed global/static arrays."
-        )
+        mem_mode = self.get_nodeattr("mem_mode")
+        mlo = self.get_nodeattr("mlo_max_iter")
+        if mem_mode == "internal_embedded" and self._has_embedded_initializer(model):
+            assert is_versal(fpgapart), (
+                "ElementwiseBinaryOperation_hls with internal_embedded URAM constants requires "
+                "a Versal target. Use internal_decoupled memory mode or a non-URAM "
+                "ram_style for non-Versal targets."
+            )
+            vivado_version = get_vivado_version()
+            assert vivado_version is None or vivado_version >= (2024, 2), (
+                "ElementwiseBinaryOperation_hls with internal_embedded URAM constants requires "
+                "Vitis HLS 2024.2 or newer because older versions cannot initialize "
+                "URAM-backed arrays."
+            )
+        elif mem_mode == "internal_decoupled" or mlo:
+            assert is_versal(fpgapart), (
+                "ElementwiseBinaryOperation_hls with internal_decoupled URAM requires "
+                "a Versal target, as URAM cannot be initialized from bitfile on non-Versal "
+                "devices and runtime-writeable weights are not supported for this layer."
+            )
 
     # Note: End of shape and datatype utilities
 

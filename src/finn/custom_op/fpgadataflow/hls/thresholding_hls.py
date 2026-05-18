@@ -35,7 +35,7 @@ from qonnx.util.basic import roundup_to_integer_multiple
 
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 from finn.custom_op.fpgadataflow.thresholding import Thresholding
-from finn.util.basic import is_versal
+from finn.util.basic import get_vivado_version, is_versal
 from finn.util.data_packing import (
     npy_to_rtlsim_input,
     numpy_to_hls_code,
@@ -158,18 +158,25 @@ class Thresholding_hls(Thresholding, HLSBackend):
         """Generates c++ code and tcl script for ip generation."""
         super().code_generation_ipgen(model, fpgapart, clk)
         mem_mode = self.get_nodeattr("mem_mode")
-        if self.get_nodeattr("ram_style") == "ultra" and not is_versal(fpgapart):
+        if self.get_nodeattr("ram_style") == "ultra":
             if mem_mode == "internal_embedded":
-                raise Exception(
-                    "URAM thresholds with internal_embedded mode are not supported "
-                    "on non-Versal devices, as URAM cannot be initialized from bitfile."
+                if not is_versal(fpgapart):
+                    raise Exception(
+                        "URAM thresholds with internal_embedded mode are not supported "
+                        "on non-Versal devices, as URAM cannot be initialized from bitfile."
+                    )
+                vivado_version = get_vivado_version()
+                assert vivado_version is None or vivado_version >= (2024, 2), (
+                    "URAM thresholds with internal_embedded mode require Vitis HLS 2024.2 "
+                    "or newer because older versions cannot initialize URAM-backed arrays."
                 )
             elif mem_mode == "internal_decoupled":
-                runtime_writeable = self.get_nodeattr("runtime_writeable_weights")
-                assert (
-                    runtime_writeable == 1
-                ), """Layer with URAM thresholds must have runtime_writeable_weights=1
-                    if Ultrascale device is targeted."""
+                if not is_versal(fpgapart):
+                    runtime_writeable = self.get_nodeattr("runtime_writeable_weights")
+                    assert (
+                        runtime_writeable == 1
+                    ), """Layer with URAM thresholds must have runtime_writeable_weights=1
+                        if Ultrascale device is targeted."""
         if mem_mode == "internal_decoupled":
             self.generate_hdl_memstream(fpgapart)
 
