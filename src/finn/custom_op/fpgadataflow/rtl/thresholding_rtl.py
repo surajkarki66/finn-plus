@@ -157,7 +157,10 @@ class Thresholding_rtl(Thresholding, RTLBackend):
         return used_bits["BRAM"] / capacity_bits["BRAM"]
 
     def uram_efficiency_estimation(self):
-        """return URAM parameter storage efficiency for this node"""
+        """return URAM parameter storage efficiency for this node."""
+        # TODO: Versal URAM supports flexible bit widths (9/18/36/72) unlike
+        # UltraScale+ which only supports 72-bit. This could improve efficiency
+        # for narrow data types on Versal devices.
         _, used_bits, capacity_bits = self._get_memory_estimate_details()
         if capacity_bits.get("URAM", 0) == 0:
             return 1

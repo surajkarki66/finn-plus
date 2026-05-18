@@ -123,6 +123,9 @@ class Thresholding_hls(Thresholding, HLSBackend):
         return wbits / bram16_est_capacity
 
     def uram_efficiency_estimation(self):
+        # TODO: Versal URAM supports flexible bit widths (9/18/36/72) unlike
+        # UltraScale+ which only supports 72-bit. This could improve efficiency
+        # for narrow data types on Versal devices.
         uram_est = self.uram_estimation()
         if uram_est == 0:
             return 1

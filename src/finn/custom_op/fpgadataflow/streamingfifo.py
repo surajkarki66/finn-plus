@@ -216,6 +216,9 @@ class StreamingFIFO(HWCustomOp):
         return wbits / bram16_est_capacity
 
     def uram_efficiency_estimation(self):
+        # TODO: Versal URAM supports flexible bit widths (9/18/36/72) unlike
+        # UltraScale+ which only supports 72-bit. This could improve efficiency
+        # for narrow data types on Versal devices.
         try:
             depth = self.get_adjusted_depth()
         except AttributeError:

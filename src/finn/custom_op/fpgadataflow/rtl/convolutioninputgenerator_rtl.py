@@ -278,6 +278,9 @@ class ConvolutionInputGenerator_rtl(ConvolutionInputGenerator, RTLBackend):
             return 0
 
     def uram_efficiency_estimation(self):
+        # TODO: Versal URAM supports flexible bit widths (9/18/36/72) unlike
+        # UltraScale+ which only supports 72-bit. This could improve efficiency
+        # for narrow data types on Versal devices.
         simd = self.get_nodeattr("SIMD")
         ram_style = self.get_nodeattr("ram_style")
         impl_style = self.select_impl_style()
