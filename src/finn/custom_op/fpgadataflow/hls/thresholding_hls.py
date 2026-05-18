@@ -90,15 +90,11 @@ class Thresholding_hls(Thresholding, HLSBackend):
         n_thres_steps = self.get_nodeattr("numSteps")
         return pe * weight_bits * n_thres_steps
 
-    def _threshold_mem_depth(self):
-        sets = max(1, self.get_nodeattr("mlo_max_iter"))
-        return self.calc_tmem() * sets
-
     def bram_estimation(self):
         """Calculates BRAM cost if resource set to BRAM"""
         style = self.get_nodeattr("ram_style")
         mem_width = self._threshold_mem_width()
-        tmem = self._threshold_mem_depth()
+        tmem = self.calc_tmem()
 
         if style == "block" and tmem > 1:
             return int(ceil(mem_width / 16)) * int(ceil(tmem / 1024))
@@ -108,7 +104,7 @@ class Thresholding_hls(Thresholding, HLSBackend):
     def uram_estimation(self):
         """Calculates URAM cost if resource set to URAM"""
         style = self.get_nodeattr("ram_style")
-        tmem = self._threshold_mem_depth()
+        tmem = self.calc_tmem()
         if style == "ultra" and tmem > 1:
             return int(ceil(self._threshold_mem_width() / 72)) * int(ceil(tmem / 4096))
         else:
@@ -118,7 +114,7 @@ class Thresholding_hls(Thresholding, HLSBackend):
         bram16_est = self.bram_estimation()
         if bram16_est == 0:
             return 1
-        wbits = self._threshold_mem_width() * self._threshold_mem_depth()
+        wbits = self._threshold_mem_width() * self.calc_tmem()
         bram16_est_capacity = bram16_est * 18 * 1024
         return wbits / bram16_est_capacity
 
@@ -129,7 +125,7 @@ class Thresholding_hls(Thresholding, HLSBackend):
         uram_est = self.uram_estimation()
         if uram_est == 0:
             return 1
-        wbits = self._threshold_mem_width() * self._threshold_mem_depth()
+        wbits = self._threshold_mem_width() * self.calc_tmem()
         uram_est_capacity = uram_est * 72 * 4096
         return wbits / uram_est_capacity
 
@@ -140,7 +136,7 @@ class Thresholding_hls(Thresholding, HLSBackend):
         P = self.get_nodeattr("PE")
         idt = self.get_input_datatype(0)
         A = idt.bitwidth()
-        tmem = self._threshold_mem_depth()
+        tmem = self.calc_tmem()
         # cost of comparators
         comparator_cost = A * P
         # cost of LUTRAM
