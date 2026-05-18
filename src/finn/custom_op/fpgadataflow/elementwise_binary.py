@@ -513,7 +513,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
         if ram_style != "distributed":
             return 0
         return int(
-            sum(math.ceil(width * depth / 64) for width, depth in self._parameter_memory_specs())
+            sum(width * math.ceil(depth / 64) for width, depth in self._parameter_memory_specs())
         )
 
 

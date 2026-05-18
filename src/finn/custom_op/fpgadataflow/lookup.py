@@ -239,8 +239,9 @@ class Lookup(HWCustomOp):
         mem_mode = self.get_nodeattr("mem_mode")
         ram_style = self.get_nodeattr("ram_style")
         if mem_mode == "internal_embedded" and ram_style == "distributed":
-            ebits = self.get_outstream_width() * self.get_nodeattr("NumEmbeddings")
-            return ceil(ebits / 64)
+            width = self.get_outstream_width()
+            depth = self.get_nodeattr("NumEmbeddings")
+            return width * ceil(depth / 64)
         else:
             return 0
 
