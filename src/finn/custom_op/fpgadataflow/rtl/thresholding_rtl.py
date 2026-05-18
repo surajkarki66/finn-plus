@@ -89,11 +89,13 @@ class Thresholding_rtl(Thresholding, RTLBackend):
         odt_bits = odt.bitwidth()
         t_channels = self.get_nodeattr("NumChannels")
         cf = t_channels / pe
+        # For MLO, multiply depth by number of sets (iterations)
+        mlo_sets = max(1, self.get_nodeattr("mlo_max_iter"))
         is_uniform = self.get_nodeattr("uniform_thres")
         if is_uniform:
-            ret = [(odt_bits - x, cf * (2**x)) for x in range(1, odt_bits)]
+            ret = [(odt_bits - x, cf * (2**x) * mlo_sets) for x in range(1, odt_bits)]
         else:
-            ret = [(wdt_bits, (cf) * 2**x) for x in range(odt_bits)]
+            ret = [(wdt_bits, cf * (2**x) * mlo_sets) for x in range(odt_bits)]
         return ret
 
     def _get_memory_estimate_details(self):

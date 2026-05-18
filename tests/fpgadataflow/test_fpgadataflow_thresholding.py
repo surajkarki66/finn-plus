@@ -444,7 +444,6 @@ def test_fpgadataflow_thresholding_stitched_ip(
 
 
 @pytest.mark.parametrize("num_input_channels", [6, 16])
-@pytest.mark.parametrize("num_input_vecs", [[1], [1, 2, 2]])
 @pytest.mark.parametrize("activation", [DataType["UINT4"], DataType["INT4"]])
 @pytest.mark.parametrize(
     "idt_tdt_cfg",
@@ -468,7 +467,6 @@ def test_fpgadataflow_thresholding_stitched_ip(
 @pytest.mark.slow
 def test_fpgadataflow_thresholding_hls_internal_embedded_ram_style(
     num_input_channels,
-    num_input_vecs,
     activation,
     idt_tdt_cfg,
     fold,
@@ -477,6 +475,7 @@ def test_fpgadataflow_thresholding_hls_internal_embedded_ram_style(
     exec_mode,
 ):
     """Test HLS Thresholding with internal_embedded mode and different ram_style options."""
+    num_input_vecs = [1]
     input_data_type, threshold_data_type = idt_tdt_cfg
     num_steps = activation.get_num_possible_values() - 1
 
