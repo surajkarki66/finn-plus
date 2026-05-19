@@ -16,6 +16,7 @@ def deprecated(func: Callable[pT, rT]) -> Callable[pT, rT]:
 
     @functools.wraps(func)
     def new_func(*args: pT.args, **kwargs: pT.kwargs) -> rT:
+        """Emit a deprecation warning and call the original function."""
         log.warning(
             f"Using {func.__qualname__} is deprecated and will be removed in the next release.",
             stacklevel=2,

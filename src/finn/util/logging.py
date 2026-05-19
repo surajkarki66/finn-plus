@@ -1,4 +1,5 @@
 """Handle logging related functionality."""
+
 import logging
 from rich.console import Console
 from rich.progress import Progress, TaskID
@@ -128,7 +129,11 @@ class ThreadsafeProgressDisplay:
         self.progress.stop()
 
     def __enter__(self) -> None:
+        """Enter the context and start the display."""
         self.start()
 
-    def __exit__(self, tp, vl, tb) -> None:
+    def __exit__(
+        self, tp: type[BaseException] | None, vl: BaseException | None, tb: TracebackType | None
+    ) -> None:
+        """Exit the context and stop the display."""
         self.stop()

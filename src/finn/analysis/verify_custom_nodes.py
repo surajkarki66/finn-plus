@@ -1,3 +1,4 @@
+"""Runs verify nodes on all custom nodes in the model and checks that they pass."""
 # Copyright (c) 2020, Xilinx
 # All rights reserved.
 #

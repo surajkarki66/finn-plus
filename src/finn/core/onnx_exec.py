@@ -41,13 +41,24 @@ Key Functions:
 import copy
 import numpy as np
 import qonnx.analysis.topology as ta
+from collections.abc import Callable
+from onnx import NodeProto
+from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.core.onnx_exec import execute_onnx as execute_onnx_base
+from typing import cast
 
 from finn.core.rtlsim_exec import rtlsim_exec
+from finn.util.exception import FINNInternalError, FINNUserError
 
 
-def execute_onnx(model, input_dict, return_full_exec_context=False, start_node=None, end_node=None):
-    """Executes given ONNX ModelWrapper with given named inputs.
+def execute_onnx(
+    model: "ModelWrapper",
+    input_dict: dict[str, np.ndarray],
+    return_full_exec_context: bool = False,
+    start_node: NodeProto | None = None,
+    end_node: NodeProto | None = None,
+) -> dict[str, np.ndarray]:
+    """Execute given ONNX ModelWrapper with given named inputs.
     If return_full_exec_context is False, a dict of named outputs is returned
     as indicated by the model.graph.output.
     If return return_full_exec_context is True, the full set of tensors used by
@@ -66,7 +77,7 @@ def execute_onnx(model, input_dict, return_full_exec_context=False, start_node=N
     if model_exec_mode == "rtlsim":
         # check sanity of model and then use stitched IP for rtlsim
         if not model.check_all_tensor_shapes_specified():
-            raise Exception("Found unspecified tensor shapes, try infer_shapes")
+            raise FINNUserError("Found unspecified tensor shapes, try infer_shapes")
         ret = model.analysis(ta.nodes_topologically_sorted)
         assert (
             ret["nodes_topologically_sorted"] is True
@@ -79,26 +90,23 @@ def execute_onnx(model, input_dict, return_full_exec_context=False, start_node=N
         # the input data as well as the trained parameters) and the graph ValueInfo
         # (intermediate tensors between layers)
         # this is provided by the execution_context, which is a dict of np.ndarray
-        execution_context = model.make_empty_exec_context()
+        execution_context = cast("dict[str, np.ndarray]", model.make_empty_exec_context())
         # fill in any inputs provided to this function
         for inp_name in input_dict.keys():
             if inp_name in execution_context:
                 if execution_context[inp_name].shape == input_dict[inp_name].shape:
                     execution_context[inp_name] = input_dict[inp_name]
                 else:
-                    raise Exception(
-                        "Shape mismatch for provided input %s: found %s expected %s "
-                        % (
-                            inp_name,
-                            str(execution_context[inp_name].shape),
-                            str(input_dict[inp_name].shape),
-                        )
+                    raise FINNInternalError(
+                        f"Shape mismatch for provided input {inp_name}: found "
+                        f"{execution_context[inp_name].shape!s} expected "
+                        f"{input_dict[inp_name].shape!s} "
                     )
 
         # use stitched IP for rtlsim
         rtlsim_exec(model, execution_context)
     else:
-        raise Exception(
+        raise FINNInternalError(
             """Metadata property "exec_mode" is set to an unknown value. Can be left
             unset or has to be set to "rtlsim" for execution using xsi!"""
         )
@@ -106,15 +114,17 @@ def execute_onnx(model, input_dict, return_full_exec_context=False, start_node=N
     if return_full_exec_context:
         return execution_context
     # provide outputs as dict
-    output_dict = dict()
+    output_dict = {}
     for out_tensor in graph.output:
         out_name = out_tensor.name
         output_dict[out_name] = execution_context[out_name]
     return output_dict
 
 
-def execute_onnx_and_make_model(model, input_dict):
-    """Executes given ONNX ModelWrapper with given named inputs and return a new
+def execute_onnx_and_make_model(
+    model: "ModelWrapper", input_dict: dict[str, np.ndarray]
+) -> ModelWrapper:
+    """Execute given ONNX ModelWrapper with given named inputs and return a new
     ModelWrapper where an initializer is provided for each tensor as taken from
     the execution. This new model is useful for debugging, since it contains
     all the intermediate activation values."""
@@ -131,15 +141,17 @@ def execute_onnx_and_make_model(model, input_dict):
 
 
 def compare_execution(
-    model_a,
-    model_b,
-    input_dict,
-    compare_fxn=lambda x, y: np.isclose(x, y, atol=1e-3).all(),
-):
-    """Executes two ONNX models and compare their outputs using given function.
+    model_a: "ModelWrapper",
+    model_b: "ModelWrapper",
+    input_dict: dict[str, np.ndarray],
+    compare_fxn: Callable[
+        [list | np.ndarray, list | np.ndarray], bool | np.bool_
+    ] = lambda x, y: np.isclose(x, y, atol=1e-3).all(),
+) -> bool | np.bool_:
+    """Execute two ONNX models and compare their outputs using given function.
 
     compare_fxn should take in two tensors and return a Boolean"""
     # compare values from first output tensors produced
-    res_a = list(execute_onnx(model_a, input_dict).items())[0][1]
-    res_b = list(execute_onnx(model_b, input_dict).items())[0][1]
+    res_a = next(iter(execute_onnx(model_a, input_dict).items()))[1]
+    res_b = next(iter(execute_onnx(model_b, input_dict).items()))[1]
     return compare_fxn(res_a, res_b)

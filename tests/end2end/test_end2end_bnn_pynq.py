@@ -72,7 +72,6 @@ import finn.transformation.fpgadataflow.convert_to_hw_layers as to_hw
 import finn.transformation.streamline.absorb as absorb
 from finn.analysis.fpgadataflow.dataflow_performance import dataflow_performance
 from finn.core.onnx_exec import execute_onnx
-from finn.core.throughput_test import throughput_test_rtlsim
 from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
 from finn.transformation.fpgadataflow.annotate_resources import AnnotateResources
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
@@ -103,6 +102,7 @@ from tests.testing_util.test import (
     get_trained_network_and_ishape,
     load_test_checkpoint_or_skip,
 )
+from tests.testing_util.throughput_test import throughput_test_rtlsim
 
 target_clk_ns = 20
 mem_mode = "internal_decoupled"

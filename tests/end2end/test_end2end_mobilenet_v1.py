@@ -61,7 +61,6 @@ import finn.transformation.streamline.reorder as reorder
 from finn.analysis.fpgadataflow.dataflow_performance import dataflow_performance
 from finn.builder.build_dataflow_config import DataflowBuildConfig
 from finn.core.onnx_exec import execute_onnx
-from finn.core.throughput_test import throughput_test_rtlsim
 from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
@@ -88,6 +87,7 @@ from tests.testing_util.test import (
     load_test_checkpoint_or_skip,
     resize_smaller_side,
 )
+from tests.testing_util.throughput_test import throughput_test_rtlsim
 
 # Select Versal device such that RTL VVU (i.e. DSP58) can be enabled
 fpga_part = "xcvm1802-vsvd1760-2MP-e-S"
