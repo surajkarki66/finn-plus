@@ -36,11 +36,13 @@ if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
 
 
-def floorplan_params(model: "ModelWrapper"):
+def floorplan_params(
+    model: "ModelWrapper",
+) -> dict[str, dict[str, list[int | str | list[str]] | int | str]]:
     """Gathers SLR and partition IDs from nodes.
 
     Returns {node name : {slr, device id, partition id, memory port}}."""
-    ret_dict = {
+    ret_dict: dict[str, dict[str, list[int | str | list[str]] | int | str]] = {
         "Defaults": {
             "slr": [-1, ["all"]],
             "partition_id": [0, ["all"]],

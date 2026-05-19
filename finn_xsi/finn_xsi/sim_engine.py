@@ -68,6 +68,7 @@ class SimEngine:
                 p.clear().write_back()
 
         def cycle(updates: dict[xsi.Port, str]) -> None:
+            """Perform one clock cycle with the given port updates."""
             # Rising Edge
             clk.set(1).write_back()
             if clk2x is not None:

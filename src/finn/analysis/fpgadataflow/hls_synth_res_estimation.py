@@ -1,3 +1,5 @@
+"""Module which contains an analysis pass that extracts the resource estimation results from the
+Vitis HLS synthesis reports for nodes with an HLS backend in the given model."""
 # Copyright (c) 2020, Xilinx
 # All rights reserved.
 #

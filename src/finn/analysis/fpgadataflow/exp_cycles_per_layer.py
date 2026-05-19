@@ -1,3 +1,5 @@
+"""Module which contains an analysis pass that estimates the number of cycles
+per sample for dataflow layers in a given model."""
 # Copyright (c) 2020, Xilinx, Inc.
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 # All rights reserved.
