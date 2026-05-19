@@ -20,12 +20,13 @@ Usage:
 
 import contextlib
 import os
+import re
 import sys
-from pathlib import Path
 from typing import Any
 
 from finn.util.exception import FINNUserError
 from finn.util.logging import log
+from finn.util.settings import get_settings
 
 # Track if auto-install has been attempted
 _auto_install_attempted = False
@@ -33,6 +34,8 @@ _auto_install_attempted = False
 # Cache for loaded modules
 _adapter_module: Any | None = None
 _sim_engine_module: Any | None = None
+
+xsi_path = get_settings().finn_xsi
 
 
 def is_available() -> bool:
@@ -42,9 +45,27 @@ def is_available() -> bool:
         bool: True if finn_xsi can be imported, False otherwise
     """
     # Check if xsi.so exists
-    xsi_path = Path(os.environ["FINN_XSI"])
     xsi_so = xsi_path / "xsi.so"
-    if not xsi_so.exists():
+    vivado_path = os.environ.get("XILINX_VIVADO")
+    if vivado_path is None:
+        raise OSError("XILINX_VIVADO environment variable not set. Please source Vivado settings.")
+    match = re.search(r"\b(20\d{2})\.(1|2)\b", vivado_path)
+    if not match:
+        raise ValueError(f"Could not parse Vivado version from XILINX_VIVADO path: {vivado_path}")
+    year, minor = int(match.group(1)), int(match.group(2))
+
+    version_file = xsi_path / "VERSION"
+
+    if not xsi_so.exists() or not version_file.exists():
+        # Attempt auto-install if not yet tried
+        _attempt_auto_install()
+        # Check again after auto-install attempt
+        if not xsi_so.exists():
+            print("XSI INSTALL: xsi.so does not exist")
+            return False
+    with version_file.open() as f:
+        version_info = f.read().strip()
+    if version_info != f"Vivado {year}.{minor}":
         # Attempt auto-install if not yet tried
         _attempt_auto_install()
         # Check again after auto-install attempt
@@ -103,7 +124,6 @@ def _load_modules() -> bool:
     if _adapter_module is not None:
         return True
 
-    xsi_path = Path(os.environ["FINN_XSI"])
     xsi_so = xsi_path / "xsi.so"
 
     if not xsi_so.exists():
