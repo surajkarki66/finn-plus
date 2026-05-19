@@ -372,6 +372,9 @@ class bench:
                 # microbenchmarks might skip because no model can be generated for given params
                 return "skipped"
 
+        if "multi_dnn_config_path" in self._params:
+            cfg.multi_dnn_config_path = self._params["multi_dnn_config_path"]
+
         # Set some global defaults (could still be overwritten by run-specific YAML)
         cfg.output_dir = self._build_inputs["build_dir"]
         # enable extra performance optimizations (physopt)

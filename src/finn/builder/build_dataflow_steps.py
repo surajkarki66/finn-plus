@@ -123,6 +123,7 @@ from finn.transformation.multi_dnn.mutli_dnn_steps import (
 )
 from finn.transformation.multi_dnn.nodecontainer_transformations import (
     GenerateNodeContainerStitched,
+    NameNodeContainerNodes,
 )
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
 from finn.transformation.qonnx.quant_act_to_multithreshold import default_filter_function_generator
@@ -420,6 +421,7 @@ def step_prepare_nodecontainer(model: ModelWrapper, cfg: DataflowBuildConfig):
     # For selectable weights generate a stitiched ip for the entire container
     # For the partial reconfiguration case generate a stitched ip for every body
     model = model.transform(GenerateNodeContainerStitched(cfg))
+    model = model.transform(NameNodeContainerNodes())
     return model
 
 

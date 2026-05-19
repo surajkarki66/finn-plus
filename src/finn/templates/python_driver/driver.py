@@ -3,17 +3,19 @@
 import click
 import copy
 import json
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import random
+import re
 import sys
 import time
 from dataset_loading import FileQueue, ImgQueue
 from PIL import Image
 
 # from pynq import PL
-from pynq import Overlay, allocate
+from pynq import MMIO, Bitstream, Overlay, allocate
 
 # from pynq.pl_server.device import Device
 from pynq.ps import Clocks
@@ -688,7 +690,7 @@ class FINNInstrumentationOverlay(Overlay):
     def __init__(
         self,
         bitfile_name,
-        platform="zynq",
+        platform="zynq-iodma",
         fclk_mhz=100.0,
         device=None,
         download=True,
@@ -703,7 +705,7 @@ class FINNInstrumentationOverlay(Overlay):
         self.seed = seed
 
         # configure clock (for ZYNQ platforms)
-        if self.platform == "zynq":
+        if self.platform == "zynq-iodma":
             if self.fclk_mhz > 0:
                 Clocks.fclk0_mhz = self.fclk_mhz
                 self.fclk_mhz_actual = Clocks.fclk0_mhz
@@ -832,7 +834,7 @@ class FINNLiveFIFOOverlay(FINNInstrumentationOverlay):
     def __init__(
         self,
         bitfile_name,
-        platform="zynq",
+        platform="zynq-iodma",
         fclk_mhz=100.0,
         device=None,
         download=True,
@@ -1480,17 +1482,273 @@ class FINNLiveFIFOOverlay(FINNInstrumentationOverlay):
 class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
     """FINN overlay for DMA and instrumentation (with Switch Block)."""
 
+    class Selector:
+        def __init__(self, ip_dict_entry):
+            base_addr = ip_dict_entry["phys_addr"]
+            addr_range = ip_dict_entry["addr_range"]
+            self.mmio = MMIO(base_addr, addr_range)
+
+        def halt(self):
+            self.mmio.write(0x00, 0x0000_0000)
+
+        def start(self):
+            self.mmio.write(0x00, 0x0000_0001)
+
+        def set_schedule(self, schedule: list[int]):
+            for i, rep in enumerate(schedule):
+                value = (i & 0xFFFF) | ((rep & 0xFFFF) << 16)
+                self.mmio.write(0x04 + 4 * i, value)
+
+    class DFXController:
+        # Note: sockets have to ordered correctly.
+        def __init__(self, dfx_controller_inst, sockets: list[str], bitstream_folder=None):
+            self.dfx_controller_inst = dfx_controller_inst
+            self.bitstream_folder = bitstream_folder
+            assert os.path.isdir(self.bitstream_folder)
+
+            self.socket_map = {socket: idx for idx, socket in enumerate(sockets)}
+
+            # Expected pattern: partial_<socket_name>_<bs_id>_icap.bin
+            self.socket_dict_paths = {}
+            for socket in sockets:
+                pattern = re.compile(rf"^partial_{re.escape(socket)}_(\d+)_icap\.bin$")
+                socket_files = {}
+                for fname in os.listdir(self.bitstream_folder):
+                    m = pattern.match(fname)
+                    if m:
+                        bs_id = int(m.group(1))
+                        socket_files[bs_id] = os.path.join(self.bitstream_folder, fname)
+                self.socket_dict_paths[socket] = socket_files
+
+            # Allocate Pynq Buffers for every bitstream
+            self.socket_buffers = {}
+            for socket, bs_dict in self.socket_dict_paths.items():
+                self.socket_buffers[socket] = {}
+                for bs_id, path in bs_dict.items():
+                    raw = np.fromfile(path, dtype=np.uint32)
+                    buf = allocate(shape=(len(raw),), dtype=np.uint32)
+                    buf[:] = raw
+                    buf.flush()
+                    self.socket_buffers[socket][bs_id] = buf
+
+            # Compute Address Layout
+            self.max_num_rm = max(
+                len(bs_dict.keys()) for bs_dict in self.socket_dict_paths.values()
+            )
+            self.num_sockets = len(self.socket_dict_paths)
+            # Address encoding: [Virtual Socket Manager Select] [Bank Select] [Register Select] [00]
+            self.reg_select_shift = 2
+            bank0_bits = 1
+            bank1_bits = math.ceil(math.log2(self.max_num_rm))  # We assume one trigger per RM
+            bank2_bits = math.ceil(math.log2(self.max_num_rm)) + 1
+            bank3_bits = math.ceil(math.log2(self.max_num_rm)) + 2
+            self.reg_select_bits = max(bank0_bits, bank1_bits, bank2_bits, bank3_bits)
+            self.bank_select_shift = self.reg_select_shift + self.reg_select_bits
+            self.vsm_select_shift = self.bank_select_shift + 2
+
+            # Initialize the DFX Controller
+            for socket in self.socket_dict_paths.keys():
+                self.shutdown(vsm=socket)
+
+            for socket, rm in self.socket_buffers.items():
+                for bs_id, buf in rm.items():
+                    self.set_rm_bs_index(rm_id=bs_id, bs_index=bs_id, clear_bs_index=0, vsm=socket)
+                    self.set_bs_address(bs_row=bs_id, address=buf.device_address, vsm=socket)
+                    self.set_bs_size(bs_row=bs_id, size=len(buf) * 4, vsm=socket)
+
+            for socket in self.socket_dict_paths.keys():
+                self.restart_with_status(vsm=socket, is_full=True, rm_id=0)
+
+        def _map_socket(self, socket_name):
+            if isinstance(socket_name, int):
+                return socket_name
+            return self.socket_map[socket_name]
+
+        def _reg_addr(self, vsm, bank, reg_select):
+            return (
+                (vsm << self.vsm_select_shift)
+                | (bank << self.bank_select_shift)
+                | (reg_select << self.reg_select_shift)
+            )
+
+        def _extract_bits(self, value, high, low):
+            mask = (1 << (high - low + 1)) - 1
+            return (value >> low) & mask
+
+        def get_status(self, vsm):
+            vsm = self._map_socket(vsm)
+            addr = self._reg_addr(vsm, bank=0, reg_select=0)
+            raw = self.dfx_controller_inst.read(addr)
+            shutdown = bool(self._extract_bits(raw, 7, 7))
+            state_val = self._extract_bits(raw, 2, 0)
+            err_code = self._extract_bits(raw, 6, 3)
+            return {
+                "raw": hex(raw),
+                "rm_id": self._extract_bits(raw, 23, 8),
+                "shutdown": shutdown,
+                "error": err_code != 0,
+                "error_code": err_code,
+                "state": state_val,
+            }
+
+        def set_control(self, cmd, vsm, byte_field=0, halfword_field=0):
+            vsm = self._map_socket(vsm)
+            control_value = (
+                ((halfword_field & 0xFFFF) << 16) | ((byte_field & 0xFF) << 8) | (cmd & 0xFF)
+            )
+            addr = self._reg_addr(vsm, bank=0, reg_select=0)
+            self.dfx_controller_inst.write(addr, control_value)
+
+        def shutdown(self, vsm):
+            self.set_control(0, vsm=vsm)
+
+        def restart_with_status(self, vsm, is_full=False, rm_id=0):
+            byte_field = 1 if is_full else 0
+            self.set_control(2, vsm=vsm, byte_field=byte_field, halfword_field=rm_id)
+
+        def set_rm_bs_index(self, rm_id, bs_index, vsm, clear_bs_index=0):
+            vsm = self._map_socket(vsm)
+            reg_sel = (rm_id << 1) | 0
+            addr = self._reg_addr(vsm, bank=2, reg_select=reg_sel)
+            value = ((clear_bs_index & 0xFFFF) << 16) | (bs_index & 0xFFFF)
+            self.dfx_controller_inst.write(addr, value)
+
+        def set_rm_control(
+            self,
+            rm_id,
+            vsm,
+            shutdown_required=0,
+            startup_required=0,
+            reset_required=0,
+            reset_duration=1,
+        ):
+            vsm = self._map_socket(vsm)
+            reg_sel = (rm_id << 1) | 1
+            addr = self._reg_addr(vsm, bank=2, reg_select=reg_sel)
+            value = (
+                (((reset_duration - 1) & 0xFF) << 5)
+                | ((reset_required & 0x3) << 3)
+                | ((startup_required & 0x1) << 2)
+                | (shutdown_required & 0x3)
+            )
+            self.dfx_controller_inst.write(addr, value)
+
+        def set_bs_id(self, bs_row, bs_id, vsm):
+            vsm = self._map_socket(vsm)
+            reg_sel = (bs_row << 2) | 0
+            addr = self._reg_addr(vsm, bank=3, reg_select=reg_sel)
+            value = bs_id & 0x1
+            self.dfx_controller_inst.write(addr, value)
+
+        def set_bs_address(self, bs_row, address, vsm):
+            vsm = self._map_socket(vsm)
+            reg_sel = (bs_row << 2) | 1
+            addr = self._reg_addr(vsm, bank=3, reg_select=reg_sel)
+            self.dfx_controller_inst.write(addr, address)
+
+        def set_bs_size(self, bs_row, size, vsm):
+            vsm = self._map_socket(vsm)
+            reg_sel = (bs_row << 2) | 2
+            addr = self._reg_addr(vsm, bank=3, reg_select=reg_sel)
+            self.dfx_controller_inst.write(addr, size)
+
+        def print_status(self, vsm):
+            s = self.get_status(vsm=vsm)
+            print(f"VSM {vsm} Status: {s['raw']}")
+            print(f"RM ID: {s['rm_id']}")
+            print(f"Shutdown: {s['shutdown']}")
+            print(f"Error: {s['error']}")
+            print(f"State: {s['state']}")
+
+    def get_config_reg(self):
+        os.system("echo 0xffca3008 > /sys/firmware/zynqmp/config_reg")
+        result = os.popen("cat /sys/firmware/zynqmp/config_reg").read()
+        return result.strip()
+
+    def enable_icap(self):
+        os.system("echo 0xffca3008 0xff 0x0 > /sys/firmware/zynqmp/config_reg")
+
+    def enable_pcap(self):
+        os.system("echo 0xffca3008 0xff 0x1 > /sys/firmware/zynqmp/config_reg")
+
+    class DFXScheduler:
+        def __init__(self, ip_dict_entry, num_slots):
+            base_addr = ip_dict_entry["phys_addr"]
+            addr_range = ip_dict_entry["addr_range"]
+            self.mmio = MMIO(base_addr, addr_range)
+            self.num_slots = num_slots
+
+        def write64(self, msb_offset, value):
+            self.mmio.write(msb_offset, (value >> 32) & 0xFFFF_FFFF)
+            self.mmio.write(msb_offset + 4, value & 0xFFFF_FFFF)
+
+        def read64(self, msb_offset):
+            msb = self.mmio.read(msb_offset)
+            lsb = self.mmio.read(msb_offset + 4)
+            return (msb << 32) | lsb
+
+        def slot_offset(self, slot):
+            if slot < 0 or slot >= self.num_slots:
+                raise ValueError(f"slot must be in range [0, {self.num_slots - 1}], got {slot}")
+            return 0x1C + slot * 0x0C
+
+        def start(self):
+            self.mmio.write(0, 0x1)
+
+        def stop(self):
+            ctrl = self.mmio.read(0)
+            self.mmio.write(0, ctrl & ~(0x1))
+
+        @property
+        def running(self):
+            return bool(self.mmio.read(0) & (1 << 0))
+
+        @property
+        def error(self):
+            return bool(self.mmio.read(0) & (1 << 1))
+
+        @property
+        def max_cycles(self):
+            return self.read64(0x04)
+
+        @property
+        def min_cycles(self):
+            return self.read64(0x0C)
+
+        @property
+        def pre_decouple_cycles(self):
+            return self.read64(0x14)
+
+        @pre_decouple_cycles.setter
+        def pre_decouple_cycles(self, value):
+            self.write64(0x14, value)
+
+        def set_slot(self, slot, rm_id, cycles_wait):
+            base = self.slot_offset(slot)
+            self.mmio.write(base, (1 << rm_id) & 0xFFFF_FFFF)
+            self.write64(base + 4, cycles_wait)
+
+        def status(self):
+            return {
+                "running": self.running,
+                "error": self.error,
+                "max_cycles": self.max_cycles,
+                "min_cycles": self.min_cycles,
+                "pre_decouple_cycles": self.pre_decouple_cycles,
+            }
+
     def __init__(
         self,
         bitfile_name,
         io_shape_dict,
-        platform="zynq",
+        platform="zynq-iodma",
         fclk_mhz=100.0,
         device=None,
         download=True,
         runtime_weight_dir="runtime_weights/",
         batch_size=1,
         seed=1,
+        multidnn_mode=None,
         **kwargs,
     ):
         """Initialize DMA instrumentation overlay."""
@@ -1505,6 +1763,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             batch_size=batch_size,
             seed=seed,
         )
+        self.multidnn_mode = multidnn_mode
 
     def set_current_mode(self, mode):
         """Set accelerator mode ('dma' or 'instr')."""
@@ -1536,7 +1795,230 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
     def experiment_instrumentation(self, **kwargs):
         """Run instrumentation experiment (instrumentation mode)."""
         self.set_current_mode("instr")
+        if self.multidnn_mode == "SelectableWeights":
+            selector = self.Selector(self.ip_dict["StreamingDataflowPartition_1_selector"])
+            selector.set_schedule(schedule=[1, 1])
+            selector.start()
         return super().experiment_instrumentation(**kwargs)
+
+    def experiment_ma(self, **kwargs):
+        report_dir = kwargs.get("report_dir")
+        os.makedirs(report_dir, exist_ok=True)
+        report = {}
+        pr_bitstream_folder = os.path.join(os.path.dirname(self.bitfile_name), "partial_bitstreams")
+        socket_prefix = kwargs.get("pr_bitstream_prefix", "StreamingDataflowPartition")
+        num_slots = kwargs.get("num_slots", 2)
+        lead_time = kwargs.get("lead_time")
+        reconfiguration_time = kwargs.get("reconfiguration_time", 100000000)
+        test_bs = kwargs.get("test_bs", 200)
+
+        if self.multidnn_mode != "PartialReconfiguration":
+            if test_bs is not None:
+                if self.multidnn_mode == "Parallel":
+                    self.batch_size = test_bs // 2
+                else:
+                    self.batch_size = test_bs
+            if self.multidnn_mode == "SelectableWeights":
+                selector = self.SelectorDriver(
+                    self.ip_dict["StreamingDataflowPartition_1_selector"]
+                )
+                selector.set_schedule(schedule=[1, 1])
+                selector.start()
+
+            self.set_current_mode("dma")
+            test_results = {}
+            res = []
+            for _ in range(3):
+                self.throughput_test()["throughput[images/s]"]  # Dry runs
+            for _ in range(20):
+                res.append(self.throughput_test()["throughput[images/s]"])
+
+            if self.fclk_mhz == 200.0:
+                res = [x * (200.0 / 214.28357) for x in res]
+            res_sorted = sorted(res)
+            n = len(res_sorted)
+            q1 = res_sorted[n // 4]
+            q3 = res_sorted[(3 * n) // 4]
+            report = {
+                "avg_th": sum(res) / len(res),
+                "min": min(res),
+                "q1": q1,
+                "q3": q3,
+                "max": max(res),
+            }
+            self.batch_size = 1
+            reportfile = os.path.join(report_dir, "report_pr.json")
+            with open(reportfile, "w") as f:
+                json.dump(report, f, indent=2)
+            return 0
+
+        pattern = rf".*_{re.escape(socket_prefix)}_(\d+)_"
+        socket_names = []
+        for filename in os.listdir(pr_bitstream_folder):
+            match = re.search(pattern, filename)
+            if match:
+                name = f"{socket_prefix}_{match.group(1)}"
+                if name not in socket_names:
+                    socket_names.append(name)
+        socket_names = sorted(socket_names, key=lambda x: int(x.split("_")[-1]))
+        self.enable_icap()
+        dfx = self.DFXController(
+            self.dfx_controller_0, sockets=socket_names, bitstream_folder=pr_bitstream_folder
+        )
+
+        dfx_scheduler = self.DFXScheduler(self.ip_dict["dfx_schedule"], num_slots=num_slots)
+        dfx_scheduler.pre_decouple_cycles = lead_time
+        for slot in range(num_slots):
+            dfx_scheduler.set_slot(slot=slot, rm_id=slot, cycles_wait=reconfiguration_time)
+        dfx_scheduler.start()
+
+        # Get Min/Max cycles to sweep##
+        min_max = {}
+        time.sleep(1)  # Let the scheduler run for a bit to gather min/max cycles
+        max_cycles = dfx_scheduler.max_cycles
+        min_cycles = dfx_scheduler.min_cycles
+        min_max["max_cycles"] = max_cycles
+        min_max["min_cycles"] = min_cycles
+        report["min_max_cycles"] = min_max
+
+        # Set Batch Size
+        if test_bs is not None:
+            self.batch_size = test_bs
+        report["batch_size"] = self.batch_size
+
+        # Generate Experiments
+        overhead_cycles = max_cycles + lead_time
+        tests = [
+            100000,
+            250000,
+            500000,
+            750000,
+            1000000,
+            2500000,
+            5000000,
+            7500000,
+            10000000,
+            25000000,
+            50000000,
+            75000000,
+            100000000,
+        ]
+
+        test_results = {}
+        for inference_cycles in tests:
+            res = []
+            for slot in range(num_slots):
+                dfx_scheduler.set_slot(
+                    slot=slot, rm_id=slot, cycles_wait=inference_cycles + overhead_cycles
+                )
+            self.throughput_test()["throughput[images/s]"]  # dry run
+            for _ in range(20):
+                res.append(self.throughput_test()["throughput[images/s]"])
+            # if self.fclk_mhz == 200.0:
+            res = [x * (200.0 / 214.28357) for x in res]
+            res_sorted = sorted(res)
+            n = len(res_sorted)
+            q1 = res_sorted[n // 4]
+            q3 = res_sorted[(3 * n) // 4]
+            test_results[inference_cycles] = {
+                "overhead_cycles": overhead_cycles,
+                "lead_time": lead_time,
+                "inference_cycles": inference_cycles,
+                "avg_th": sum(res) / len(res),
+                "min": min(res),
+                "q1": q1,
+                "q3": q3,
+                "max": max(res),
+            }
+        report["test"] = test_results
+        report["Error"] = dfx_scheduler.error
+        dfx_scheduler.stop()
+        print(dfx_scheduler.status())
+
+        self.batch_size = 1  # Free memory
+        del dfx
+        # PCAP test - dry run to buffer bitstreams in RAM
+        self.enable_pcap()
+
+        full_bs = []
+        full_bs_pattern = re.compile(r"^config_(\d+)\.bit$")
+        for filename in sorted(os.listdir(pr_bitstream_folder)):
+            m = full_bs_pattern.match(filename)
+            if m:
+                path = os.path.join(pr_bitstream_folder, filename)
+                full_bs += [path]
+
+        for p in full_bs:
+            pb = Bitstream(p, None, False)
+            pb.download()
+
+        full_configuration_time = []
+        for _ in range(10):
+            for p in full_bs:
+                pb = Bitstream(p, None, False)
+                start = time.time()
+                pb.download()
+                end = time.time()
+                full_configuration_time.append(end - start)
+        fct = sorted(full_configuration_time)
+        fn = len(fct)
+        full_configuration_report = {
+            "avg": sum(fct) / fn,
+            "min": fct[0],
+            "q1": fct[fn // 4],
+            "q3": fct[(3 * fn) // 4],
+            "max": fct[-1],
+            "bitfile_sizes_bytes": {os.path.basename(p): os.path.getsize(p) for p in full_bs},
+        }
+        report["full_configuration"] = full_configuration_report
+
+        partial_bs_by_rm = {}
+        partial_bs_pattern = re.compile(rf"^partial_{re.escape(socket_prefix)}_(\d+)_(\d+)\.bit$")
+        for filename in sorted(os.listdir(pr_bitstream_folder)):
+            m = partial_bs_pattern.match(filename)
+            if m:
+                socket_id = int(m.group(1))
+                rm_id = int(m.group(2))
+                path = os.path.join(pr_bitstream_folder, filename)
+                partial_bs_by_rm.setdefault(rm_id, []).append((socket_id, path))
+        for rm_id in partial_bs_by_rm:
+            partial_bs_by_rm[rm_id].sort(key=lambda t: t[0])
+
+        # Dry run
+        for rm_id, sockets in sorted(partial_bs_by_rm.items()):
+            for _, path in sockets:
+                pb = Bitstream(path, None, True)
+                pb.download()
+
+        # Measure reconfiguration time for one full id (all sockets for a given RM id)
+        partial_configuration_time = []
+        for _ in range(10):
+            for rm_id, sockets in sorted(partial_bs_by_rm.items()):
+                start = time.time()
+                for _, path in sockets:
+                    pb = Bitstream(path, None, True)
+                    pb.download()
+                end = time.time()
+                partial_configuration_time.append(end - start)
+        pct = sorted(partial_configuration_time)
+        pn = len(pct)
+        partial_configuration_report = {
+            "avg": sum(pct) / pn,
+            "min": pct[0],
+            "q1": pct[pn // 4],
+            "q3": pct[(3 * pn) // 4],
+            "max": pct[-1],
+            "bitfile_sizes_bytes": {
+                os.path.basename(path): os.path.getsize(path)
+                for sockets in partial_bs_by_rm.values()
+                for _, path in sockets
+            },
+        }
+        report["partial_configuration"] = partial_configuration_report
+        report["fclk_mhz"] = self.fclk_mhz
+        reportfile = os.path.join(report_dir, "report_pr.json")
+        with open(reportfile, "w") as f:
+            json.dump(report, f, indent=2)
 
 
 def parse_kv(ctx, self, value):

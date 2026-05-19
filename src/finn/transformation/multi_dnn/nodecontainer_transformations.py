@@ -135,8 +135,15 @@ class NameNodeContainerNodes(Transformation):
                 for id in range(bodies):
                     body_attr = f"body_{id}"
                     body_model = node_inst.get_nodeattr(body_attr)
-                    body_model = body_model.transform(
-                        GiveUniqueNodeNames(prefix=f"{node.name}_body_{id}_")
-                    )
+                    prefix = f"{node.name}_body_{id}_"
+
+                    optype_count = {}
+                    for n in body_model.graph.node:
+                        if n.op_type not in optype_count.keys():
+                            optype_count[n.op_type] = 0
+                        if not n.name.startswith(prefix):
+                            n.name = "%s%s_%d" % (prefix, n.op_type, optype_count[n.op_type])
+                        optype_count[n.op_type] += 1
+
                     node_inst.set_nodeattr(body_attr, body_model)
         return (model, False)
