@@ -28,11 +28,11 @@
 
 # -*- coding: utf-8 -*-
 """
-    Dummy conftest.py for finn.
+Dummy conftest.py for finn.
 
-    If you don't know what this is for, just leave it empty.
-    Read more about conftest.py under:
-    https://pytest.org/latest/plugins.html
+If you don't know what this is for, just leave it empty.
+Read more about conftest.py under:
+https://pytest.org/latest/plugins.html
 """
 
 import pytest
@@ -62,6 +62,14 @@ def load_settings(request) -> None:
 def pytest_collect_file(file_path: Path, parent) -> None:  # noqa: ARG001
     """Initialize FINN settings before each test module is imported."""
     finn.util.settings.initialize_dummy_settings()
+
+
+def pytest_configure(config) -> None:  # noqa: ARG001
+    """Initialize FINN settings once per pytest run."""
+    import finn.util.settings
+
+    finn.util.settings.initialize_dummy_settings()
+    import finn.xsi  # noqa
 
 
 @pytest.fixture(scope="class", autouse=True)
