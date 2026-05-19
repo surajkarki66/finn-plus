@@ -5,14 +5,12 @@ from __future__ import annotations
 import pytest
 
 import numpy as np
-import os
-import sys
-import types
 from onnx import GraphProto, NodeProto, TensorProto, ValueInfoProto, helper
-from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.util.basic import qonnx_make_model
 from typing import Protocol, cast
+from finn.transformation.fpgadataflow.simulation_build import SimulationBuilder
+from finn.util.exception import FINNInternalError
 
 
 class _SimulationBuilderProtocol(Protocol):
@@ -21,50 +19,6 @@ class _SimulationBuilderProtocol(Protocol):
 
     def _isolated_node_model(self, by_node: int | str) -> ModelWrapper:
         ...
-
-
-def _import_simulation_build_types() -> tuple[type[_SimulationBuilderProtocol], type[Exception]]:
-    finn_xsi_stub_dir = Path("/tmp/finn_xsi_stub")
-    finn_xsi_stub_dir.mkdir(parents=True, exist_ok=True)
-    (finn_xsi_stub_dir / "xsi.so").touch(exist_ok=True)
-    os.environ.setdefault("FINN_XSI", str(finn_xsi_stub_dir))
-
-    finn_xsi_module = types.ModuleType("finn_xsi")
-    finn_xsi_module.__path__ = []
-    finn_xsi_adapter_module = types.ModuleType("finn_xsi.adapter")
-
-    def _get_simkernel_so() -> str:
-        return ""
-
-    finn_xsi_adapter_module.__dict__["get_simkernel_so"] = _get_simkernel_so
-    finn_xsi_sim_engine_module = types.ModuleType("finn_xsi.sim_engine")
-
-    class _SimEngine:
-        pass
-
-    finn_xsi_sim_engine_module.__dict__["SimEngine"] = _SimEngine
-    finn_xsi_module.__dict__["adapter"] = finn_xsi_adapter_module
-    finn_xsi_module.__dict__["sim_engine"] = finn_xsi_sim_engine_module
-    sys.modules.setdefault("finn_xsi", finn_xsi_module)
-    sys.modules.setdefault("finn_xsi.adapter", finn_xsi_adapter_module)
-    sys.modules.setdefault("finn_xsi.sim_engine", finn_xsi_sim_engine_module)
-
-    scipy_module = types.ModuleType("scipy")
-    scipy_special_module = types.ModuleType("scipy.special")
-
-    def _softmax(x: np.ndarray, axis: int | None = None) -> np.ndarray:
-        exp_x = np.exp(x)
-        return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
-
-    scipy_special_module.__dict__["softmax"] = _softmax
-    scipy_module.__dict__["special"] = scipy_special_module
-    sys.modules.setdefault("scipy", scipy_module)
-    sys.modules.setdefault("scipy.special", scipy_special_module)
-
-    from finn.transformation.fpgadataflow.simulation_build import SimulationBuilder
-    from finn.util.exception import FINNInternalError
-
-    return SimulationBuilder, FINNInternalError
 
 
 def _vi(name: str, shape: list[int]) -> ValueInfoProto:
@@ -728,9 +682,8 @@ def test_isolated_node_model_unary_target_with_varied_other_node_inputs(
     pre_binary: bool, succ_binary: bool
 ) -> None:
     """Isolate unary target with unary/binary surrounding nodes."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_unary_target_model(pre_binary=pre_binary, succ_binary=succ_binary)
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, 1)
 
@@ -749,9 +702,8 @@ def test_isolated_node_model_unary_target_with_varied_other_node_inputs(
 
 def test_isolated_node_model_select_by_name() -> None:
     """Selecting node by name returns the correct isolated model."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_unary_target_model(pre_binary=False, succ_binary=False)
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, "target_dwc")
 
@@ -786,9 +738,8 @@ def test_isolated_node_model_binary_target_with_dynamic_and_fixed_inputs(
     expected_target_inputs: list[str],
 ) -> None:
     """Isolate binary target for dynamic/fixed lhs-rhs and MLO/non-MLO cases."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_binary_target_model(initializer_side=initializer_side, mlo=mlo)
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, 0)
 
@@ -810,7 +761,6 @@ def test_isolated_node_model_unary_succ_fifo_chain_transparency(
     fifo_between_depth: int,
 ) -> None:
     """FIFOs between target and successor are transparent for isolation checks."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_unary_target_model(
         pre_binary=False,
         succ_binary=False,
@@ -818,7 +768,7 @@ def test_isolated_node_model_unary_succ_fifo_chain_transparency(
         fifo_between=True,
         fifo_between_depth=fifo_between_depth,
     )
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, "succ_dwc")
 
@@ -841,7 +791,6 @@ def test_isolated_node_model_binary_succ_fifo_chain_transparency(
     fifo_between_depth: int,
 ) -> None:
     """Binary successor nodes see FIFO chains as transparent."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_binary_target_model(
         initializer_side=None,
         mlo=False,
@@ -849,7 +798,7 @@ def test_isolated_node_model_binary_succ_fifo_chain_transparency(
         fifo_between=True,
         fifo_between_depth=fifo_between_depth,
     )
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, "succ_dwc")
 
@@ -881,7 +830,6 @@ def test_isolated_node_model_binary_target_fifo_pre_transparency(
     expected_target_inputs: list[str],
 ) -> None:
     """FIFO chains before the target are transparent for inputs."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_binary_target_model(
         initializer_side=initializer_side,
         mlo=False,
@@ -890,7 +838,7 @@ def test_isolated_node_model_binary_target_fifo_pre_transparency(
         fifo_between=True,
         fifo_between_depth=2,
     )
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     model.save("/scratch/pc2-mitarbeiter/linusjun/finn-tmp/source_model.onnx")
 
@@ -974,7 +922,6 @@ def test_isolated_node_model_duplicate_stream_fifo_transparency(
     config: dict[str, object],
 ) -> None:
     """DuplicateStreams models behave identically with FIFO chains present."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_duplicate_target_model(
         fifos=bool(config["fifos"]),
         branch_nodes=bool(config["branch_nodes"]),
@@ -983,7 +930,7 @@ def test_isolated_node_model_duplicate_stream_fifo_transparency(
         fifo_after=bool(config["fifo_after"]),
         fifo_between_depth=cast("int | None", config["fifo_between_depth"]),
     )
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, "dup_stream")
 
@@ -1003,7 +950,6 @@ def test_isolated_node_model_duplicate_stream_fifo_transparency(
 
 def test_isolated_node_model_fifo_transparency_nodes() -> None:
     """Compare isolated node inputs/outputs between FIFO and non-FIFO topologies for all nodes."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model_no_fifo = _build_unary_target_model(
         pre_binary=True,
         succ_binary=False,
@@ -1024,8 +970,8 @@ def test_isolated_node_model_fifo_transparency_nodes() -> None:
         fifo_after=True,
     )
 
-    builder_no_fifo = simulation_builder_cls(model_no_fifo, "xc7z020clg400-1", 5.0)
-    builder_fifo = simulation_builder_cls(model_fifo, "xc7z020clg400-1", 5.0)
+    builder_no_fifo = SimulationBuilder(model_no_fifo, "xc7z020clg400-1", 5.0)
+    builder_fifo = SimulationBuilder(model_fifo, "xc7z020clg400-1", 5.0)
 
     node_names = [node.name for node in model_no_fifo.graph.node if node.op_type != "StreamingFIFO"]
 
@@ -1043,9 +989,8 @@ def test_isolated_node_model_fifo_transparency_nodes() -> None:
 
 def test_isolated_node_model_elementwise_sets_const_style_for_mlo_initializer() -> None:
     """Elementwise ops set lhs_style/rhs_style=const for remapped MLO initializer inputs."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_binary_target_model(initializer_side=None, mlo=True)
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, 0)
     target_node = next(n for n in isolated.graph.node if n.name == "target_add")
@@ -1063,9 +1008,8 @@ def test_isolated_node_model_elementwise_sets_const_style_for_mlo_initializer() 
 
 def test_isolated_node_model_mvau_sets_internal_decoupled_for_initializer_input() -> None:
     """MVAU ops set mem_mode=internal_decoupled when an input is remapped to initializer."""
-    simulation_builder_cls, _ = _import_simulation_build_types()
     model = _build_mvau_target_model(mlo=True)
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
     isolated = _isolate_node_model(builder, 0)
     target_node = next(n for n in isolated.graph.node if n.name == "target_mvau")
@@ -1079,11 +1023,10 @@ def test_isolated_node_model_mvau_sets_internal_decoupled_for_initializer_input(
 
 def test_isolated_node_model_rejects_bad_mlo_metadata() -> None:
     """Reject invalid mlo_input_parameter_names metadata values."""
-    simulation_builder_cls, finn_internal_error_cls = _import_simulation_build_types()
     model = _build_binary_target_model(initializer_side="rhs", mlo=False)
     model.set_metadata_prop("is_mlo", "1")
     model.set_metadata_prop("mlo_input_parameter_names", "42")
-    builder = simulation_builder_cls(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
 
-    with pytest.raises(finn_internal_error_cls, match="mlo_input_parameter_names"):
+    with pytest.raises(FINNInternalError, match="mlo_input_parameter_names"):
         _isolate_node_model(builder, 0)

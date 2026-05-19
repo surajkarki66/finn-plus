@@ -35,6 +35,7 @@ from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import getHWCustomOp, launch_process_helper, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
+from finn.util.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -621,7 +622,7 @@ class SimulationBuilder:
             return Path(sim_base)
 
         # Check where FINNXSI is
-        finnxsi_dir = os.environ["FINN_XSI"]
+        finnxsi_dir = get_settings().finn_xsi
 
         # Running CMake first
         cmake_call = f"{sys.executable} -m cmake -S {finnxsi_dir} -B {sim_base}"
@@ -679,7 +680,7 @@ class SimulationBuilder:
         """Template finn_xsi/finn_xsi/rtlsim_config.hpp.template with the correct values and
         return the templated file.
         """
-        finnxsi_dir = os.environ["FINN_XSI"]
+        finnxsi_dir = get_settings().finn_xsi
         # Prepare the C++ driver config template
         (
             instream_descrs_str,

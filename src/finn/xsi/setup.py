@@ -224,7 +224,7 @@ def build_xsi(force: bool = False, verbose: bool = True) -> bool:
 
 def verify_installation() -> bool:
     """Verify that finn_xsi can be imported and works."""
-    xsi_path = Path(os.environ["FINN_XSI"])
+    xsi_path = get_settings().finn_xsi
 
     # Check if xsi.so exists
     xsi_so = xsi_path / "xsi.so"
@@ -261,7 +261,7 @@ def verify_installation() -> bool:
 
 def clean_build() -> bool:
     """Clean build artifacts."""
-    xsi_path = Path(os.environ["FINN_XSI"])
+    xsi_path = get_settings().finn_xsi
 
     print(f"Cleaning build artifacts in {xsi_path}...")
 
