@@ -5,7 +5,7 @@ import pytest
 
 import math
 
-from finn.transformation.fpgadataflow.simulation import (
+from finn.transformation.fpgadataflow.simulation_connected import (
     calculate_bram_blocks,
     calculate_bram_depth_range,
 )
@@ -147,7 +147,7 @@ class TestGetValidBlockCounts:
 
     def test_all_valid_bitwidth_1(self) -> None:
         """Test that all block counts are valid for bitwidth=1."""
-        from finn.transformation.fpgadataflow.simulation import RunLayerParallelSimulation
+        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
         # Create dummy instance just to test the method
         sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
@@ -157,7 +157,7 @@ class TestGetValidBlockCounts:
 
     def test_wide_bitwidth_filtering(self) -> None:
         """Test that some block counts may be invalid for wide bitwidths."""
-        from finn.transformation.fpgadataflow.simulation import RunLayerParallelSimulation
+        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
         sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
 
@@ -170,7 +170,7 @@ class TestGetValidBlockCounts:
 
     def test_range_respects_bounds(self) -> None:
         """Test that valid blocks respect min/max bounds."""
-        from finn.transformation.fpgadataflow.simulation import RunLayerParallelSimulation
+        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
         sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
 
@@ -181,7 +181,7 @@ class TestGetValidBlockCounts:
 
     def test_empty_when_no_valid_in_range(self) -> None:
         """Test that empty list is returned when no valid configs exist in range."""
-        from finn.transformation.fpgadataflow.simulation import RunLayerParallelSimulation
+        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
         sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
 
@@ -237,7 +237,7 @@ class TestSRL16ELUTCalculations:
 
     def test_calculate_srl16e_luts_basic(self):
         """Test basic SRL16E LUT calculations."""
-        from finn.transformation.fpgadataflow.simulation import calculate_srl16e_luts
+        from finn.transformation.fpgadataflow.simulation_connected import calculate_srl16e_luts
 
         # Formula: LUTs = ⌈depth/32⌉ * ⌈bitwidth/2⌉
         # depth=32, bitwidth=2: ⌈32/32⌉ * ⌈2/2⌉ = 1 * 1 = 1
@@ -254,7 +254,7 @@ class TestSRL16ELUTCalculations:
 
     def test_calculate_srl16e_luts_various_bitwidths(self):
         """Test SRL16E LUT calculations for various bitwidths."""
-        from finn.transformation.fpgadataflow.simulation import calculate_srl16e_luts
+        from finn.transformation.fpgadataflow.simulation_connected import calculate_srl16e_luts
 
         # Bitwidth 1: ⌈1/2⌉ = 1
         assert calculate_srl16e_luts(32, 1) == 1
@@ -270,7 +270,7 @@ class TestSRL16ELUTCalculations:
 
     def test_calculate_srl16e_luts_small_depths(self):
         """Test SRL16E LUT calculations for small depths."""
-        from finn.transformation.fpgadataflow.simulation import calculate_srl16e_luts
+        from finn.transformation.fpgadataflow.simulation_connected import calculate_srl16e_luts
 
         # Small depths still use at least 1 LUT per bitwidth factor
         assert calculate_srl16e_luts(2, 2) == 1
@@ -283,7 +283,7 @@ class TestSRL16EDepthRange:
 
     def test_depth_range_basic(self):
         """Test basic depth range calculation for SRL16E."""
-        from finn.transformation.fpgadataflow.simulation import (
+        from finn.transformation.fpgadataflow.simulation_connected import (
             calculate_srl16e_depth_range,
             calculate_srl16e_luts,
         )
@@ -297,7 +297,7 @@ class TestSRL16EDepthRange:
 
     def test_depth_range_bitwidth_1(self):
         """Test depth range for 1-bit data."""
-        from finn.transformation.fpgadataflow.simulation import (
+        from finn.transformation.fpgadataflow.simulation_connected import (
             calculate_srl16e_depth_range,
             calculate_srl16e_luts,
         )
@@ -316,7 +316,9 @@ class TestSRL16EDepthRange:
 
     def test_depth_range_invalid_odd_luts(self):
         """Test that odd LUT counts are invalid for certain bitwidths."""
-        from finn.transformation.fpgadataflow.simulation import calculate_srl16e_depth_range
+        from finn.transformation.fpgadataflow.simulation_connected import (
+            calculate_srl16e_depth_range,
+        )
 
         # Bitwidth=4: ⌈4/2⌉ = 2, so only even LUT counts are valid
         _, max_d = calculate_srl16e_depth_range(1, 4)
@@ -327,7 +329,7 @@ class TestSRL16EDepthRange:
 
     def test_depth_range_consistency(self):
         """Test that all valid ranges produce the correct LUT count."""
-        from finn.transformation.fpgadataflow.simulation import (
+        from finn.transformation.fpgadataflow.simulation_connected import (
             calculate_srl16e_depth_range,
             calculate_srl16e_luts,
         )
@@ -358,7 +360,7 @@ class TestNeedsMinimization:
     # TODO: Maybe remove this behavior
     def test_small_depths_no_minimization(self):
         """Test that small depths don't need minimization."""
-        from finn.transformation.fpgadataflow.simulation import RunLayerParallelSimulation
+        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
         sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
         sim.max_qsrl_depth = 256
@@ -371,7 +373,7 @@ class TestNeedsMinimization:
     # TODO: Maybe remove this behavior
     def test_qsrl_range_no_minimization(self):
         """Test that depths within QSRL range don't need minimization."""
-        from finn.transformation.fpgadataflow.simulation import RunLayerParallelSimulation
+        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
         sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
         sim.max_qsrl_depth = 256
@@ -382,7 +384,7 @@ class TestNeedsMinimization:
 
     def test_large_depths_need_minimization(self):
         """Test that large depths with multiple BRAM blocks need minimization."""
-        from finn.transformation.fpgadataflow.simulation import (
+        from finn.transformation.fpgadataflow.simulation_connected import (
             RunLayerParallelSimulation,
             calculate_bram_blocks,
             calculate_bram_depth_range,
@@ -446,7 +448,7 @@ class TestNeedsMinimization:
 
     def test_minimum_bram_edge_case(self):
         """Test edge case at minimum BRAM blocks."""
-        from finn.transformation.fpgadataflow.simulation import RunLayerParallelSimulation
+        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 
         sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
         sim.max_qsrl_depth = 256
