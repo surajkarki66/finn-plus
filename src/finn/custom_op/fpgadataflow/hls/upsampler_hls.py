@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for upsampler hls."""
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 from finn.custom_op.fpgadataflow.upsampler import UpsampleNearestNeighbour
 
@@ -37,18 +38,22 @@ class UpsampleNearestNeighbour_hls(UpsampleNearestNeighbour, HLSBackend):
     """
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {}
         my_attrs.update(UpsampleNearestNeighbour.get_nodeattr_types(self))
         my_attrs.update(HLSBackend.get_nodeattr_types(self))
         return my_attrs
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = ['#include "upsample.hpp"']
 
     def defines(self, var):
+        """Return defines."""
         self.code_gen_dict["$DEFINES$"] = []
 
         HI = self.get_nodeattr("HI")
@@ -69,11 +74,13 @@ class UpsampleNearestNeighbour_hls(UpsampleNearestNeighbour, HLSBackend):
         self.code_gen_dict["$DEFINES$"] += [f"#define CF {CF}"]
 
     def docompute(self):
+        """Return docompute."""
         self.code_gen_dict["$DOCOMPUTE$"] = [
             """upsample_nn<HI, HO, WI, WO, CF, CF>(in0_V, out0_V);"""
         ]
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         simd = self.get_nodeattr("SIMD")
         input_elem_hls_type = self.get_input_datatype().get_hls_datatype_str()
         output_elem_hls_type = self.get_output_datatype().get_hls_datatype_str()
@@ -90,4 +97,5 @@ class UpsampleNearestNeighbour_hls(UpsampleNearestNeighbour, HLSBackend):
         ]
 
     def execute_node(self, context, graph):
+        """Execute node."""
         HLSBackend.execute_node(self, context, graph)

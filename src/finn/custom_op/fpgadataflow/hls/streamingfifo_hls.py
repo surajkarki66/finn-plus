@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for streamingfifo hls."""
 import numpy as np
 import os
 from qonnx.core.datatype import DataType
@@ -39,6 +40,7 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
     """HLS-based FIFO implementation. Currently only used as virtual FIFO for live FIFO-sizing."""
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {
             # Only purpose of this CustomOp for now: virtual FIFO for live FIFO-sizing
             "impl_style": ("s", False, "virtual", {"virtual"}),
@@ -52,6 +54,7 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
         self.code_gen_dict["$GLOBALS$"] = ['#include "virtual_fifo.hpp"']
 
     def defines(self, var) -> None:
+        """Return defines."""
         numReps = 1
         width = self.get_instream_width()
         self.code_gen_dict["$DEFINES$"] = [
@@ -60,6 +63,7 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
         ]
 
     def strm_decl(self):
+        """Return strm decl."""
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
             f"hls::stream<ap_uint<{self.get_instream_width()}>> "
@@ -71,6 +75,7 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
         )
 
     def docompute(self):
+        """Return docompute."""
         self.code_gen_dict["$DOCOMPUTE$"] = [
             f"""
             #pragma HLS dataflow disable_start_propagation
@@ -92,6 +97,7 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
         ]
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         in_packed_bits = self.get_instream_width()
         in_packed_hls_type = f"ap_uint<{in_packed_bits}>"
         out_packed_bits = self.get_outstream_width()
@@ -111,6 +117,7 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
         ]
 
     def pragmas(self):
+        """Return pragmas."""
         self.code_gen_dict["$PRAGMAS$"] = [
             "#pragma HLS INTERFACE axis port=in0_" + self.hls_sname()
         ]
@@ -125,11 +132,13 @@ class StreamingFIFO_hls(StreamingFIFO, HLSBackend):
 
     def get_verilog_top_module_intf_names(self):
         # Overload default HWCustomOp implementation to add axilite control IF
+        """Return verilog top module intf names."""
         intf_names = super().get_verilog_top_module_intf_names()
         intf_names["axilite"] = ["s_axi_control"]
         return intf_names
 
     def execute_node(self, context, graph):
+        """Execute node."""
         mode = self.get_nodeattr("exec_mode")
         node = self.onnx_node
         exp_shape = self.get_normal_input_shape()

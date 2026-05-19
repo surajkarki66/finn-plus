@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for fold quant weights."""
 import numpy as np
 import qonnx.core.onnx_exec as oxe
 from onnx import TensorProto, helper
@@ -43,6 +44,7 @@ class FoldQuantWeights(Transformation):
     """
 
     def apply(self, model):
+        """Apply transformation."""
         graph = model.graph
         node_ind = 0
         graph_modified = False

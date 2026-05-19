@@ -84,9 +84,11 @@ class InsertFIFO(Transformation):
         self.vivado_ram_style = vivado_ram_style
 
     def _is_fifo_node(self, node: NodeProto) -> bool:
+        """Return whether node is a FIFO node."""
         return bool(node.op_type.startswith("StreamingFIFO"))
 
     def _suitable_node(self, node: NodeProto) -> bool:
+        """Return whether node is suitable for FIFO insertion."""
         if node is not None:
             if is_fpgadataflow_node(node):
                 return bool(not self._is_fifo_node(node))
@@ -98,11 +100,13 @@ class InsertFIFO(Transformation):
         ishape: Sequence[int] | npt.NDArray[np.int_],
         oshape: Sequence[int] | npt.NDArray[np.int_],
     ) -> bool:
+        """Return suitable folded shapes."""
         matching_stream_width = ishape[-1] == oshape[-1]
         matching_size = np.prod(ishape) == np.prod(oshape)
         return matching_stream_width and matching_size
 
     def _shape_to_onnx(self, shape: Sequence[int] | npt.NDArray[np.int_]) -> list[int]:
+        """Return shape as a list of integers."""
         return [int(dim) for dim in shape]
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:

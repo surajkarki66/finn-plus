@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for streamingdatawidthconverter hls."""
 import numpy as np
 
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
@@ -40,15 +41,18 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
     function."""
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {}
         my_attrs.update(StreamingDataWidthConverter.get_nodeattr_types(self))
         my_attrs.update(HLSBackend.get_nodeattr_types(self))
         return my_attrs
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = ['#include "streamtools.h"']
 
     def defines(self, var):
+        """Return defines."""
         numReps = 1
         numInWords = int(np.prod(self.get_folded_input_shape()[:-1]))
         inWidth = self.get_nodeattr("inWidth")
@@ -67,6 +71,7 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
             self.code_gen_dict["$DEFINES$"].append("#define NumLCMToOut %d" % (numLCMToOut))
 
     def strm_decl(self):
+        """Return strm decl."""
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
             f'hls::stream<ap_uint<{self.get_instream_width()}>> in0_V ("in0_V");'
@@ -77,6 +82,7 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
 
     def docompute(self):
         # TODO continue with fxns below, they are copy-pasted
+        """Return docompute."""
         op = "StreamingDataWidthConverter_Batch"
         if self.needs_lcm():
             self.code_gen_dict["$DOCOMPUTE$"] = [
@@ -90,6 +96,7 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
             ]
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         in_packed_bits = self.get_instream_width()
         in_packed_hls_type = "ap_uint<%d>" % in_packed_bits
         out_packed_bits = self.get_outstream_width()
@@ -104,6 +111,7 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
         ]
 
     def pragmas(self):
+        """Return pragmas."""
         self.code_gen_dict["$PRAGMAS$"] = ["#pragma HLS INTERFACE axis port=in0_V"]
         self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS INTERFACE axis port=out0_V")
         self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS INTERFACE ap_ctrl_none port=return")
@@ -111,6 +119,7 @@ class StreamingDataWidthConverter_hls(StreamingDataWidthConverter, HLSBackend):
             self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS DATAFLOW disable_start_propagation")
 
     def execute_node(self, context, graph):
+        """Execute node."""
         mode = self.get_nodeattr("exec_mode")
         if mode == "cppsim":
             exp_shape = self.get_normal_input_shape()

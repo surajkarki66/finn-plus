@@ -397,6 +397,7 @@ class Thresholding(HWCustomOp):
         return num_channels // pe
 
     def get_verilog_top_module_intf_names(self):
+        """Return the signal names for the Verilog top module."""
         intf_names = {}
         intf_names["clk"] = ["ap_clk"]
         intf_names["rst"] = ["ap_rst_n"]

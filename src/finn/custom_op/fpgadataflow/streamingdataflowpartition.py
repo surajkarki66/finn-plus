@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for streamingdataflowpartition."""
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.base import CustomOp
 
@@ -41,6 +42,7 @@ class StreamingDataflowPartition(CustomOp):
     bitfile by itself."""
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         return {
             "model": ("s", True, ""),
             "res_estimate": ("s", False, ""),
@@ -55,12 +57,15 @@ class StreamingDataflowPartition(CustomOp):
         }
 
     def make_shape_compatible_op(self, model):
+        """Create shape compatible op."""
         pass
 
     def infer_node_datatype(self, model):
+        """Infer node datatype."""
         pass
 
     def execute_node(self, context, graph):
+        """Execute node."""
         model = ModelWrapper(self.get_nodeattr("model"))
         return_full_exec_context = self.get_nodeattr("return_full_exec_context") == 1
         node = self.onnx_node
@@ -83,6 +88,7 @@ class StreamingDataflowPartition(CustomOp):
                     context[node.name + "_" + tname] = ret[tname]
 
     def verify_node(self):
+        """Verify node."""
         info_messages = []
 
         # verify number of attributes

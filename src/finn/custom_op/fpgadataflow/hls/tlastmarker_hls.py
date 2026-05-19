@@ -27,6 +27,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for tlastmarker hls."""
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 
@@ -40,9 +41,11 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
     from DMA read."""
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {
             # number of (static) iterations until TLAST=1 is generated for Direction=out
             "NumIters": ("i", True, 0),
@@ -68,6 +71,7 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
         # of the current image/input sample. when executing
         # inside FINN as a single node, this is not visible.
         # so here we simply return the input as output
+        """Execute node."""
         i_name = self.onnx_node.input[0]
         o_name = self.onnx_node.output[0]
         i_tensor = context[i_name]
@@ -75,16 +79,20 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
 
     def make_shape_compatible_op(self, model):
         # not supported for shape inference
+        """Create shape compatible op."""
         pass
 
     def infer_node_datatype(self, model):
         # not supported for datatype inference
+        """Infer node datatype."""
         pass
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = ['#include "ap_axi_sdata.h"']
 
     def defines(self, var):
+        """Return defines."""
         stream_width = self.get_nodeattr("StreamWidth")
         direction = self.get_nodeattr("Direction")
         protocol = self.get_nodeattr("Protocol")
@@ -117,9 +125,11 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
         ]
 
     def read_npy_data(self):
+        """Return read npy data."""
         self.code_gen_dict["$READNPYDATA$"] = []
 
     def docompute(self):
+        """Return docompute."""
         dyn_iters = self.get_nodeattr("DynIters")
         direction = self.get_nodeattr("Direction")
         use_qdma_axis = self.get_nodeattr("Protocol") == "external"
@@ -175,9 +185,11 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
             ]
 
     def dataoutstrm(self):
+        """Return dataoutstrm."""
         self.code_gen_dict["$DATAOUTSTREAM$"] = []
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         dyn_iters = self.get_nodeattr("DynIters")
 
         if dyn_iters == 1:
@@ -194,6 +206,7 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
             ]
 
     def pragmas(self):
+        """Return pragmas."""
         self.code_gen_dict["$PRAGMAS$"] = ["#pragma HLS INTERFACE axis port=in0_V"]
         self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS INTERFACE axis port=out0_V")
 
@@ -206,25 +219,31 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
         self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS INTERFACE ap_ctrl_none port=return")
 
     def get_number_output_values(self):
+        """Return number output values."""
         return self.get_nodeattr("NumIters")
 
     def get_input_datatype(self, ind=0):
         # not supported
+        """Return input datatype."""
         raise Exception("get_input_datatype not implemented for TlastMarker")
 
     def get_output_datatype(self, ind=0):
         # not supported
+        """Return output datatype."""
         raise Exception("get_output_datatype not implemented for TlastMarker")
 
     def get_normal_input_shape(self, ind=0):
         # not supported
+        """Return normal input shape."""
         raise Exception("get_normal_input_shape not implemented for TlastMarker")
 
     def get_normal_output_shape(self, ind=0):
         # not supported
+        """Return normal output shape."""
         raise Exception("get_normal_input_shape not implemented for TlastMarker")
 
     def get_folded_input_shape(self, ind=0):
+        """Return folded input shape."""
         stream_width = self.get_nodeattr("StreamWidth")
         elem_width = self.get_nodeattr("ElemWidth")
         n_packed_elems = stream_width // elem_width
@@ -232,17 +251,21 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
         return (1, n_iters, n_packed_elems)
 
     def get_folded_output_shape(self, ind=0):
+        """Return folded output shape."""
         return self.get_folded_input_shape()
 
     def get_instream_width(self, ind=0):
+        """Return instream width."""
         stream_width = self.get_nodeattr("StreamWidth")
         return stream_width
 
     def get_outstream_width(self, ind=0):
+        """Return outstream width."""
         stream_width = self.get_nodeattr("StreamWidth")
         return stream_width
 
     def strm_decl(self):
+        """Return strm decl."""
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append('hls::stream<InDType> in0_V ("in0_V");')
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
@@ -250,6 +273,7 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
         )
 
     def get_verilog_top_module_intf_names(self):
+        """Return verilog top module intf names."""
         intf_names = super().get_verilog_top_module_intf_names()
         stream_width = self.get_nodeattr("StreamWidth")
         intf_names["s_axis"] = [("in0_V", stream_width)]

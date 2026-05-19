@@ -1,4 +1,5 @@
 # QONNX wrapper of ONNX model graphs
+"""Module to remove identity operations."""
 from qonnx.core.modelwrapper import ModelWrapper
 
 # QONNX graph transformation base class
@@ -18,8 +19,11 @@ from qonnx.util.basic import get_by_name
 # same as the target shape
 class RemoveIdentityReshape(Transformation):
     # Applies the transform to a whole model graph
+    """Transformation to remove Identity Reshape operations."""
+
     def apply(self, model: ModelWrapper):  # noqa
         # Get the model graph out of the model wrapper object
+        """Apply transformation."""
         graph = model.graph
         # Keep track of whether the graph has been modified
         graph_modified = False
@@ -57,8 +61,11 @@ class RemoveIdentityReshape(Transformation):
 # the same as the target permutation
 class RemoveIdentityTranspose(Transformation):
     # Applies the transform to a whole model graph
+    """Transformation to remove Identity Transpose operations."""
+
     def apply(self, model: ModelWrapper):  # noqa
         # Get the model graph out of the model wrapper object
+        """Apply transformation."""
         graph = model.graph
         # Keep track of whether the graph has been modified
         graph_modified = False

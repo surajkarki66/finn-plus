@@ -1,3 +1,4 @@
+"""Module for vivado power estimation."""
 import json
 import os
 from qonnx.custom_op.registry import getCustomOp
@@ -26,6 +27,7 @@ class VivadoPowerEstimation(Transformation):
         simulate_switching_activity=True,
         vivado_power_simulation_type="functional",
     ):
+        """Initialize instance."""
         super().__init__()
         self.report_dir = report_dir
         self.clk_period_ns = clk_period_ns
@@ -33,6 +35,7 @@ class VivadoPowerEstimation(Transformation):
         self.vivado_power_simulation_type = vivado_power_simulation_type
 
     def apply(self, model):
+        """Apply transformation."""
         ooc_res_dict = eval(model.get_metadata_prop("res_total_ooc_synth"))
         vivado_proj_folder = ooc_res_dict["vivado_proj_folder"]
         project_path = os.path.join(vivado_proj_folder, "vivadocompile", "vivadocompile.xpr")

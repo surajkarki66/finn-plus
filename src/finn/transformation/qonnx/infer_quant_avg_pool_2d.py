@@ -27,6 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+"""Module for infer quant avg pool 2d."""
 import math
 import numpy as np
 from onnx import TensorProto, helper
@@ -117,6 +118,7 @@ class AvgPoolAndTruncToQuantAvgPool(Transformation):
     """
 
     def apply(self, model):
+        """Apply transformation."""
         opset_imports = model.get_opset_imports()
         if "qonnx.custom_op.general" in opset_imports:
             trunc_opset = opset_imports["qonnx.custom_op.general"]
@@ -143,6 +145,7 @@ class AvgPoolAndTruncv1ToQuantAvgPool(Transformation):
     """
 
     def apply(self, model):
+        """Apply transformation."""
         graph = model.graph
         node_ind = 0
         for n in graph.node:
@@ -316,6 +319,7 @@ class AvgPoolAndTruncv2ToQuantAvgPool(Transformation):
     """
 
     def apply(self, model):
+        """Apply transformation."""
         graph = model.graph
         node_ind = 0
         for node in graph.node:

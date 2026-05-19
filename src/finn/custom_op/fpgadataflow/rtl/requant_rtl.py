@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+"""Module for requant rtl."""
 import numpy as np
 import os
 
@@ -17,9 +18,11 @@ class Requant_rtl(Requant, RTLBackend):
     """RTL backend for Requant operation using finn-rtllib/requant."""
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {}
         my_attrs.update(Requant.get_nodeattr_types(self))
         my_attrs.update(RTLBackend.get_nodeattr_types(self))
@@ -155,6 +158,7 @@ class Requant_rtl(Requant, RTLBackend):
         return [os.path.basename(f) for f in rtl_files]
 
     def code_generation_ipi(self):
+        """Return code generation ipi."""
         sourcefiles = self.get_rtl_file_list(abspath=True)
 
         cmd = []

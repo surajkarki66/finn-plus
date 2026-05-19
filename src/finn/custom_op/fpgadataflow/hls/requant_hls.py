@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+"""Module for requant hls."""
 import numpy as np
 import os
 import warnings
@@ -28,9 +29,11 @@ class Requant_hls(Requant, HLSBackend):
     """
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {}
         my_attrs.update(Requant.get_nodeattr_types(self))
         my_attrs.update(HLSBackend.get_nodeattr_types(self))
@@ -81,6 +84,7 @@ class Requant_hls(Requant, HLSBackend):
             f.write("};\n")
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = [
             "#include <hls_math.h>",
             "#include <hls_stream.h>",
@@ -90,6 +94,7 @@ class Requant_hls(Requant, HLSBackend):
         ]
 
     def defines(self, var):
+        """Return defines."""
         pe = self.get_nodeattr("PE")
         num_channels = self.get_nodeattr("NumChannels")
         cf = num_channels // pe
@@ -139,6 +144,7 @@ static inline T clip(T const x, TLo const lo, THi const hi) {
 
     def docompute(self):
         # Get optimization flags (set during generate_params)
+        """Return docompute."""
         scale_is_one = getattr(self, "_scale_is_one", False)
         bias_is_zero = getattr(self, "_bias_is_zero", False)
 
@@ -194,6 +200,7 @@ static inline T clip(T const x, TLo const lo, THi const hi) {
         ]
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
             f"""
             void {self.onnx_node.name}(
@@ -242,6 +249,7 @@ static inline T clip(T const x, TLo const lo, THi const hi) {
         self.code_gen_dict["$SAVEASCNPY$"] = []
 
     def pragmas(self):
+        """Return pragmas."""
         self.code_gen_dict["$PRAGMAS$"] = [
             """
             #pragma HLS interface AXIS port=in0_V

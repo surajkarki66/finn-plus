@@ -1022,6 +1022,8 @@ class ElementwiseAbsDiff_hls(
     ElementwiseBinaryOperation_hls,
     elementwise_binary.ElementwiseAbsDiff,
 ):
+    """HLS implementation of elementwise absolute diff operation."""
+
     pass
 
 

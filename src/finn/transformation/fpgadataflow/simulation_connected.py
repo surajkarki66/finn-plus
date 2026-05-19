@@ -338,6 +338,7 @@ class NodeConnectedSimulationController(SimulationController):
         with (self.logdir / f"{name}_{process_index}_of_{self.total}.txt").open("w+") as logfile:
 
             def _print(msg: str, color: str = "green") -> None:
+                """Return formatted print."""
                 if self.progress is None:
                     if is_special_for_display:
                         color = "orange3"
@@ -598,7 +599,9 @@ class NodeConnectedSimulation(Simulation):
         return data, merged_data.get("timeout_occurred", False)
 
 
-class RunLayerParallelSimulation(Transformation):  # noqa
+class RunLayerParallelSimulation(Transformation):
+    """Transformation for running Layer Parallel Simulation."""
+
     def __init__(
         self,
         fpgapart: str,

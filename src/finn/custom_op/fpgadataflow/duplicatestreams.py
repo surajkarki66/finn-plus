@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for duplicatestreams."""
 import numpy as np
 from qonnx.core.datatype import DataType
 
@@ -34,12 +35,14 @@ from finn.util.logging import log
 
 
 class DuplicateStreams(HWCustomOp):
-    """Abstraction layer for HW implementation of DuplicateStreams"""
+    """Abstraction layer for HW implementation of DuplicateStreams."""
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {
             "NumChannels": ("i", True, 0),
             "PE": ("i", True, 0),
@@ -57,15 +60,18 @@ class DuplicateStreams(HWCustomOp):
         return my_attrs
 
     def get_num_output_streams(self):
+        """Return num output streams."""
         return self.get_nodeattr("NumOutputStreams")
 
     def get_normal_input_shape(self, ind=0):
+        """Return normal input shape."""
         ch = self.get_nodeattr("NumChannels")
         vecs = list(self.get_nodeattr("numInputVectors"))
         ishape = tuple(vecs + [ch])
         return ishape
 
     def get_folded_input_shape(self, ind=0):
+        """Return folded input shape."""
         ch = self.get_nodeattr("NumChannels")
         pe = self.get_nodeattr("PE")
         vecs = list(self.get_nodeattr("numInputVectors"))
@@ -77,19 +83,23 @@ class DuplicateStreams(HWCustomOp):
     def get_normal_output_shape(self, ind=0):
         # since the output shape of both out streams are the same
         # return independently from index
+        """Return normal output shape."""
         return self.get_normal_input_shape()
 
     def get_folded_output_shape(self, ind=0):
         # since the output shape of both out streams are the same
         # return independently from index
+        """Return folded output shape."""
         return self.get_folded_input_shape()
 
     def make_shape_compatible_op(self, model):
+        """Create shape compatible op."""
         ret = super().make_shape_compatible_op(model)
         ret.output[:] = self.onnx_node.output
         return ret
 
     def infer_node_datatype(self, model):
+        """Infer node datatype."""
         node = self.onnx_node
         idt = model.get_tensor_datatype(node.input[0])
         if idt != self.get_input_datatype():
@@ -127,6 +137,7 @@ class DuplicateStreams(HWCustomOp):
         return out_width
 
     def get_number_output_values(self):
+        """Return number output values."""
         out_val = {}
         for i in range(len(self.onnx_node.output)):
             out_val["out%s" % i] = np.prod(self.get_folded_output_shape(i)[1:-1])
@@ -134,11 +145,13 @@ class DuplicateStreams(HWCustomOp):
 
     def get_exp_cycles(self):
         # Channels/PE * batch size * fmdim * fmdim
+        """Return exp cycles."""
         return np.prod(self.get_folded_output_shape()[:-1])
 
     def execute_node(self, context, graph):
         # passing input to both outputs to make
         # abstraction layer executable
+        """Execute node."""
         node = self.onnx_node
         inp = context[node.input[0]]
         exp_shape = self.get_normal_input_shape()

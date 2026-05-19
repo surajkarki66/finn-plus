@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for matrixvectoractivation hls."""
 import math
 import numpy as np
 import os
@@ -52,9 +53,11 @@ class MVAU_hls(MVAU, HLSBackend):
     """Corresponds to finn-hlslib MatrixVectorActivation_Batch function."""
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {}
         my_attrs.update(MVAU.get_nodeattr_types(self))
         my_attrs.update(HLSBackend.get_nodeattr_types(self))
@@ -63,12 +66,12 @@ class MVAU_hls(MVAU, HLSBackend):
         return my_attrs
 
     def lut_estimation(self):
-        """Calculates resource estimations for LUTs based on:
+        """Calculate resource estimations for LUTs based on:
         - FINN-R: An End-to-End Deep-Learning Framework for Fast
         Exploration of Quantized Neural Networks
         - M. Blott, T. B. Preusser, N. J. Fraser, G. Gambardella, K. O'Brien,
         Y. Umuroglu, M. Leeser and K. Vissers
-        - 12. Sep 2018
+        - 12. Sep 2018.
         """
         # TODO add in/out FIFO contributions
         P = self.get_nodeattr("PE")
@@ -127,6 +130,7 @@ class MVAU_hls(MVAU, HLSBackend):
 
     def dsp_estimation(self, fpgapart):
         # multiplication
+        """Return dsp estimation."""
         P = self.get_nodeattr("PE")
         res_type = self.get_nodeattr("resType")
         Q = self.get_nodeattr("SIMD")
@@ -159,7 +163,7 @@ class MVAU_hls(MVAU, HLSBackend):
             self.generate_hdl_fetch_weights(fpgapart)
 
     def get_template_param_values(self):
-        """Returns the template parameter values according to input, output and weight
+        """Return the template parameter values according to input, output and weight
         data types."""
         ret = dict()
         inp_hls_str = self.get_input_datatype(0).get_hls_datatype_str()
@@ -198,6 +202,7 @@ class MVAU_hls(MVAU, HLSBackend):
         return ret
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = ['#include "weights.hpp"']
         self.code_gen_dict["$GLOBALS$"] += ['#include "activations.hpp"']
 
@@ -214,6 +219,7 @@ class MVAU_hls(MVAU, HLSBackend):
 
     def defines(self, var):
         # Only ipgen mode: Make sure that SIMD parameter satisfies minimum requirements.
+        """Return defines."""
         if var == "ipgen":
             SIMD = self.get_nodeattr("SIMD")
             MW = self.get_nodeattr("MW")
@@ -249,6 +255,7 @@ class MVAU_hls(MVAU, HLSBackend):
             self.code_gen_dict["$DEFINES$"].append(f"#define WP1 {wdt.bitwidth()}\n")
 
     def read_npy_data(self):
+        """Return read npy data."""
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
         dtype = self.get_input_datatype(0)
         if dtype == DataType["BIPOLAR"]:
@@ -301,6 +308,7 @@ class MVAU_hls(MVAU, HLSBackend):
             )
 
     def strm_decl(self):
+        """Return strm decl."""
         mem_mode = self.get_nodeattr("mem_mode")
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
@@ -323,6 +331,7 @@ class MVAU_hls(MVAU, HLSBackend):
             )
 
     def docompute(self):
+        """Return docompute."""
         mem_mode = self.get_nodeattr("mem_mode")
         map_to_hls_mult_style = {
             "auto": "ap_resource_dflt()",
@@ -376,6 +385,7 @@ class MVAU_hls(MVAU, HLSBackend):
             )
 
     def dataoutstrm(self):
+        """Return dataoutstrm."""
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
         dtype = self.get_output_datatype()
         if dtype == DataType["BIPOLAR"]:
@@ -404,9 +414,11 @@ class MVAU_hls(MVAU, HLSBackend):
         ]
 
     def save_as_npy(self):
+        """Save as npy."""
         self.code_gen_dict["$SAVEASCNPY$"] = []
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         mem_mode = self.get_nodeattr("mem_mode")
         if mem_mode == "internal_embedded":
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
@@ -438,6 +450,7 @@ class MVAU_hls(MVAU, HLSBackend):
             )
 
     def pragmas(self):
+        """Return pragmas."""
         mem_mode = self.get_nodeattr("mem_mode")
         ram_style_thresholds = self.get_nodeattr("ram_style_thresholds")
         self.code_gen_dict["$PRAGMAS$"] = ["#pragma HLS INTERFACE axis port=in0_V"]
@@ -492,6 +505,7 @@ class MVAU_hls(MVAU, HLSBackend):
 
     def get_ap_int_max_w(self):
         # base class impl (max of inp/out stream widths)
+        """Return ap int max w."""
         max_of_io = super().get_ap_int_max_w()
         # internal_decoupled mode weight stream
         weightstream = self.get_instream_width(1)
@@ -504,6 +518,7 @@ class MVAU_hls(MVAU, HLSBackend):
         return max([weightstream, max_of_io, single_pe_w])
 
     def execute_node(self, context, graph):
+        """Execute node."""
         mode = self.get_nodeattr("exec_mode")
         dynamic_input = self.get_nodeattr("dynamic_input")
         mem_mode = self.get_nodeattr("mem_mode")
@@ -678,6 +693,7 @@ class MVAU_hls(MVAU, HLSBackend):
 
     def instantiate_ip(self, cmd):
         # instantiate the HLS IP
+        """Return instantiate ip."""
         vlnv = self.get_nodeattr("ip_vlnv")
         node_name = self.onnx_node.name
         if self.get_nodeattr("mem_mode") == "internal_decoupled" or self.get_nodeattr(

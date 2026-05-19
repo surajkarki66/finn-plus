@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for vectorvectoractivation hls."""
 import math
 import numpy as np
 import os
@@ -41,9 +42,11 @@ class VVAU_hls(VVAU, HLSBackend):
     """Corresponds to finn-hlslib Vector_Vector_Activate_Batch function"""
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {}
         my_attrs.update(VVAU.get_nodeattr_types(self))
         my_attrs.update(HLSBackend.get_nodeattr_types(self))
@@ -115,6 +118,7 @@ class VVAU_hls(VVAU, HLSBackend):
 
     def dsp_estimation(self, fpgapart):
         # multiplication
+        """Return dsp estimation."""
         P = self.get_nodeattr("PE")
         res_type = self.get_nodeattr("resType")
         wdt = self.get_input_datatype(1)
@@ -128,6 +132,7 @@ class VVAU_hls(VVAU, HLSBackend):
         return int(mult_dsp)
 
     def execute_node(self, context, graph):
+        """Execute node."""
         mode = self.get_nodeattr("exec_mode")
         mem_mode = self.get_nodeattr("mem_mode")
         node = self.onnx_node
@@ -285,6 +290,7 @@ class VVAU_hls(VVAU, HLSBackend):
         return ret
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = ['#include "weights.hpp"']
         self.code_gen_dict["$GLOBALS$"] += ['#include "activations.hpp"']
         mem_mode = self.get_nodeattr("mem_mode")
@@ -297,6 +303,7 @@ class VVAU_hls(VVAU, HLSBackend):
             self.code_gen_dict["$GLOBALS$"] += ['#include "thresh.h"']
 
     def defines(self, var):
+        """Return defines."""
         dim_h, dim_w = self.get_nodeattr("Dim")
         numReps = 1 * dim_h * dim_w
         k_h, k_w = self.get_nodeattr("Kernel")
@@ -318,6 +325,7 @@ class VVAU_hls(VVAU, HLSBackend):
             self.code_gen_dict["$DEFINES$"].append(f"#define WP1 {wdt.bitwidth()}\n")
 
     def read_npy_data(self):
+        """Return read npy data."""
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
         dtype = self.get_input_datatype(0)
         if dtype == DataType["BIPOLAR"]:
@@ -364,6 +372,7 @@ class VVAU_hls(VVAU, HLSBackend):
             )
 
     def strm_decl(self):
+        """Return strm decl."""
         mem_mode = self.get_nodeattr("mem_mode")
         self.code_gen_dict["$STREAMDECLARATIONS$"] = []
         self.code_gen_dict["$STREAMDECLARATIONS$"].append(
@@ -378,6 +387,7 @@ class VVAU_hls(VVAU, HLSBackend):
             )
 
     def docompute(self):
+        """Return docompute."""
         mem_mode = self.get_nodeattr("mem_mode")
         map_to_hls_mult_style = {
             "auto": "ap_resource_dflt()",
@@ -428,6 +438,7 @@ class VVAU_hls(VVAU, HLSBackend):
             )
 
     def dataoutstrm(self):
+        """Return dataoutstrm."""
         code_gen_dir = self.get_nodeattr("code_gen_dir_cppsim")
         dtype = self.get_output_datatype()
         if dtype == DataType["BIPOLAR"]:
@@ -456,9 +467,11 @@ class VVAU_hls(VVAU, HLSBackend):
         ]
 
     def save_as_npy(self) -> None:
+        """Save as npy."""
         self.code_gen_dict["$SAVEASCNPY$"] = []
 
     def blackboxfunction(self) -> None:
+        """Return blackboxfunction."""
         mem_mode = self.get_nodeattr("mem_mode")
         if mem_mode == "internal_embedded":
             self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
@@ -482,6 +495,7 @@ class VVAU_hls(VVAU, HLSBackend):
             )
 
     def pragmas(self) -> None:
+        """Return pragmas."""
         mem_mode = self.get_nodeattr("mem_mode")
         self.code_gen_dict["$PRAGMAS$"] = ["#pragma HLS INTERFACE axis port=in0_V"]
         self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS INTERFACE axis port=out0_V")
@@ -568,6 +582,7 @@ class VVAU_hls(VVAU, HLSBackend):
 
     def instantiate_ip(self, cmd):
         # instantiate the HLS IP
+        """Return instantiate ip."""
         vlnv = self.get_nodeattr("ip_vlnv")
         node_name = self.onnx_node.name
         if self.get_nodeattr("mem_mode") == "internal_decoupled":

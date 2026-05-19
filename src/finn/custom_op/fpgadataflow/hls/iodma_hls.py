@@ -27,6 +27,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for iodma hls."""
 import math
 import numpy as np
 from qonnx.core.datatype import DataType
@@ -78,9 +79,11 @@ class IODMA_hls(HLSBackend, HWCustomOp):
     """Class that corresponds to finn-hlslib DMA function(s)."""
 
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {
             "NumChannels": ("i", True, 0),
             # FINN input datatype
@@ -104,15 +107,18 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         return my_attrs
 
     def get_normal_input_shape(self, ind=0):
+        """Return normal input shape."""
         vecs = list(self.get_nodeattr("numInputVectors"))
         num_ch = self.get_nodeattr("NumChannels")
         ishape = tuple(vecs + [num_ch])
         return ishape
 
     def get_normal_output_shape(self, ind=0):
+        """Return normal output shape."""
         return self.get_normal_input_shape()
 
     def get_folded_input_shape(self, ind=0):
+        """Return folded input shape."""
         if self.get_nodeattr("direction") == "in":
             raise ValueError("Folded input shape not defined for input IODMA")
         shape = list(self.get_normal_input_shape())
@@ -127,6 +133,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         return tuple(shape)
 
     def get_folded_output_shape(self, ind=0):
+        """Return folded output shape."""
         if self.get_nodeattr("direction") == "out":
             raise ValueError("Folded output shape not defined for output IODMA")
         shape = list(self.get_normal_output_shape())
@@ -141,6 +148,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         return tuple(shape)
 
     def infer_node_datatype(self, model):
+        """Infer node datatype."""
         node = self.onnx_node
         idt = model.get_tensor_datatype(node.input[0])
         if idt != self.get_input_datatype():
@@ -162,6 +170,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         return self.get_input_datatype()
 
     def get_instream_width(self, ind=0):
+        """Return instream width."""
         if self.get_nodeattr("direction") == "in":
             return self.get_nodeattr("intfWidth")
         if self.get_nodeattr("direction") == "out":
@@ -169,6 +178,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         raise ValueError("Invalid IODMA direction, please set to in or out")
 
     def get_outstream_width(self, ind=0):
+        """Return outstream width."""
         if self.get_nodeattr("direction") == "out":
             return self.get_nodeattr("intfWidth")
         if self.get_nodeattr("direction") == "in":
@@ -176,6 +186,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         raise ValueError("Invalid IODMA direction, please set to in or out")
 
     def get_number_output_values(self):
+        """Return number output values."""
         oshape = self.get_normal_output_shape()
         itype_bits = self.get_input_datatype().bitwidth()
         stream_width = self.get_nodeattr("streamWidth")
@@ -186,10 +197,12 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         return ovalues
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = ['#include "dma.h"']
         self.code_gen_dict["$GLOBALS$"].append('#include "streamtools.h"')
 
     def defines(self, var):
+        """Return defines."""
         itype_bits = self.get_input_datatype().bitwidth()
         total_bits = itype_bits * np.prod(self.get_normal_input_shape())
         assert total_bits % 8 == 0, "DMA input not a multiple of 1 Byte"
@@ -208,6 +221,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         return width_lcm
 
     def docompute(self):
+        """Return docompute."""
         direction = self.get_nodeattr("direction")
         mode = self.get_nodeattr("burstMode")
         dwc_func = "StreamingDataWidthConverter_Batch"
@@ -316,6 +330,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
             raise Exception("Unknown IODMA direction: %s" % direction)
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         packed_ibits = self.get_instream_width()
         packed_hls_type_in = "ap_uint<%d>" % packed_ibits
         packed_obits = self.get_outstream_width()
@@ -343,6 +358,7 @@ class IODMA_hls(HLSBackend, HWCustomOp):
             raise ValueError("Invalid IODMA direction, please set to in or out")
 
     def pragmas(self):
+        """Return pragmas."""
         self.code_gen_dict["$PRAGMAS$"] = [
             "#pragma HLS INTERFACE s_axilite port=numReps bundle=control"
         ]
@@ -382,9 +398,11 @@ class IODMA_hls(HLSBackend, HWCustomOp):
         self.code_gen_dict["$PRAGMAS$"].append("#pragma HLS DATAFLOW")
 
     def execute_node(self, context, graph):
+        """Execute node."""
         pass
 
     def get_verilog_top_module_intf_names(self):
+        """Return verilog top module intf names."""
         intf_names = super().get_verilog_top_module_intf_names()
         if self.get_nodeattr("direction") == "out":
             intf_names["m_axis"] = []

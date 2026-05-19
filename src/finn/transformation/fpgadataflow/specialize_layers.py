@@ -294,10 +294,10 @@ def _vvu_rtl_possible(n, fpgapart):
 
 
 def _elementwise_rtl_possible(n, fpgapart):
-    # Checks whether RTL-based ElementwiseOp is possible
-    # Currently, we only support float32 inputs, versal fabric,
-    # the rhs needs to be a const input while the lhs is the dynamic data input
-    # and no broadcasting support
+    """Check whether RTL-based ElementwiseOp is possible
+    Currently, we only support float32 inputs, versal fabric,
+    the rhs needs to be a const input while the lhs is the dynamic data input
+    and no broadcasting support."""
     if not is_versal(fpgapart):
         return False
 
@@ -329,8 +329,8 @@ def _elementwise_rtl_possible(n, fpgapart):
 
 
 def _layernorm_rtl_possible(n, fpgapart):
-    # Checks whether RTL-based Layernorm is supported
-    # Currently, we only support float32 inputs and versal fabric
+    """Check whether RTL-based Layernorm is supported
+    Currently, we only support float32 inputs and versal fabric."""
     if not is_versal(fpgapart):
         return False
     node_inst = getCustomOp(n)
@@ -341,11 +341,11 @@ def _layernorm_rtl_possible(n, fpgapart):
 
 
 def _requant_rtl_possible(n, fpgapart):
-    # Checks whether RTL-based Requant is supported
-    # RTL Requant requires:
-    # - Integer input (not float)
-    # - Unsigned output (RTL clips to [0, 2^N-1])
-    # - Full range (narrow=0)
+    """Check whether RTL-based Requant is supported
+    RTL Requant requires:
+    - Integer input (not float)
+    - Unsigned output (RTL clips to [0, 2^N-1])
+    - Full range (narrow=0)."""
     node_inst = getCustomOp(n)
     idt = node_inst.get_input_datatype(0)
     odt = node_inst.get_output_datatype(0)
@@ -355,7 +355,7 @@ def _requant_rtl_possible(n, fpgapart):
 
 
 class SpecializeLayers(Transformation):
-    """Specialize all layers to either HLS or RTL variants"""
+    """Specialize all layers to either HLS or RTL variants."""
 
     def __init__(self, fpgapart):
         """Initialize the SpecializeLayers transformation.

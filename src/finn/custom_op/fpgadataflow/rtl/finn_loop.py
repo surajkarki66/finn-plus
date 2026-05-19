@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Module for finn loop."""
 import copy
 import math
 import numpy as np
@@ -59,6 +60,7 @@ from finn.util.settings import get_settings
 
 def collect_ip_dirs(model, ipstitch_path):
     # collect list of all IP dirs
+    """Return collect ip dirs."""
     ip_dirs = []
     need_memstreamer = False
     for node in model.graph.node:
@@ -85,6 +87,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
     out into a FINN-ONNX model of its own and are meant to be executed in a loop."""
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         my_attrs = {
             "body": ("g", True, ""),
             "iteration": ("i", False, 1),
@@ -163,6 +166,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
             raise AttributeError("Op has no such attribute: " + name)
 
     def get_normal_input_shape(self, ind=0):
+        """Return normal input shape."""
         loop_body = self.get_nodeattr("body")
         if ind == 0:
             # get first node in loop body and return
@@ -186,6 +190,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return ishape
 
     def get_normal_output_shape(self, ind=0):
+        """Return normal output shape."""
         loop_body = self.get_nodeattr("body")
         # get last node in loop body and return
         # normal output shape
@@ -198,6 +203,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return oshape
 
     def get_folded_input_shape(self, ind=0):
+        """Return folded input shape."""
         loop_body = self.get_nodeattr("body")
         if ind == 0:
             # get first node in loop body and return
@@ -214,6 +220,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return ishape
 
     def get_folded_output_shape(self, ind=0):
+        """Return folded output shape."""
         loop_body = self.get_nodeattr("body")
         # get last node in loop body and return
         # normal output shape
@@ -222,6 +229,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return inst.get_folded_output_shape(0)
 
     def infer_node_datatype(self, model):
+        """Infer node datatype."""
         pass
 
     def get_input_datatype(self, ind=0):
@@ -241,10 +249,12 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return idt
 
     def get_output_datatype(self, ind=0):
+        """Return output datatype."""
         odt = DataType[self.get_nodeattr("outputDataType")]
         return odt
 
     def get_instream_width(self, ind=0):
+        """Return instream width."""
         loop_body = self.get_nodeattr("body")
         if ind == 0:
             # get first node in loop body and return
@@ -261,6 +271,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return iwidth
 
     def get_exp_cycles(self):
+        """Return exp cycles."""
         loop_body = self.get_nodeattr("body")
         check_if_cycles_annotated = False
 
@@ -278,6 +289,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return (body_cycles + overhead_per_iter) * iteration
 
     def get_outstream_width(self, ind=0):
+        """Return outstream width."""
         loop_body = self.get_nodeattr("body")
         # get last node in loop body and return
         # normal output shape
@@ -286,6 +298,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return inst.get_outstream_width(0)
 
     def get_number_output_values(self):
+        """Return number output values."""
         loop_body = self.get_nodeattr("body")
         # get last node in loop body and return
         # normal output values
@@ -312,6 +325,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         self.set_nodeattr("rtlsim_so", sim_base + "/" + sim_rel)
 
     def execute_node(self, context, graph):
+        """Execute node."""
         node = self.onnx_node
         inp_values = context[node.input[0]]
         if self.get_nodeattr("exec_mode") == "rtlsim":
@@ -378,6 +392,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
 
     def generate_hdl(self, model, fpgapart, clk):
         # Generate params as part of IP preparation
+        """Generate hdl."""
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
         self.generate_hdl_stream_tap()
         self.generate_params(model, code_gen_dir)
@@ -614,6 +629,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
                     f.write(template_wrapper)
 
     def ipgen_singlenode_code(self, fpgapart=None):
+        """Return ipgen singlenode code."""
         prjname = "MakeLoopIP"
         block_name = self.onnx_node.name
         vivado_stitch_proj_dir = self.get_nodeattr("code_gen_dir_ipgen")
@@ -1139,6 +1155,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
 
     def get_verilog_top_module_intf_names(self):
         # from wrapper template
+        """Return verilog top module intf names."""
         addr_bits = 64
 
         intf_names = {}
@@ -1175,6 +1192,7 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return intf_names
 
     def code_generation_ipi(self):
+        """Return code generation ipi."""
         vlnv = self.get_nodeattr("ip_vlnv")
         cmd = []
         # add all the generated IP dirs to ip_repo_paths
@@ -1194,4 +1212,5 @@ class FINNLoop(RTLBackend, HWCustomOp):
         return cmd
 
     def get_rtl_file_list(self, abspath: bool = False):
+        """Return rtl file list."""
         return []

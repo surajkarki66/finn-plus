@@ -99,9 +99,11 @@ class NodeIsolatedSimulationController(SimulationController):
 
         # Callback to show progress and save the simulation result
         def _done_callback_generator(name: str) -> Callable:
+            """Return done callback generator."""
             nonlocal total, done, data, datalock
 
             def _f(future: Future) -> None:
+                """Return f."""
                 nonlocal total, done, data, datalock
                 with datalock:
                     done += 1
@@ -152,6 +154,7 @@ class NodeIsolatedSimulationController(SimulationController):
         with self.get_logfile_path(binary).open("w+") as logfile:
             # Logging helper
             def write_log(msg: str) -> None:
+                """Return write log."""
                 self.write_log(logfile, msg)
 
             # Initialize: Start simulation process and give the start command
@@ -221,6 +224,8 @@ IsoSimLogDataByLayer = dict[str, IsoSimLogData]  # Indexed by layer name
 
 
 class IsolatedSimulation(Simulation):
+    """Class for Isolated Simulation."""
+
     def __init__(
         self,
         model: ModelWrapper,
@@ -230,6 +235,7 @@ class IsolatedSimulation(Simulation):
         functional_sim: bool,
         workers: int | None = None,
     ) -> None:
+        """Initialize instance."""
         super().__init__(model, simulation_type, fpgapart, clk_ns, functional_sim, workers)
 
     def simulate(self) -> IsoSimLogDataByLayer:
@@ -309,6 +315,7 @@ class RunLayerIsolatedSimulation(Transformation):
 
         # TODO: Proper pytest tests
         def _any_ready(cycle_data: dict[str, int]) -> bool:
+            """Return any ready."""
             for key in cycle_data.keys():
                 if (
                     key not in ["totalCycles", "inputCyclesDone", "inputCyclesTarget"]
@@ -571,6 +578,7 @@ class RunLayerIsolatedSimulation(Transformation):
         # Find the index/tensor that connects the predecessor and the current one
         # Use that index to retrieve the fifo depth between them and save it
         def get_index(a: Any, values: Any) -> int | None:
+            """Return index."""
             for i, val in enumerate(values):
                 if val == a:
                     return i

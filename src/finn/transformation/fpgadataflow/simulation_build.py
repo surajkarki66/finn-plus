@@ -265,6 +265,7 @@ class SimulationBuilder:
         nodes_graph: list[NodeProto] = []
 
         def _find_first_non_fifo_pred(pred: NodeProto) -> NodeProto | None:
+            """Return the first non fifo predecessor."""
             if "FIFO" in pred.op_type:
                 # Replace FIFOs with their predecessor
                 pred_fifo = self.model.find_direct_predecessors(pred)
@@ -282,6 +283,7 @@ class SimulationBuilder:
             return pred
 
         def _find_first_non_fifo_succ(succ: NodeProto) -> NodeProto | None:
+            """Return the first non fifo successor."""
             if "FIFO" in succ.op_type:
                 # Replace FIFOs with their successor
                 succ_fifo = self.model.find_direct_successors(succ)
@@ -562,6 +564,7 @@ class SimulationBuilder:
         # Convert to the format required by the C++ sim config header
         # (initializer list of pairs of name and iters)
         def _format_descr_name(s: list[tuple[str, int]]) -> str:
+            """Return formated Stream Descriptor."""
             return ", ".join([f'StreamDescriptor{{"{name}", {iters}}}' for name, iters in s])
 
         instream_descrs = [
@@ -835,6 +838,7 @@ class SimulationBuilder:
             total_nodes: int,
             build_dir: Path,
         ) -> Any:
+            """Build simulation for a single node."""
             nodemodel = self._isolated_node_model(node_index)
             nodemodel = nodemodel.transform(InferShapes())
             nodemodel = nodemodel.transform(PrepareIP(self.fpgapart, self.clk_ns))
@@ -870,9 +874,11 @@ class SimulationBuilder:
 
         # Progress display callback
         def _callback_progress(name: str) -> Callable:
+            """Return formatted progress callback."""
             nonlocal total_nodes, built_nodes
 
             def _f(f: Future) -> None:
+                """Return callback function for progress display."""
                 nonlocal total_nodes, built_nodes
                 built_nodes += 1
                 log.info(
@@ -889,6 +895,7 @@ class SimulationBuilder:
 
         # Build sims in parallel
         def _try_int(value: str | None) -> int | None:
+            """Cast value to int, return None if it fails or if value is None."""
             if value is None:
                 return None
             try:
@@ -898,6 +905,7 @@ class SimulationBuilder:
             return parsed if parsed > 0 else None
 
         def _parse_slurm_job_cpus_per_node(value: str | None) -> int | None:
+            """Return parse slurm job cpus per node."""
             if value is None:
                 return None
             # Example values: "16", "16(x2)", "16(x2),8"
@@ -909,6 +917,7 @@ class SimulationBuilder:
             return parsed if parsed > 0 else None
 
         def _get_slurm_cpus() -> int | None:
+            """Return slurm workers while considering cpu allocation."""
             cpus_per_task = _try_int(os.environ.get("SLURM_CPUS_PER_TASK"))
             if cpus_per_task is not None:
                 return cpus_per_task
@@ -921,6 +930,7 @@ class SimulationBuilder:
 
         def _get_slurm_mem_workers(cpus_alloc: int | None) -> int | None:
             # SLURM memory env vars are in MB.
+            """Return number of slurm workers while considering memory allocation."""
             mem_per_node_mb = _try_int(os.environ.get("SLURM_MEM_PER_NODE"))
             if mem_per_node_mb is not None:
                 return max(1, mem_per_node_mb // (10 * 1024))  # 10GB per synthesis
@@ -1089,6 +1099,7 @@ class BuildSimulation(Transformation):
         else:
             # Run only compilation again, and avoid repeating building of the stitched IPs
             def _compile(binary: Path) -> None:
+                """Compile binary in path binary."""
                 result = subprocess.run(
                     "cmake .;make",
                     shell=True,
@@ -1107,9 +1118,11 @@ class BuildSimulation(Transformation):
             done = 0
 
             def _progress_callback(binary: str | Path) -> Callable:
+                """Return progress callback formatted."""
                 nonlocal done, total
 
                 def _f(future: Future) -> None:
+                    """Return progress callback."""
                     nonlocal done, total
                     done += 1
                     log.info(

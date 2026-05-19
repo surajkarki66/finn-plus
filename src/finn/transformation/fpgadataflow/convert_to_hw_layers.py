@@ -468,9 +468,11 @@ class InferRequantLayer(Transformation):
     """
 
     def __init__(self):
+        """Initialize instance."""
         super().__init__()
 
     def apply(self, model):
+        """Apply transformation."""
         graph = model.graph
         node_ind = 0
         graph_modified = False
@@ -777,6 +779,7 @@ class InferAddStreamsLayer(Transformation):
     """
 
     def apply(self, model):
+        """Apply transformation."""
         log.warning(
             "InferAddStreamsLayer is deprecated. "
             "Use InferElementwiseBinaryOperation instead. "
@@ -945,6 +948,7 @@ class InferChannelwiseLinearLayer(Transformation):
     """
 
     def apply(self, model):
+        """Apply transformation."""
         log.warning(
             "InferChannelwiseLinearLayer is deprecated. "
             "Use InferElementwiseBinaryOperation instead. "
@@ -1669,6 +1673,7 @@ class InferStreamingEltwise(Transformation):
     """
 
     def apply(self, model):
+        """Apply transformation."""
         log.warning(
             "InferStreamingEltwise is deprecated. "
             "Use InferElementwiseBinaryOperation instead. "
@@ -2172,6 +2177,7 @@ class InferShuffle(Transformation):
     """
 
     def __init__(self, _filter=skip_first_node_transpose):
+        """Initialize instance."""
         super().__init__()
         # Register the filter function as attribute
         self._filter = _filter

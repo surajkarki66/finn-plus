@@ -7,6 +7,7 @@
 # @author       Shane T. Fleming <shane.fleming@amd.com>
 ############################################################################
 
+"""Module for outer shuffle hls."""
 import math
 import numpy as np
 
@@ -40,7 +41,10 @@ def auto_size_simd(I_dim: int, SIMD: int) -> int | None:
 
 
 class OuterShuffle_hls(OuterShuffle, HLSBackend):
+    """Class for Outer Shuffle hls."""
+
     def __init__(self, onnx_node, **kwargs):
+        """Initialize instance."""
         super().__init__(onnx_node, **kwargs)
 
         # check some constraints that it is a legal shuffle_hls
@@ -54,9 +58,11 @@ class OuterShuffle_hls(OuterShuffle, HLSBackend):
                 raise RuntimeError("Unable to determine a new SIMD value for this transpose.")
 
     def get_nodeattr_types(self):
+        """Return nodeattr types."""
         return OuterShuffle.get_nodeattr_types(self) | HLSBackend.get_nodeattr_types(self)
 
     def global_includes(self):
+        """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = [
             '#include "input_gen.hpp"',
             "#include <ap_int.h>",
@@ -65,6 +71,7 @@ class OuterShuffle_hls(OuterShuffle, HLSBackend):
         ]
 
     def defines(self, var):
+        """Return defines."""
         simd = self.get_nodeattr("SIMD")
         dtype = self.get_input_datatype()
         self.code_gen_dict["$DEFINES$"] = [
@@ -76,6 +83,7 @@ class OuterShuffle_hls(OuterShuffle, HLSBackend):
         ]
 
     def docompute(self):
+        """Return docompute."""
         simd = self.get_nodeattr("SIMD")
         out_shape = self.get_nodeattr("transpose_out_shape")
         out_shape[-1] = int(out_shape[-1] / simd)
@@ -96,6 +104,7 @@ class OuterShuffle_hls(OuterShuffle, HLSBackend):
         ]
 
     def blackboxfunction(self):
+        """Return blackboxfunction."""
         self.code_gen_dict["$BLACKBOXFUNCTION$"] = [
             f"""
             void {self.onnx_node.name} (
@@ -106,6 +115,7 @@ class OuterShuffle_hls(OuterShuffle, HLSBackend):
         ]
 
     def pragmas(self):
+        """Return pragmas."""
         self.code_gen_dict["$PRAGMAS$"] = [
             """
             #pragma HLS interface AXIS port=in0_V
@@ -119,6 +129,7 @@ class OuterShuffle_hls(OuterShuffle, HLSBackend):
         ]
 
     def execute_node(self, context, graph):
+        """Execute node."""
         HLSBackend.execute_node(self, context, graph)
 
     def timeout_value(self):
