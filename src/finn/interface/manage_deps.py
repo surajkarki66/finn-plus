@@ -90,25 +90,12 @@ class DirectDownloadDependency(BaseModel, Dependency):
     target_directory: Path = Field(strict=False)
 
 
-class CustomDependency(BaseModel, Dependency):
-    """Data model for a custom dependency.
-
-    installation_function: Name of the function that should be implemented in the DependencyUpdater
-                            to install this dependency.
-    outdated_function: Name of function that returns whether this dependency is outdated.
-    """
-
-    installation_function: str
-    outdated_function: str
-
-
 class DependencyData(BaseModel):
     """Data model that stores all dependencies."""
 
     git_deps: dict[str, GitDependency]
     boardfile_deps: dict[str, BoardfileDependency]
     direct_download_deps: dict[str, DirectDownloadDependency]
-    custom_deps: dict[str, CustomDependency]
 
     def get_all_dependencies(self) -> list[str]:
         """Return a list of all packages, across dependency types."""
@@ -120,7 +107,6 @@ class DependencyData(BaseModel):
                         self.git_deps,
                         self.boardfile_deps,
                         self.direct_download_deps,
-                        self.custom_deps,
                     ]
                 ]
             )
@@ -148,8 +134,6 @@ class DependencyData(BaseModel):
             return "Boardfiles"
         if package_name in self.direct_download_deps:
             return "Data"
-        if package_name in self.custom_deps:
-            return "Custom"
         return "Misc"
 
     def get_dependency_data(self, package_name: str) -> Dependency | None:
@@ -160,7 +144,6 @@ class DependencyData(BaseModel):
             self.git_deps,
             self.boardfile_deps,
             self.direct_download_deps,
-            self.custom_deps,
         ]:
             if package_name in depdict:
                 return depdict[package_name]
@@ -466,22 +449,6 @@ class DependencyUpdater:
                 return False
         return unzipped.exists()
 
-    def _install_custom(self, package_name: str) -> bool:
-        """Install the custom dependency. The function name provided by the definition file
-        must exist as a method of this class. If so, it is executed and it's return value
-        used to check for success.
-        """
-        data = self.deps.get_dependency_data(package_name)
-        assert data is not None
-        function_name = cast("CustomDependency", data).installation_function
-        try:
-            return self.__getattribute__(function_name)()
-        except AttributeError as e:
-            raise FINNUserError(
-                f"Implementation for custom installation function for "
-                f"{package_name} not found in DependencyUpdater!"
-            ) from e
-
     def install_dependency(self, package_name: str) -> bool:
         """Install the dependency in the dependency location. If no definition for this dependency
         exists or the installation failed, return False.
@@ -495,8 +462,6 @@ class DependencyUpdater:
             return self._install_boardfile_dependency(package_name)
         if t is DirectDownloadDependency:
             return self._install_direct_download_dependency(package_name)
-        if t is CustomDependency:
-            return self._install_custom(package_name)
         return False
 
     def is_outdated(self, package_name: str, installed: bool = False) -> bool:
@@ -507,15 +472,6 @@ class DependencyUpdater:
             raise FINNUserError(
                 f"Cannot check if non-existing dependency {package_name} is outdated."
             )
-        if package_name in self.deps.custom_deps:
-            function_name = cast("CustomDependency", data).outdated_function
-            try:
-                return self.__getattribute__(function_name)()
-            except AttributeError as e:
-                raise FINNUserError(
-                    f"Custom package {package_name} is missing the implementation"
-                    f"of the outdated check function in DependencyUpdater!"
-                ) from e
         if package_name in self.deps.direct_download_deps:
             # TODO: Improve (e.g. by checking directly instead of by using wget).
             # Check by letting wget compare timestamps. To avoid large wait times

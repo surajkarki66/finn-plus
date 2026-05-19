@@ -51,5 +51,3 @@ direct_download_deps:
         url: "https://dpoauwgwqsy2x.cloudfront.net/Download/pynq-z2.zip"
         do_unzip: True
         target_directory: "board_files"
-
-custom_deps:
