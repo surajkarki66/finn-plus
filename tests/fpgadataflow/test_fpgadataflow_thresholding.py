@@ -26,10 +26,6 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from finn.builder.build_dataflow_config import DataflowBuildConfig
-from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
-from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
-from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 import pytest
 
 import numpy as np
@@ -45,6 +41,7 @@ from qonnx.util.basic import gen_finn_dt_tensor
 import finn.core.onnx_exec as oxe
 from finn.analysis.fpgadataflow.exp_cycles_per_layer import exp_cycles_per_layer
 from finn.analysis.fpgadataflow.hls_synth_res_estimation import hls_synth_res_estimation
+from finn.builder.build_dataflow_config import DataflowBuildConfig
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
 from finn.transformation.fpgadataflow.convert_to_hw_layers import InferThresholdingLayer
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
@@ -54,27 +51,27 @@ from finn.transformation.fpgadataflow.prepare_cppsim import PrepareCppSim
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
+from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
+from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
+from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 
 test_fpga_part = "xczu3eg-sbva484-1-e"
 target_clk_ns = 5
 
+
 def InsertAndSetFIFODepths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
     cfg = DataflowBuildConfig()
     model = model.transform(
-                BuildSimulation(
-                    fpga_part,
-                    clk_ns,
-                    True,
-                    performance_sim=False,
-                )
-            )
-    model = model.transform(
-                RunLayerParallelSimulation(
-                    fpga_part, clk_ns, cfg
-                )
-            )
+        BuildSimulation(
+            fpga_part,
+            clk_ns,
+            True,
+            performance_sim=False,
+        )
+    )
+    model = model.transform(RunLayerParallelSimulation(fpga_part, clk_ns, cfg))
     model = model.transform(ApplySimulatedFIFOSizes(cfg))
     return model
 

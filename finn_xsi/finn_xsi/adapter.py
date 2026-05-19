@@ -14,12 +14,11 @@ import errno
 import os
 import re
 from finn_xsi.sim_engine import SimEngine
+from pathlib import Path
 from typing import Literal
 
 from finn.util.basic import launch_process_helper
 from finn.util.exception import FINNInternalError, FINNUserError
-
-from pathlib import Path
 
 
 def locate_glbl() -> Path | None:

@@ -32,22 +32,19 @@ emulation library."""
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Literal, cast, TYPE_CHECKING
-
 from onnx import NodeProto
-
-from finn.util.basic import getHWCustomOp
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import NodeLocalTransformation
+from typing import TYPE_CHECKING, Literal, cast
 
 from finn.transformation.fpgadataflow.replace_verilog_relpaths import ReplaceVerilogRelPaths
+from finn.util.basic import getHWCustomOp
+from finn.util.exception import FINNUserError
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 
-from finn.util.exception import FINNUserError
-
 if TYPE_CHECKING:
-    from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
     from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
+    from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 
 
 class PrepareRTLSim(NodeLocalTransformation):

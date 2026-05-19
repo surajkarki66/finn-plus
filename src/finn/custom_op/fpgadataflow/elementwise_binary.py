@@ -27,12 +27,13 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import numpy as np
-from typing import cast
 
 # Helper for creating ONNX nodes
-from onnx import NodeProto, helper as oh
+from onnx import NodeProto
+from onnx import helper as oh
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
+from typing import cast
 
 from finn.custom_op.fpgadataflow import register_custom_op
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
@@ -136,17 +137,17 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Shape attribute as property for convenience
     @property
-    def lhs_shape(self) ->np.ndarray:
+    def lhs_shape(self) -> np.ndarray:
         return cast("np.ndarray", self.get_nodeattr("lhs_shape"))
 
     # Shape attribute as property for convenience
     @property
-    def rhs_shape(self) ->np.ndarray:
+    def rhs_shape(self) -> np.ndarray:
         return cast("np.ndarray", self.get_nodeattr("rhs_shape"))
 
     # Shape attribute as property for convenience
     @property
-    def out_shape(self) ->np.ndarray:
+    def out_shape(self) -> np.ndarray:
         return cast("np.ndarray", self.get_nodeattr("out_shape"))
 
     # Style attribute as property for convenience
@@ -335,9 +336,9 @@ class ElementwiseBinaryOperation(HWCustomOp):
         if not all([self.lhs_dtype.is_integer(), self.rhs_dtype.is_integer()]):
             # Check the annotated tensor data type corresponds to the stored
             # attribute
-            assert model.get_tensor_datatype(self.onnx_node.output[0]) == self.out_dtype, (
-                f"Output type mismatch for {self.onnx_node.name}"
-            )
+            assert (
+                model.get_tensor_datatype(self.onnx_node.output[0]) == self.out_dtype
+            ), f"Output type mismatch for {self.onnx_node.name}"
             # Exit here, returning the not-minimized data type
             return self.out_dtype
         # Call the output type derivation specialized by the concrete operator

@@ -1,7 +1,6 @@
 """Build FINN Simulations."""
 
 import contextlib
-import finn.xsi as finnxsi
 import numpy as np
 import onnx
 import os
@@ -15,6 +14,7 @@ from ast import literal_eval
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from enum import Enum
+from jinja2 import Environment
 from onnx import NodeProto, TensorProto, ValueInfoProto
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
@@ -25,6 +25,7 @@ from qonnx.util.basic import gen_finn_dt_tensor, get_by_name
 from subprocess import CalledProcessError
 from typing import TYPE_CHECKING, Any, cast
 
+import finn.xsi as finnxsi
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
 from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
@@ -34,7 +35,6 @@ from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import getHWCustomOp, launch_process_helper, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
-from jinja2 import Environment
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

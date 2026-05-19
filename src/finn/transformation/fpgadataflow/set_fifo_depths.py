@@ -30,28 +30,21 @@
 """Transformations for inserting and setting the size of FIFOs in FINN dataflow graphs."""
 
 import json
-from onnx import TensorProto, helper
+from onnx import NodeProto, TensorProto, helper
 from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
-from qonnx.transformation.base import Transformation
-from qonnx.transformation.general import GiveReadableTensorNames, SortGraph
-from typing import Literal, TypeAlias, cast
-
-from finn.util.basic import getHWCustomOp
-from finn.util.exception import FINNUserError
-from finn.util.logging import log
-
-from onnx import NodeProto
-
-
 from qonnx.custom_op.registry import getCustomOp
-from qonnx.transformation.general import GiveUniqueNodeNames
+from qonnx.transformation.base import Transformation
+from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames, SortGraph
+from typing import Literal, TypeAlias, cast
 
 from finn.builder.build_dataflow_config import DataflowBuildConfig
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
-from finn.util.exception import FINNInternalError
+from finn.util.basic import getHWCustomOp
+from finn.util.exception import FINNInternalError, FINNUserError
+from finn.util.logging import log
 
 FIFODepthConfig: TypeAlias = list[dict[str, list[int]]]
 

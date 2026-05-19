@@ -474,9 +474,9 @@ def prepare_finn(
     if "LD_LIBRARY_PATH" not in os.environ.keys():
         os.environ["LD_LIBRARY_PATH"] = f"/lib/x86_64-linux-gnu/:{vivado_path}/lib/lnx64.o"
     else:
-        os.environ["LD_LIBRARY_PATH"] = (
-            f"/lib/x86_64-linux-gnu/:{vivado_path}/lib/lnx64.o:{os.environ['LD_LIBRARY_PATH']}"
-        )
+        os.environ[
+            "LD_LIBRARY_PATH"
+        ] = f"/lib/x86_64-linux-gnu/:{vivado_path}/lib/lnx64.o:{os.environ['LD_LIBRARY_PATH']}"
 
     # Automatically set XILINX_LOCAL_USER_DATA to avoid issues later on
     if "XILINX_LOCAL_USER_DATA" in os.environ and os.environ["XILINX_LOCAL_USER_DATA"] != "no":
@@ -592,7 +592,7 @@ def _build(
             sys.exit(1)
         else:
             model = mp
-    status(f"Starting FINN build with config {flow_config.name} and model {model.name}!")  # type: ignore
+    status(f"Starting FINN build with config {flow_config.name} and model {model.name}!")
     if finn_build_dir is not None:
         finn_build_dir = finn_build_dir.expanduser().absolute()
         finn_build_dir.mkdir(parents=True, exist_ok=True)

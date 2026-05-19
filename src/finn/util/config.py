@@ -13,14 +13,13 @@
 # https://github.com/fastmachinelearning/qonnx/blob/
 # abb9eb12e0248014a805f505aacfaeb14d42409a/src/qonnx/util/config.py
 
-from numpy import typing as npt
-import json
-from pathlib import Path
-import onnx
-from qonnx.custom_op.registry import getCustomOp, is_custom_op
-
-from typing import TYPE_CHECKING
 import contextlib
+import json
+import onnx
+from numpy import typing as npt
+from pathlib import Path
+from qonnx.custom_op.registry import getCustomOp, is_custom_op
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper

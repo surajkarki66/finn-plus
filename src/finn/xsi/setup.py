@@ -118,10 +118,12 @@ def build_xsi(force: bool = False, verbose: bool = True) -> bool:
         bool: True if build successful
     """
     xsi_path = get_settings().finn_xsi
-    
+
     vivado_path = os.environ.get("XILINX_VIVADO")
     if vivado_path is None:
-        raise EnvironmentError("XILINX_VIVADO environment variable not set. Please source Vivado settings.")
+        raise EnvironmentError(
+            "XILINX_VIVADO environment variable not set. Please source Vivado settings."
+        )
     match = re.search(r"\b(20\d{2})\.(1|2)\b", vivado_path)
     if not match:
         raise ValueError(f"Could not parse Vivado version from XILINX_VIVADO path: {vivado_path}")
@@ -210,7 +212,7 @@ def build_xsi(force: bool = False, verbose: bool = True) -> bool:
 
     if verbose and result.stdout:
         print(result.stdout)
-        
+
     # Write version info    version_file = xsi_path / "VERSION"
     with version_file.open("w") as f:
         f.write(f"Vivado {year}.{minor}")

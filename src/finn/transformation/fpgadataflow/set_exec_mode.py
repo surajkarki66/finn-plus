@@ -32,13 +32,12 @@ executed."""
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import qonnx.custom_op.registry as registry
+from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.transformation.base import Transformation
 from typing import Literal
 
 from finn.util.exception import FINNUserError
-from qonnx.core.modelwrapper import ModelWrapper
-import qonnx.custom_op.registry as registry
-from qonnx.transformation.base import Transformation
-
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 
 
@@ -49,7 +48,7 @@ class SetExecMode(Transformation):
     for RTL components, by default the execution of the HW op parent is
     executed."""
 
-    def __init__(self, mode:str) -> None:
+    def __init__(self, mode: str) -> None:
         """Construct the transformation."""
         super().__init__()
         self.mode = mode
@@ -66,8 +65,10 @@ class SetExecMode(Transformation):
                     inst.set_nodeattr("exec_mode", self.mode)
                     # ensure that sim_mode is now set
                     if inst.get_nodeattr("exec_mode") == "":
-                        raise FINNUserError("""Transformation
-                        was not successful. Node attribute "exec_mode" is not set""")
+                        raise FINNUserError(
+                            """Transformation
+                        was not successful. Node attribute "exec_mode" is not set"""
+                        )
                 except KeyError:
                     # exception if op_type is not supported
                     raise FINNUserError(

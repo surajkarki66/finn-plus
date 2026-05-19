@@ -8,18 +8,18 @@
 #
 ############################################################################
 
-import os
-from pathlib import Path
-from typing import Any
+import pytest
 
 import onnx
-import pytest
+import os
 from onnxscript import BOOL, FLOAT
 from onnxscript import opset13 as op
 from onnxscript import script
 from onnxscript.values import Opset
+from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
+from typing import Any
 
 from finn.transformation.general import ApplyConfig
 from finn.util.config import extract_model_config, extract_model_config_to_json

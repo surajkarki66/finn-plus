@@ -16,8 +16,8 @@ from typing import Any, Literal, TypeAlias
 
 from finn.transformation.fpgadataflow.simulation import (
     Simulation,
-    store_fifo_data,
     SimulationController,
+    store_fifo_data,
 )
 from finn.transformation.fpgadataflow.simulation_build import SimulationType
 from finn.util.exception import FINNInternalError

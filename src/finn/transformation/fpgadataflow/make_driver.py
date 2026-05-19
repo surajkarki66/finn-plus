@@ -36,6 +36,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
@@ -49,7 +50,6 @@ from finn.util.data_packing import to_external_tensor
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
 
-from pathlib import Path
 
 def update_bitfile_path_after_copy(bitfile_path: Path, json_path: Path) -> None:
     """Update the xclbinPath in the JSON configuration to point to the new bitfile location.

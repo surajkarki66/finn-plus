@@ -26,10 +26,6 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from finn.builder.build_dataflow_config import DataflowBuildConfig
-from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
-from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
-from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 import pytest
 
 import numpy as np
@@ -49,6 +45,7 @@ import finn.transformation.fpgadataflow.convert_to_hw_layers as to_hw
 from finn import xsi as finnxsi
 from finn.analysis.fpgadataflow.exp_cycles_per_layer import exp_cycles_per_layer
 from finn.analysis.fpgadataflow.hls_synth_res_estimation import hls_synth_res_estimation
+from finn.builder.build_dataflow_config import DataflowBuildConfig
 from finn.core.rtlsim_exec import rtlsim_exec
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
@@ -59,30 +56,30 @@ from finn.transformation.fpgadataflow.prepare_cppsim import PrepareCppSim
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
+from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
+from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
+from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.transformation.general import ApplyConfig
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.basic import is_versal
-
 from finn.xsi import SimEngine
+
 
 def InsertAndSetFIFODepths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
     cfg = DataflowBuildConfig()
     model = model.transform(
-                BuildSimulation(
-                    fpga_part,
-                    clk_ns,
-                    True,
-                    performance_sim=False,
-                )
-            )
-    model = model.transform(
-                RunLayerParallelSimulation(
-                    fpga_part, clk_ns, cfg
-                )
-            )
+        BuildSimulation(
+            fpga_part,
+            clk_ns,
+            True,
+            performance_sim=False,
+        )
+    )
+    model = model.transform(RunLayerParallelSimulation(fpga_part, clk_ns, cfg))
     model = model.transform(ApplySimulatedFIFOSizes(cfg))
     return model
+
 
 def make_single_fclayer_modelwrapper(W, pe, simd, wdt, idt, odt, T=None, tdt=None):
     mw = W.shape[0]
@@ -675,6 +672,7 @@ def test_fpgadataflow_mvau_large_depth_decoupled_mode_rtlsim(
     assert (
         y_expected == output_mvau_rtl_stitch
     ).all(), "Output of ONNX model not matching output of stitched-IP RTL model!"
+
 
 @pytest.mark.parametrize("mh", [18])
 @pytest.mark.parametrize("mw", [32])

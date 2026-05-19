@@ -10,13 +10,12 @@
 #############################################################################
 """Simulation engine utilities for FINN XSI-based hardware runs."""
 
-from typing import Literal
-from collections.abc import Generator, Iterator
-
 import numpy as np
 
 # provided via pybind11
 import xsi
+from collections.abc import Generator, Iterator
+from typing import Literal
 
 
 class SimEngine:

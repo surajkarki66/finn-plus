@@ -103,11 +103,11 @@ from finn.transformation.fpgadataflow.replace_verilog_relpaths import ReplaceVer
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
 from finn.transformation.fpgadataflow.set_fifo_depths import (
     ApplyFIFODepthsFromFile,
+    ApplySimulatedFIFOSizes,
     SplitLargeFIFOs,
 )
 from finn.transformation.fpgadataflow.set_folding import SetFolding
 from finn.transformation.fpgadataflow.set_loop_boundary import SetLoopBoundary
-from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
 from finn.transformation.fpgadataflow.simulation_build import BuildSimulation, SimulationType
 from finn.transformation.fpgadataflow.simulation_connected import (
     NodeConnectedSimulation,
@@ -131,7 +131,7 @@ from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.basic import get_liveness_threshold_cycles, get_rtlsim_trace_depth, getHWCustomOp
 from finn.util.config import extract_model_config_to_json
-from finn.util.exception import FINNUserError, FINNInternalError
+from finn.util.exception import FINNUserError
 from finn.util.execution import execute_parent
 from finn.util.logging import log
 from finn.util.mlo_sim import is_mlo, mlo_prehook_func_factory
@@ -406,6 +406,7 @@ def step_hw_ipgen(
         verify_step(model, cfg, "node_by_node_rtlsim", need_parent=True)
 
     return model
+
 
 @register_build_dataflow_step()
 def step_set_fifo_depths(
@@ -1328,7 +1329,7 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
             del res["fifo_cycles_until_first_valid"]
             cycle_per_sec = 1e9 / cfg.synth_clk_period_ns
             res["throughput_fps"] = cycle_per_sec / res["intervals"][0]  # type: ignore
-            #TODO: Add latency measurement
+            # TODO: Add latency measurement
             # Attach entry to output
             outputs.append(res)
 

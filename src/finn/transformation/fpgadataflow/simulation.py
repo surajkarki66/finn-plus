@@ -1,26 +1,24 @@
 """Manages the Simulation superclass as well as general simulation related transforms."""
 
-import pandas as pd
-from pathlib import Path
-from qonnx.core.modelwrapper import ModelWrapper
-from typing import Any, TypeAlias
-
-from finn.transformation.fpgadataflow.simulation_build import BuildSimulation, SimulationType
-from finn.util.exception import FINNInternalError, FINNUserError
-from finn.util.logging import log
-
 import json
+import pandas as pd
 import socket
 import subprocess
 import threading
 import time
+from pathlib import Path
+from qonnx.core.modelwrapper import ModelWrapper
 from rich.console import Console
 from threading import Lock
+from typing import Any, TypeAlias
 
+from finn.transformation.fpgadataflow.simulation_build import BuildSimulation, SimulationType
 from finn.util.basic import make_build_dir
-from finn.util.logging import ThreadsafeProgressDisplay
+from finn.util.exception import FINNInternalError, FINNUserError
+from finn.util.logging import ThreadsafeProgressDisplay, log
 
 FIFODepthConfig: TypeAlias = list[dict[str, list[int]]]
+
 
 def store_fifo_data(
     model: ModelWrapper,
@@ -497,4 +495,3 @@ class SimulationController:
             finally:
                 stdout_file.close()
                 stderr_file.close()
-

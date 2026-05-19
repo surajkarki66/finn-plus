@@ -43,13 +43,12 @@ if TYPE_CHECKING:
     from onnx import GraphProto
     from qonnx.core.modelwrapper import ModelWrapper
 
+import finn.xsi as finnxsi
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.util.basic import make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
-from finn.util.exception import FINNInternalError
+from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
-
-import finn.xsi as finnxsi
 
 
 class RTLBackend(HWCustomOp, ABC):
@@ -209,7 +208,11 @@ class RTLBackend(HWCustomOp, ABC):
                     # container datatype
                     inp_val = inp_val.astype(np.float32)
 
-                assert inp_val.shape == exp_ishape, "Input shape doesn't match expected shape."
+                if inp_val.shape != exp_ishape:
+                    raise FINNInternalError(
+                        f"Input shape for input {i} of node {node.name} doesn't match expected "
+                        f"shape. (got {inp_val.shape}, expected {exp_ishape})"
+                    )
                 export_idt = self.get_input_datatype(i)
 
                 reshaped_input = inp_val.reshape(folded_ishape)
@@ -249,12 +252,14 @@ class RTLBackend(HWCustomOp, ABC):
                 output = np.asarray([output], dtype=np.float32).reshape(*exp_oshape)
                 context[outp] = output
 
-                assert context[outp].shape == exp_oshape, (
-                    "Output shape doesn't match expected shape."
-                )
+                if context[outp].shape != exp_oshape:
+                    raise FINNInternalError(
+                        f"Output shape for output {o} of node {node.name} doesn't match expected "
+                        f"shape. (got {context[outp].shape}, expected {exp_oshape})"
+                    )
 
         else:
-            raise Exception(
+            raise FINNUserError(
                 f"""Invalid value for attribute exec_mode! Is currently set to: {mode}
             has to be set to one of the following value ("cppsim", "rtlsim")"""
             )

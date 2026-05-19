@@ -16,9 +16,11 @@ from typing import Protocol, cast
 
 
 class _SimulationBuilderProtocol(Protocol):
-    def __init__(self, model: ModelWrapper, fpgapart: str, clk_ns: float) -> None: ...
+    def __init__(self, model: ModelWrapper, fpgapart: str, clk_ns: float) -> None:
+        ...
 
-    def _isolated_node_model(self, by_node: int | str) -> ModelWrapper: ...
+    def _isolated_node_model(self, by_node: int | str) -> ModelWrapper:
+        ...
 
 
 def _import_simulation_build_types() -> tuple[type[_SimulationBuilderProtocol], type[Exception]]:

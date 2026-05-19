@@ -30,14 +30,13 @@ All nodes in the graph must have the fpgadataflow backend attribute."""
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import cast, TYPE_CHECKING
-from onnx import NodeProto
-
 import qonnx.custom_op.registry as registry
+from onnx import NodeProto
 from qonnx.transformation.base import NodeLocalTransformation
+from typing import TYPE_CHECKING, cast
 
-from finn.util.fpgadataflow import is_hls_node
 from finn.util.exception import FINNUserError
+from finn.util.fpgadataflow import is_hls_node
 
 if TYPE_CHECKING:
     from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend

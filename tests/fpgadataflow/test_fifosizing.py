@@ -27,17 +27,14 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
-from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
-from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 import pytest
-from pathlib import Path
 
 import json
 import shutil
 import torch
 from brevitas.export import export_qonnx
 from onnx import TensorProto, helper
+from pathlib import Path
 from qonnx.core.datatype import BaseDataType, DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -48,30 +45,31 @@ from qonnx.util.basic import qonnx_make_model
 
 import finn.builder.build_dataflow as build
 import finn.builder.build_dataflow_config as build_cfg
+from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
+from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
+from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import make_build_dir
 from tests.testing_util.test import get_trained_network_and_ishape
+
 
 def insert_and_set_fifo_depths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
     """Run FIFO sizing for testing."""
     cfg = build_cfg.DataflowBuildConfig()
     model = model.transform(
-                BuildSimulation(
-                    fpga_part,
-                    clk_ns,
-                    True,
-                    performance_sim=False,
-                )
-            )
-    model = model.transform(
-                RunLayerParallelSimulation(
-                    fpga_part, clk_ns, cfg
-                )
-            )
+        BuildSimulation(
+            fpga_part,
+            clk_ns,
+            True,
+            performance_sim=False,
+        )
+    )
+    model = model.transform(RunLayerParallelSimulation(fpga_part, clk_ns, cfg))
     model = model.transform(ApplySimulatedFIFOSizes(cfg))
     return model
 
-def fetch_test_model(topology:str, wbits:int=2, abits:int=2) -> Path:
+
+def fetch_test_model(topology: str, wbits: int = 2, abits: int = 2) -> Path:
     """Fetch the test model for the given topology and bitwidths,
     export it to QONNX, and return the output directory."""
     tmp_output_dir = Path(make_build_dir(f"build_fifosizing_{topology}_"))
@@ -80,7 +78,8 @@ def fetch_test_model(topology:str, wbits:int=2, abits:int=2) -> Path:
     export_qonnx(model, torch.randn(ishape), chkpt_name)
     return tmp_output_dir
 
-def make_multi_io_modelwrapper(ch:int, pe:int, idt:BaseDataType) -> ModelWrapper:
+
+def make_multi_io_modelwrapper(ch: int, pe: int, idt: BaseDataType) -> ModelWrapper:
     """Make a simple ONNX model with one addstreams node and one duplicate streams node,
     with multiple inputs and outputs, for testing multi-IO FIFO sizing."""
     in0 = helper.make_tensor_value_info("in0", TensorProto.FLOAT, [1, ch])
@@ -204,9 +203,6 @@ def test_fifosizing_multi_io():
     model = make_multi_io_modelwrapper(2, 2, DataType["INT4"])
     model = model.transform(SpecializeLayers("xc7z020clg400-1"))
     model = model.transform(GiveUniqueNodeNames())
-    model = model.transform(InsertAndSetFIFODepths("xc7z020clg400-1", 5))
+    model = insert_and_set_fifo_depths(model, "xc7z020clg400-1", 5)
     fifos = model.get_nodes_by_op_type("StreamingFIFO_rtl")
     assert len(fifos) > 1, "No FIFOs inserted"
-
-
-

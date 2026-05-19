@@ -20,14 +20,13 @@ from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.transformation.fpgadataflow.set_fifo_depths import get_fifo_split_configs
 from finn.transformation.fpgadataflow.simulation import (
     Simulation,
+    SimulationController,
     SimulationType,
     store_fifo_data,
-    SimulationController,
 )
 from finn.util.basic import getHWCustomOp, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
-
 
 # Hardware BRAM FIFOs lose entries to internal pipeline registers compared to the software FIFO
 # model (which has exact capacity). This constant accounts for that overhead so that the
@@ -210,9 +209,9 @@ class NodeConnectedSimulationController(SimulationController):
                                 cycles_results[sim_name] = cycles
                                 samples_results[sim_name] = samps
                                 intervals_results[sim_name] = intervals
-                                fifo_cycles_until_first_valid_results[sim_name] = (
-                                    fifo_cycles_until_first_valid
-                                )
+                                fifo_cycles_until_first_valid_results[
+                                    sim_name
+                                ] = fifo_cycles_until_first_valid
                                 timeout_result = timeout_result or timeout
                         except Exception as e:  # noqa
                             self.console.log(f"Simulation failed: {e}")
@@ -247,9 +246,9 @@ class NodeConnectedSimulationController(SimulationController):
                             ) = result
                             # Only update if not already collected
                             if sim_name not in fifo_results:
-                                fifo_cycles_until_first_valid_results[sim_name] = (
-                                    fifo_cycles_until_first_valid
-                                )
+                                fifo_cycles_until_first_valid_results[
+                                    sim_name
+                                ] = fifo_cycles_until_first_valid
                                 fifo_depths[sim_name] = fifo_depth
                                 fifo_results[sim_name] = fifo_util
                                 cycles_results[sim_name] = cycles

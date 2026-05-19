@@ -23,9 +23,9 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-from finn.util.logging import log
-from finn.util.exception import FINNUserError
 
+from finn.util.exception import FINNUserError
+from finn.util.logging import log
 
 # Track if auto-install has been attempted
 _auto_install_attempted = False
@@ -147,7 +147,7 @@ if xsi_avail is False:
     raise FINNUserError("XSI not available. Please run 'finn deps update' to install XSI.")
 
 from finn_xsi.sim_engine import SimEngine  # noqa
-from finn_xsi.adapter import ( #noqa
+from finn_xsi.adapter import (  # noqa
     locate_glbl,
     compile_sim_obj,
     get_simkernel_so,

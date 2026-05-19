@@ -27,29 +27,23 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from collections.abc import Callable
-
-from finn_xsi.sim_engine import SimEngine
 import numpy as np
+from collections.abc import Callable
+from finn_xsi.sim_engine import SimEngine
 from pathlib import Path
-from finn.util.basic import getHWCustomOp
+from typing import TYPE_CHECKING
 
 from finn import xsi as finnxsi
-from finn.util.basic import (
-    get_liveness_threshold_cycles,
-    make_build_dir,
-)
+from finn.util.basic import get_liveness_threshold_cycles, getHWCustomOp, make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from qonnx.core.datatype import BaseDataType
     from qonnx.core.modelwrapper import ModelWrapper
 
-from finn.util.exception import FINNUserError
-
 from ast import literal_eval
+
+from finn.util.exception import FINNUserError
 
 
 def prep_rtlsim_io_dict(
