@@ -50,19 +50,17 @@ from __future__ import annotations
 
 import logging
 import mashumaro.config
+import mip
 import numpy as np
 from dataclasses import dataclass, field
 from enum import Enum
 from mashumaro.mixins.json import DataClassJSONMixin
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path, PosixPath, PurePath
-from typing import TYPE_CHECKING, Any, List, Literal, Optional, cast
+from typing import Any, List, Literal, Optional, cast
 
 from finn.util.basic import alveo_default_platform, part_map
 from finn.util.exception import FINNConfigurationError
-
-if TYPE_CHECKING:
-    import mip
 
 
 class LogLevel(str, Enum):
@@ -170,6 +168,16 @@ class VerificationStepType(str, Enum):
     PASSES_FRONTEND = "passes_frontend"
 
 
+class MIPSolver(str, Enum):
+    """Solver type enum. Used for type hinting,
+    since `Literal[mip.CBC]` is currently not allowed.
+    """
+
+    CBC = mip.CBC
+    GUROBI = mip.GUROBI
+    HIGHS = mip.HIGHS
+
+
 class MFVerbosity(Enum):
     """Verbosity levels for Multi-FPGA."""
 
@@ -263,7 +271,12 @@ class PartitioningConfiguration:
 
     # The solver to apply to the partitioning model. If left to None,
     # the default `mip` solver is used, with CBC as a fallback.
-    partition_solver: mip.GUROBI | mip.CBC | mip.HIGHS | None = None  # type: ignore
+    partition_solver: Literal[MIPSolver.CBC, MIPSolver.GUROBI, MIPSolver.HIGHS] | None = None
+
+    # Search emphasis. Can be set to default for balanced results, or to OPTIMAL
+    # for optimal solutions or to FEASIBLE for quickly finding feasible solutions.
+    # Details can be found here: https://docs.python-mip.com/en/latest/classes.html
+    partition_solver_emphasis: mip.SearchEmphasis = mip.SearchEmphasis.DEFAULT
 
     # Determines how many synthesis processes can run in parallel. Keep in mind
     # that very roughly estimated, one synthesis should be able to use up to 100 GB RAM,

@@ -8,34 +8,21 @@ import pytest
 
 import contextlib
 import mip
-import torch
-from brevitas.export import export_qonnx
-from fpgadataflow.multifpga.utils import (
-    generate_basic_model,
-    generate_mobilenet,
-    generate_rn18,
-    prepare_basic_model_for_multifpga,
-    prepare_mobilenet_for_multifpga,
-    prepare_resnet_for_multifpga,
-)
+from fpgadataflow.multifpga.utils import get_model
 from pathlib import Path
-from qonnx.core.modelwrapper import ModelWrapper
-from qonnx.util.cleanup import cleanup as qonnx_cleanup
 from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
-from testing_util.test import get_test_model
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
-    DataflowOutputType,
     MFCommunicationKernel,
     MFTopology,
     MFVerbosity,
+    MIPSolver,
     PartitioningConfiguration,
     PartitioningStrategy,
-    default_build_dataflow_steps,
+    ShellFlowType,
 )
-from finn.builder.build_dataflow_steps import build_dataflow_step_lookup
 from finn.transformation.fpgadataflow.multifpga.assign_metadata import AssignNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.aurora_metadata import AuroraNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.communication_kernels import PrepareAuroraFlow
@@ -55,9 +42,8 @@ from finn.util.exception import (
 )
 from finn.util.platforms import platforms
 
-# TODO: ALL TODOS
-# 1. Organize tests into classes
-# 2. Modernize all tests (with recent changes), remove unnecessary old tests
+if TYPE_CHECKING:
+    from qonnx.core.modelwrapper import ModelWrapper
 
 
 @pytest.mark.auroraflow
@@ -195,114 +181,21 @@ class TestAuroraFlowPreparationAndMetadata:
 class TestAuroraFlowPartitioning:
     """Tests regarding the partitioning using the AuroraFlow kernel and partitioner class."""
 
-    def make_model(
-        self, model_type: tuple[str, int, int, bool], onnx_path_prefix: str
-    ) -> tuple[ModelWrapper, Path]:  # noqa
-        """Make a model of the given type, ready for usage in FINN.
-
-        Arguments:
-            `model_type`: Tuple of (typename, wbits, abits, pretrained?).
-                Typename can be one of [resnet18, mobilenet, CNV, LFC, SFC, TFC].
-            `onnx_path_prefix`: Prefix to the path where the models ONNX file is stored.
-
-        Returns:
-            `ModelWrapper`, `Path`: The modelwrapper and the path of its underlying ONNX file.
+    def get_shell_flow_type(self, board: str) -> ShellFlowType:
+        """Return the shell flow type for the given board.
+        Errors if a not assigned board is passed.
         """
-        typename, wbits, abits, pretrained = model_type
-        model_onnx_path = Path(make_build_dir(onnx_path_prefix + "_")) / "model.onnx"
-        match typename:
-            case "resnet18":
-                model, _ = generate_rn18(str(model_onnx_path), wbits, abits)
-            case "mobilenet":
-                model = generate_mobilenet(model_onnx_path, wbits, abits, pretrained)
-            case "CNV" | "LFC" | "SFC" | "TFC":
-                model = generate_basic_model(model_onnx_path, typename, wbits, abits)
-            case _:
-                raise NotImplementedError(f"Unknown model type {typename}")
-        return model, model_onnx_path
-
-    def prepare_and_partition_model(
-        self,
-        model: ModelWrapper,
-        board: str,
-        num_fpgas: int,
-        topology: MFTopology,
-        partitioning_strategy: PartitioningStrategy,
-        skip_fifo_sizing: bool,
-        model_type: str,
-        max_util: float,
-        ideal_util: float,
-        ports_per_device: int = 2,
-        separate_iodmas: bool = True,
-        partition_solver_timeout: int = 100,
-        target_fps: int = 1000,
-        mvau_wwidth_max: int = 1024,
-        synth_clk_ns: float = 5.0,
-        solver: mip.CBC | mip.GUROBI | mip.HIGHS | None = None,
-    ) -> tuple[ModelWrapper, DataflowBuildConfig, PartitionForMultiFPGA]:
-        """Prepare the given model by running the required FINN steps
-        until the model is ready to be partitioned, then partition.
-
-        Returns the partitioned model, the build config, as
-        well as the transformation for inspection.
-
-        wbits, abits and basic_model_type are only relevant when a basic model is supplied.
-        """
-        # Create the build config, which is always the same
-        cfg = DataflowBuildConfig(
-            output_dir=make_build_dir("prepare_until_partition_"),
-            board=board,
-            mvau_wwidth_max=mvau_wwidth_max,
-            target_fps=target_fps,
-            synth_clk_period_ns=synth_clk_ns,
-            save_intermediate_models=True,
-            standalone_thresholds=True,
-            partitioning_configuration=PartitioningConfiguration(
-                num_fpgas=num_fpgas,
-                topology=topology,
-                communication_kernel=MFCommunicationKernel.AURORA,
-                partition_strategy=partitioning_strategy,
-                max_utilization=max_util,
-                ideal_utilization=ideal_util,
-                ports_per_device=ports_per_device,
-                separate_iodmas=separate_iodmas,
-                partition_solver_timeout=partition_solver_timeout,
-                partition_solver=solver,
-            ),
+        if board in ["U280"]:
+            return ShellFlowType.VITIS_ALVEO
+        elif board in ["Pynq-Z1"]:  # noqa
+            return ShellFlowType.VIVADO_ZYNQ
+        raise NotImplementedError(
+            f"Unknown board type ({board}) for this test. " f"Unsure which shell type to use."
         )
-
-        # Prepare depending on model type
-        match model_type:
-            case "resnet" | "resnet18":
-                model, cfg = prepare_resnet_for_multifpga(
-                    model, cfg=cfg, skip_fifo_sizing=skip_fifo_sizing
-                )
-            case "mobilenet":
-                model, cfg = prepare_mobilenet_for_multifpga(
-                    model, cfg=cfg, skip_fifo_sizing=skip_fifo_sizing
-                )
-            case "CNV" | "TFC" | "LFC" | "SFC":
-                # TODO: Currently assume default models, this should be checked more thoroughly
-                model, cfg = prepare_basic_model_for_multifpga(
-                    model, cfg=cfg, skip_fifo_sizing=skip_fifo_sizing
-                )
-            case _:
-                raise NotImplementedError(f"Unsupported model type: {model_type}")
-
-        # Do the partitioning
-        assert cfg.partitioning_configuration is not None
-        partition_transform = PartitionForMultiFPGA(
-            cfg.partitioning_configuration,
-            cfg._resolve_fpga_part(),  # noqa
-            board,
-            Path(make_build_dir("partition_prepare_")),
-        )
-        model = model.transform(partition_transform)
-        return model, cfg, partition_transform
 
     @pytest.mark.parametrize("network_ports", [2])
     @pytest.mark.parametrize("ideal_max_util", [(0.8, 0.9), (0.9, 1.0), (0.2, 0.8), (0.2, 1.0)])
-    def test_enforce_utilization_limit_aurora(
+    def test_enforce_utilization_limit(
         self,
         board: str,
         topology: MFTopology,
@@ -319,11 +212,17 @@ class TestAuroraFlowPartitioning:
         nodes = 2
         considered_resources = ["LUT", "FF", "DSP", "BRAM_18K"]
         res_per_device = available_resources(platform(), considered_resources)
-        # Device0 is underutilized, Device1 is overutilized
+
+        # Hypothetical resource use per node
+        # Node0 (and thus implicitly Device0) is underutilized
+        # Node1(and thus implicitly Device1) is overutilized
         resource_estimates = {
             0: {res: res_per_device[res] * (max_util - diff) for res in considered_resources},
             1: {res: res_per_device[res] * (max_util + diff) for res in considered_resources},
         }
+
+        # Since every device can have only one node, one device will be overutilized slightly,
+        # and no solution should be found.
         with pytest.raises(FINNMultiFPGANoPartitionerSolutionError):
             part = AuroraPartitioner(
                 output_dir=Path(make_build_dir(test_dir_identifier + "_")),
@@ -357,7 +256,7 @@ class TestAuroraFlowPartitioning:
             ("SFC", 2, 2, True),
             ("TFC", 1, 1, True),
             ("TFC", 1, 2, True),
-            ("mobilenet", 4, 4, True),
+            ("mobilenetv1", 4, 4, True),
             ("resnet18", 4, 4, True),
         ],
     )
@@ -377,28 +276,60 @@ class TestAuroraFlowPartitioning:
         board: str,
         max_util: float,
         ideal_util: float,
+        pytestconfig: pytest.Config,
     ) -> None:
         """Test some known model - fpga combinations that should
         be solveable.
         """
         typename, wbits, abits, pretrained = model_type
-        test_dir_identifier = (
-            f"test_partition_solution_{typename}_{wbits}_{abits}"
-            f"_p{pretrained}_dev{devices}_board{board}_topology{topology}"
+        test_identifier = (
+            f"test_partitioning_{model_type}_{wbits}_{abits}_{pretrained}_"
+            f"{devices}_{partition_strategy.name}_{topology.name}_{board}_{max_util}_{ideal_util}"
+        )
+        flow_type = self.get_shell_flow_type(board)
+        cfg = DataflowBuildConfig(
+            output_dir=make_build_dir(test_identifier),
+            board=board,
+            mvau_wwidth_max=64,
+            target_fps=1,
+            synth_clk_period_ns=5.0,
+            standalone_thresholds=True,
+            minimize_bit_width=True,
+            shell_flow_type=flow_type,
+            partitioning_configuration=PartitioningConfiguration(
+                num_fpgas=devices,
+                topology=topology,
+                communication_kernel=MFCommunicationKernel.AURORA,
+                partition_strategy=partition_strategy,
+                max_utilization=max_util,
+                ideal_utilization=ideal_util,
+                ports_per_device=2,
+                separate_iodmas=True,
+                partition_solver_timeout=60,
+            ),
         )
 
-        model, _ = self.make_model(model_type, test_dir_identifier)
-        model, cfg, part = self.prepare_and_partition_model(
-            model,
-            board,
-            devices,
-            topology,
-            skip_fifo_sizing=True,
-            model_type=typename,
-            max_util=max_util,
-            ideal_util=ideal_util,
-            partitioning_strategy=partition_strategy,
+        # Get the model
+        model = get_model(
+            typename,
+            wbits,
+            abits,
+            pretrained,
+            "step_set_fifo_depths",
+            True,
+            cfg,
+            pytestconfig,
+            identifier="test_partitioning",
         )
+
+        # Do the partitioning
+        assert cfg.partitioning_configuration is not None
+        part = PartitionForMultiFPGA(
+            cfg.partitioning_configuration,
+            cfg._resolve_fpga_part(),
+            board,
+            Path(make_build_dir("")),
+        )  # noqa
 
         # Check that partitioning was successful
         assert part.partitioner is not None
@@ -504,16 +435,19 @@ class TestAuroraFlowPartitioning:
         strategy: PartitioningStrategy,
     ) -> None:
         """Test that the partitioning of certain models has not regressed in recent commits.
+        Specifically, test the final value of the objective function.
 
         TODO: Save recent CI run data in proper infrastructure as soon as we have set it
         up, instead of hardcoding the values.
         """
+        flow_type = self.get_shell_flow_type(board)
         model, _ = self.make_model(
             model_type, f"test_regression_model_{'_'.join(map(str, (model_type)))}"
         )
         _, _, part = self.prepare_and_partition_model(
             model,
             board,
+            flow_type,
             2,
             topology,
             strategy,
@@ -526,12 +460,11 @@ class TestAuroraFlowPartitioning:
             target_fps=10,
             mvau_wwidth_max=1024,
             synth_clk_ns=5.0,
-            solver=mip.CBC,
+            solver=None,
         )
         assert part.partitioner is not None
         assert part.partitioner.model.objective.x is not None
         assert part.partitioner.model.objective.x < 0
-
         raise NotImplementedError()
 
     @pytest.mark.parametrize(

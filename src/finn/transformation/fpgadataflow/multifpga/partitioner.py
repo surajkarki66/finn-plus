@@ -13,12 +13,13 @@ from qonnx.transformation.general import GiveUniqueNodeNames
 from rich import box
 from rich.layout import Layout
 from rich.table import Table
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from finn.builder.build_dataflow_config import (
     MFCommunicationKernel,
     MFTopology,
     MFVerbosity,
+    MIPSolver,
     PartitioningConfiguration,
     PartitioningStrategy,
 )
@@ -80,10 +81,12 @@ class Partitioner(ABC):
         ideal_utilization: float | None = None,
         index_node_name_map: dict[int, str] | None = None,
         solver: str | None = None,
+        solver_emphasis: mip.SearchEmphasis = mip.SearchEmphasis.DEFAULT,
     ) -> None:
         # MIP member variables first
         self.status: mip.OptimizationStatus | None
         self.solver = solver
+        self.solver_emphasis = solver_emphasis
         if solver is None:
             try:
                 self.model = Model()
@@ -107,6 +110,16 @@ class Partitioner(ABC):
                 raise FINNUserError(
                     f"Cannot create mip solver of type {solver}. Original error: {e}"
                 ) from e
+        self.model.name = "FINN_MultiFPGA_Partitioning_Model"
+
+        # Set model emphasis
+        self.model.emphasis = self.solver_emphasis
+
+        # Document setup
+        if verbosity.value > MFVerbosity.NONE.value:
+            log.info(f"Using solver: {self.model.solver_name}")
+        if verbosity.value > MFVerbosity.LOW.value:
+            log.info(f"Solver emphasis: {self.solver_emphasis.name}")
 
         # Details about the partitioning
         self.index_node_map = index_node_name_map
@@ -226,7 +239,8 @@ class AuroraPartitioner(Partitioner):  # noqa
         max_utilization: float | None = None,
         ideal_utilization: float | None = None,
         index_node_name_map: dict[int, str] | None = None,
-        solver: str | None = None,
+        solver: Literal[MIPSolver.CBC, MIPSolver.GUROBI, MIPSolver.HIGHS] | None = None,
+        solver_emphasis: mip.SearchEmphasis = mip.SearchEmphasis.DEFAULT,
     ) -> None:
         super().__init__(
             strategy,
@@ -244,6 +258,7 @@ class AuroraPartitioner(Partitioner):  # noqa
             ideal_utilization,
             index_node_name_map,
             solver=solver,
+            solver_emphasis=solver_emphasis,
         )
         self.verbosity = verbosity
         if self.model is None or type(self.model) is not Model:
@@ -495,14 +510,14 @@ class AuroraPartitioner(Partitioner):  # noqa
                                 "on a single device. Partitioning might fail!"
                             )
                         else:
-                            raise FINNMultiFPGAConfigError(
+                            raise FINNMultiFPGANoPartitionerSolutionError(
                                 f"Node {node}'s usage of {restype} is above "
                                 f"the allowed utilization per device "
                                 f"({self.resource_estimates[node][restype]} > "
                                 f"{max_util}). "
                                 "Theoretical max per device would "
                                 f"be {total_per_device[restype]}. "
-                                "Partitioning will fail!"
+                                "The node cannot fit on a device of this type."
                             )
 
             # Balance so that the maximum difference to the ideal load over all devices and
@@ -682,6 +697,8 @@ class PartitionForMultiFPGA(Transformation):
         self.communication_kernel = partitioning_configuration.communication_kernel
         self.partitioning_strategy = partitioning_configuration.partition_strategy
         self.timeout = partitioning_configuration.partition_solver_timeout
+        self.solver = partitioning_configuration.partition_solver
+        self.solver_emphasis = partitioning_configuration.partition_solver_emphasis
 
         # Select the partitioner class based on the communication kernel
         partitioners = {MFCommunicationKernel.AURORA: AuroraPartitioner}
@@ -857,10 +874,15 @@ class PartitionForMultiFPGA(Transformation):
             ideal_utilization=self.ideal_utilization,
             network_ports_per_device=self.ports_per_device,
             index_node_name_map={i: model.graph.node[i].name for i in range(len(model.graph.node))},
+            solver=self.solver,
+            solver_emphasis=self.solver_emphasis,
         )
 
         # Temporary dir to store information regarding the partitioning
-        logdir = Path(make_build_dir("partition_solver_"))
+        logdir = Path(make_build_dir("partitioning_model_data_"))
+
+        # Store the model definition. This is useful for debugging
+        self.partitioner.model.write(str((logdir / "model.lp").absolute()))
 
         # Print information
         self._log_pre_solve_information(self.partitioner)
@@ -874,7 +896,7 @@ class PartitionForMultiFPGA(Transformation):
                 f"No feasible partitioning solution could be found for "
                 f"the given model and configuration. If you are sure "
                 f"that everything is set up correctly, try using a "
-                f"different solver. Reports can be found at: "
+                f"different solver. The generated model can be found at: "
                 f"{logdir.absolute()}"
             )
         if self.partitioner.status is not None and self.verbosity.value > MFVerbosity.LOW.value:

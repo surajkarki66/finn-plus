@@ -88,7 +88,7 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
         case "quick":
             subprocess.run(
                 shlex.split(
-                    f"{sys.executable} -m pytest -v -m 'not "
+                    f"{sys.executable} -m pytest --cache-clear -v -m 'not "
                     f"(vivado or slow or vitis or board or notebooks or bnn_pynq or end2end)' "
                     f"--dist=loadfile -n {num_workers}",
                     posix=IS_POSIX,
@@ -97,7 +97,7 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
         case "quicktest_ci":
             subprocess.run(
                 shlex.split(
-                    f"{sys.executable} -m pytest -v -m 'not "
+                    f"{sys.executable} -m pytest --cache-clear -v -m 'not "
                     f"(vivado or slow or vitis or board or notebooks or bnn_pynq or end2end)' "
                     f"--junitxml={ci_project_dir}/reports/quick.xml "
                     f"--html={ci_project_dir}/reports/quick.html "
@@ -109,7 +109,7 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
             test_1_process = subprocess.Popen(
                 shlex.split(
                     (
-                        f"{sys.executable} -m pytest -v -m 'not "
+                        f"{sys.executable} -m pytest --cache-clear -v -m 'not "
                         f"(end2end or sanity_bnn or notebooks)' "
                         f"--junitxml={ci_project_dir}/reports/main.xml "
                         f"--html={ci_project_dir}/reports/main.html "
@@ -121,7 +121,8 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
             test_2_process = subprocess.Popen(
                 shlex.split(
                     (
-                        f"{sys.executable} -m pytest -v -m 'end2end or sanity_bnn or notebooks' "
+                        f"{sys.executable} -m pytest --cache-clear "
+                        f"-v -m 'end2end or sanity_bnn or notebooks' "
                         f"--junitxml={ci_project_dir}/reports/end2end.xml "
                         f"--html={ci_project_dir}/reports/end2end.html "
                         f"--reruns 1 --dist loadgroup -n {num_workers}"
