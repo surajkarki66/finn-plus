@@ -1,4 +1,5 @@
 """Simulating layers on their own to observe their behaviour."""
+
 import io
 import json
 import pandas as pd
@@ -13,9 +14,12 @@ from rich.console import Console
 from threading import Lock
 from typing import Any, Literal, TypeAlias
 
-from finn.transformation.fpgadataflow.simulation import Simulation, store_fifo_data
+from finn.transformation.fpgadataflow.simulation import (
+    Simulation,
+    store_fifo_data,
+    SimulationController,
+)
 from finn.transformation.fpgadataflow.simulation_build import SimulationType
-from finn.transformation.fpgadataflow.simulation_controller import SimulationController
 from finn.util.exception import FINNInternalError
 from finn.util.logging import log
 
@@ -49,8 +53,7 @@ class NodeIsolatedSimulationController(SimulationController):
         """Get the logfile for the given binary or process index."""
         if type(binary_or_idx) is int:
             return (
-                self.logdir / f"{binary_or_idx}_log_isolated_"
-                f"{self.names[binary_or_idx]}_python.txt"
+                self.logdir / f"{binary_or_idx}_log_isolated_{self.names[binary_or_idx]}_python.txt"
             )
         elif type(binary_or_idx) in [Path, PurePath, PosixPath]:  # noqa
             process_idx = self.binaries.index(binary_or_idx)  # type: ignore
@@ -103,7 +106,7 @@ class NodeIsolatedSimulationController(SimulationController):
                 with datalock:
                     done += 1
                     log.info(
-                        f"[ [bold green]{int(100 * float(done)/float(total))}%"
+                        f"[ [bold green]{int(100 * float(done) / float(total))}%"
                         f"[/bold green] ] {name} done!",
                         extra={"markup": True, "highlighter": None},
                     )
@@ -204,8 +207,7 @@ class NodeIsolatedSimulationController(SimulationController):
                 write_log("Status response:")
                 write_log(f"\tTotal cycles: {total_cycles}")
                 write_log(
-                    f"\tInput data simulated: {percent_simulated_input}% "
-                    f"({in_done} / {in_target})"
+                    f"\tInput data simulated: {percent_simulated_input}% ({in_done} / {in_target})"
                 )
                 write_log(
                     f"\tOutput data simulated: {percent_simulated_output}% "

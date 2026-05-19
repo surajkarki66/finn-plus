@@ -107,7 +107,7 @@ from finn.transformation.fpgadataflow.set_fifo_depths import (
 )
 from finn.transformation.fpgadataflow.set_folding import SetFolding
 from finn.transformation.fpgadataflow.set_loop_boundary import SetLoopBoundary
-from finn.transformation.fpgadataflow.simulation import ApplySimulatedFIFOSizes
+from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
 from finn.transformation.fpgadataflow.simulation_build import BuildSimulation, SimulationType
 from finn.transformation.fpgadataflow.simulation_connected import (
     NodeConnectedSimulation,
@@ -1328,6 +1328,7 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
             del res["fifo_cycles_until_first_valid"]
             cycle_per_sec = 1e9 / cfg.synth_clk_period_ns
             res["throughput_fps"] = cycle_per_sec / res["intervals"][0]  # type: ignore
+            #TODO: Add latency measurement
             # Attach entry to output
             outputs.append(res)
 

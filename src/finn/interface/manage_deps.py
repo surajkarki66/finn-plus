@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
-import os
 import shlex
 import shutil
 import subprocess as sp
@@ -25,7 +24,7 @@ from threading import RLock
 from typing import cast
 
 from finn.interface import IS_POSIX
-from finn.interface.interface_utils import debug, error, resolve_module_path
+from finn.interface.interface_utils import debug, error
 from finn.util.exception import (
     FINNConfigurationError,
     FINNDependencyInstallationError,
@@ -313,10 +312,6 @@ class DependencyUpdater:
         except ValidationError as e:
             raise FINNUserError(f"Validation error: {e}") from e
 
-        # Try to find FINN_XSI. If it cannot be found, it is ignored in the
-        # list of all dependencies (since this is neither a failed nor a successful install)
-        self.finn_xsi_str = resolve_module_path("finn_xsi")
-
     def _run_silent(self, cmd: str, cwd: Path | None = None, timeout: float | None = None) -> int:
         """Run a given command silently. Return its returncode."""
         debug(f"[DependencyUpdater] Running command: {cmd}", False)
@@ -486,30 +481,6 @@ class DependencyUpdater:
                 f"Implementation for custom installation function for "
                 f"{package_name} not found in DependencyUpdater!"
             ) from e
-
-    def _is_outdated_finn_xsi(self) -> bool:
-        """Return whether FINN XSI is outdated."""
-        # If finn xsi was found its outdated, if it wasnt found, its never outdated
-        return self.finn_xsi_str != ""
-
-    def _install_finn_xsi(self) -> bool:
-        """Install FINN XSI bindings and return if installation was successful."""
-        # Hacky workaround
-        os.environ["FINN_XSI"] = self.finn_xsi_str
-        from finn.xsi import is_available
-
-        result = sp.run(
-            shlex.split(f"{sys.executable} -m finn.xsi.setup"),
-            capture_output=True,
-            text=True,
-            env=os.environ.copy(),
-        )
-        if result.returncode != 0:
-            raise FINNDependencyInstallationError(
-                "Installation of FINN XSI failed!:\n" + result.stdout
-            )
-        sys.path.append(self.finn_xsi_str)
-        return is_available()
 
     def install_dependency(self, package_name: str) -> bool:
         """Install the dependency in the dependency location. If no definition for this dependency

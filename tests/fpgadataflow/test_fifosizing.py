@@ -27,14 +27,18 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
+from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
+from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 import pytest
+from pathlib import Path
 
 import json
 import shutil
 import torch
 from brevitas.export import export_qonnx
 from onnx import TensorProto, helper
-from qonnx.core.datatype import DataType
+from qonnx.core.datatype import BaseDataType, DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.general import GiveUniqueNodeNames
@@ -44,18 +48,95 @@ from qonnx.util.basic import qonnx_make_model
 
 import finn.builder.build_dataflow as build
 import finn.builder.build_dataflow_config as build_cfg
-from finn.transformation.fpgadataflow.set_fifo_depths import InsertAndSetFIFODepths
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import make_build_dir
 from tests.testing_util.test import get_trained_network_and_ishape
 
+def insert_and_set_fifo_depths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
+    """Run FIFO sizing for testing."""
+    cfg = build_cfg.DataflowBuildConfig()
+    model = model.transform(
+                BuildSimulation(
+                    fpga_part,
+                    clk_ns,
+                    True,
+                    performance_sim=False,
+                )
+            )
+    model = model.transform(
+                RunLayerParallelSimulation(
+                    fpga_part, clk_ns, cfg
+                )
+            )
+    model = model.transform(ApplySimulatedFIFOSizes(cfg))
+    return model
 
-def fetch_test_model(topology, wbits=2, abits=2):
-    tmp_output_dir = make_build_dir("build_fifosizing_%s_" % topology)
+def fetch_test_model(topology:str, wbits:int=2, abits:int=2) -> Path:
+    """Fetch the test model for the given topology and bitwidths,
+    export it to QONNX, and return the output directory."""
+    tmp_output_dir = Path(make_build_dir(f"build_fifosizing_{topology}_"))
     (model, ishape) = get_trained_network_and_ishape(topology, wbits, abits)
-    chkpt_name = tmp_output_dir + "/model.onnx"
+    chkpt_name = tmp_output_dir / "model.onnx"
     export_qonnx(model, torch.randn(ishape), chkpt_name)
     return tmp_output_dir
+
+def make_multi_io_modelwrapper(ch:int, pe:int, idt:BaseDataType) -> ModelWrapper:
+    """Make a simple ONNX model with one addstreams node and one duplicate streams node,
+    with multiple inputs and outputs, for testing multi-IO FIFO sizing."""
+    in0 = helper.make_tensor_value_info("in0", TensorProto.FLOAT, [1, ch])
+    in1 = helper.make_tensor_value_info("in1", TensorProto.FLOAT, [1, ch])
+    mid = helper.make_tensor_value_info("mid", TensorProto.FLOAT, [1, ch])
+    out0 = helper.make_tensor_value_info("out0", TensorProto.FLOAT, [1, ch])
+    out1 = helper.make_tensor_value_info("out1", TensorProto.FLOAT, [1, ch])
+
+    addstreams_node = helper.make_node(
+        "ElementwiseAdd",
+        ["in0", "in1"],
+        ["mid"],
+        domain="finn.custom_op.fpgadataflow",
+        backend="fpgadataflow",
+        lhs_shape=[1, ch],
+        rhs_shape=[1, ch],
+        out_shape=[1, ch],
+        lhs_dtype=idt.name,
+        rhs_dtype=idt.name,
+        out_dtype=idt.name,
+        lhs_style="input",
+        rhs_style="input",
+        PE=pe,
+        inFIFODepths=[2, 2],
+    )
+    duplicate_node = helper.make_node(
+        "DuplicateStreams",
+        ["mid"],
+        ["out0", "out1"],
+        domain="finn.custom_op.fpgadataflow",
+        backend="fpgadataflow",
+        NumChannels=ch,
+        NumOutputStreams=2,
+        PE=pe,
+        inputDataType=idt.name,
+        numInputVectors=[1],
+        outFIFODepths=[2, 2],
+    )
+    graph = helper.make_graph(
+        nodes=[addstreams_node, duplicate_node],
+        name="graph",
+        inputs=[in0, in1],
+        outputs=[out0, out1],
+        value_info=[mid],
+    )
+
+    model = qonnx_make_model(graph, producer_name="multi-io-model")
+    model = ModelWrapper(model)
+
+    model.set_tensor_datatype("in0", idt)
+    model.set_tensor_datatype("in1", idt)
+
+    model = model.transform(InferShapes())
+    model = model.transform(InferDataTypes())
+
+    return model
 
 
 @pytest.mark.slow
@@ -72,7 +153,6 @@ def test_fifosizing_linear(method, topology):
         target_fps=10000 if topology == "tfc" else 1000,
         synth_clk_period_ns=10.0,
         board="Pynq-Z1",
-        rtlsim_batch_size=100 if topology == "tfc" else 2,
         generate_outputs=[
             build_cfg.DataflowOutputType.ESTIMATE_REPORTS,
             build_cfg.DataflowOutputType.STITCHED_IP,
@@ -129,58 +209,4 @@ def test_fifosizing_multi_io():
     assert len(fifos) > 1, "No FIFOs inserted"
 
 
-def make_multi_io_modelwrapper(ch, pe, idt):
-    in0 = helper.make_tensor_value_info("in0", TensorProto.FLOAT, [1, ch])
-    in1 = helper.make_tensor_value_info("in1", TensorProto.FLOAT, [1, ch])
-    mid = helper.make_tensor_value_info("mid", TensorProto.FLOAT, [1, ch])
-    out0 = helper.make_tensor_value_info("out0", TensorProto.FLOAT, [1, ch])
-    out1 = helper.make_tensor_value_info("out1", TensorProto.FLOAT, [1, ch])
 
-    addstreams_node = helper.make_node(
-        "ElementwiseAdd",
-        ["in0", "in1"],
-        ["mid"],
-        domain="finn.custom_op.fpgadataflow",
-        backend="fpgadataflow",
-        lhs_shape=[1, ch],
-        rhs_shape=[1, ch],
-        out_shape=[1, ch],
-        lhs_dtype=idt.name,
-        rhs_dtype=idt.name,
-        out_dtype=idt.name,
-        lhs_style="input",
-        rhs_style="input",
-        PE=pe,
-        inFIFODepths=[2, 2],
-    )
-    duplicate_node = helper.make_node(
-        "DuplicateStreams",
-        ["mid"],
-        ["out0", "out1"],
-        domain="finn.custom_op.fpgadataflow",
-        backend="fpgadataflow",
-        NumChannels=ch,
-        NumOutputStreams=2,
-        PE=pe,
-        inputDataType=idt.name,
-        numInputVectors=[1],
-        outFIFODepths=[2, 2],
-    )
-    graph = helper.make_graph(
-        nodes=[addstreams_node, duplicate_node],
-        name="graph",
-        inputs=[in0, in1],
-        outputs=[out0, out1],
-        value_info=[mid],
-    )
-
-    model = qonnx_make_model(graph, producer_name="multi-io-model")
-    model = ModelWrapper(model)
-
-    model.set_tensor_datatype("in0", idt)
-    model.set_tensor_datatype("in1", idt)
-
-    model = model.transform(InferShapes())
-    model = model.transform(InferDataTypes())
-
-    return model

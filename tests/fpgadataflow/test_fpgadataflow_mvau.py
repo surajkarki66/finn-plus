@@ -27,7 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from finn.builder.build_dataflow_config import DataflowBuildConfig
-from finn.transformation.fpgadataflow.simulation import ApplySimulatedFIFOSizes
+from finn.transformation.fpgadataflow.set_fifo_depths import ApplySimulatedFIFOSizes
 from finn.transformation.fpgadataflow.simulation_build import BuildSimulation
 from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
 import pytest

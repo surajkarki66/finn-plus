@@ -18,8 +18,12 @@ from typing import Any, cast
 from finn.builder.build_dataflow_config import DataflowBuildConfig
 from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.transformation.fpgadataflow.set_fifo_depths import get_fifo_split_configs
-from finn.transformation.fpgadataflow.simulation import Simulation, SimulationType, store_fifo_data
-from finn.transformation.fpgadataflow.simulation_controller import SimulationController
+from finn.transformation.fpgadataflow.simulation import (
+    Simulation,
+    SimulationType,
+    store_fifo_data,
+    SimulationController,
+)
 from finn.util.basic import getHWCustomOp, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
