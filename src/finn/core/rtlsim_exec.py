@@ -29,13 +29,13 @@
 
 import numpy as np
 from collections.abc import Callable
-from finn_xsi.sim_engine import SimEngine
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from finn import xsi as finnxsi
 from finn.util.basic import get_liveness_threshold_cycles, getHWCustomOp, make_build_dir
 from finn.util.data_packing import npy_to_rtlsim_input, rtlsim_output_to_npy
+from finn.xsi import SimEngine
 
 if TYPE_CHECKING:
     from qonnx.core.datatype import BaseDataType

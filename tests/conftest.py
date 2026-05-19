@@ -59,6 +59,11 @@ def load_settings(request) -> None:
     finn.util.settings._SETTINGS = settings  # noqa
 
 
+def pytest_collect_file(file_path: Path, parent) -> None:  # noqa: ARG001
+    """Initialize FINN settings before each test module is imported."""
+    finn.util.settings.initialize_dummy_settings()
+
+
 @pytest.fixture(scope="class", autouse=True)
 def isolate_build_dir(request):
     # Retrieve settings
