@@ -50,7 +50,14 @@ class AssignNetworkMetadata(Transformation):
             `communication_kernel`: Determines the format of metadata to store the connections in.
             `topology`: Type of topology/connections to create in metadata.
             `verbosity`: Determines how much information is printed during metadata creation.
-        """
+
+        The function automatically selects the required classes:
+        >>> t = AssignNetworkMetadata(MFCommunicationKernel.AURORA, MFTopology.CHAIN, MFVerbosity.LOW)
+        >>> t.creator_type.__name__
+        'CreateChainNetworkMetadata'
+        >>> t.metadata_type.__name__
+        'AuroraNetworkMetadata'
+        """  # noqa
         super().__init__()
         self.verbosity = verbosity
         try:
@@ -58,12 +65,12 @@ class AssignNetworkMetadata(Transformation):
             metadata_type = AssignNetworkMetadata.COMMUNICATION_KERNEL_METADATA_MAP[
                 communication_kernel
             ]
-        except KeyError:
+        except KeyError as e:
             raise FINNUserError(
-                f"Cannot create metadata for topology {topology.name}"  # noqa
+                f"Cannot create metadata for topology {topology.name}"
                 f" and communication kernel {communication_kernel.name}, "
                 f"since no creator/metadata type was written/connected for it yet. "
-            )
+            ) from e
         self.creator: CreateNetworkMetadata = creator_type(
             save_as_format=metadata_type, verbosity=verbosity
         )

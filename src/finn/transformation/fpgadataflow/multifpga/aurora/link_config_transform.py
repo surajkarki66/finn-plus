@@ -4,7 +4,7 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.base import Transformation
 from typing import cast
 
-from finn.transformation.fpgadataflow.multifpga.aurora_metadata import AuroraNetworkMetadata
+from finn.transformation.fpgadataflow.multifpga.aurora.metadata import AuroraNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.metadata import DataDirection
 from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.transformation.fpgadataflow.vitis_linking_configuration import VitisLinkConfiguration

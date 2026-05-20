@@ -27,23 +27,31 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import qonnx.custom_op.registry as registry
+from qonnx.core.modelwrapper import ModelWrapper
+from typing import TYPE_CHECKING, cast
 
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 
+if TYPE_CHECKING:
+    from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 
-def res_estimation(model, fpgapart):
+
+def res_estimation(model: ModelWrapper, fpgapart: str) -> dict[str, dict[str, int | float]]:
     """Estimates the resources needed for the given model.
     Ensure that all nodes have unique names (by calling the GiveUniqueNodeNames
     transformation) prior to calling this analysis pass to ensure all nodes are
     visible in the results.
 
-    Returns {node name : resource estimation}."""
-
+    Returns
+    -------
+        `dict[str, dict[str, int | float]]`: Maps node names to resource dicts.
+            Result example: `res_estimation(...)["MVAU_hls_0"]["LUT"]`
+    """
     res_dict = {}
     for node in model.graph.node:
         if is_hls_node(node) or is_rtl_node(node):
             inst = registry.getCustomOp(node)
-            res_dict[node.name] = inst.node_res_estimation(fpgapart)
+            res_dict[node.name] = cast("HWCustomOp", inst).node_res_estimation(fpgapart)
 
     return res_dict
 
