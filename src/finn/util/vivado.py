@@ -29,62 +29,6 @@
 import os
 import re
 
-from finn.util.basic import launch_process_helper, which
-
-
-def out_of_context_synth(
-    verilog_dir,
-    top_name,
-    float_ip_tcl,
-    fpga_part="xczu3eg-sbva484-1-e",
-    clk_name="ap_clk_0",
-    clk_period_ns=5.0,
-):
-    "Run out-of-context Vivado synthesis, return resources and slack."
-
-    # ensure that the OH_MY_XILINX envvar is set
-    if "OHMYXILINX" not in os.environ:
-        raise Exception("The environment variable OHMYXILINX is not defined.")
-    # ensure that vivado is in PATH: source $VIVADO_PATH/settings64.sh
-    if which("vivado") is None:
-        raise Exception("vivado is not in PATH, ensure settings64.sh is sourced.")
-    omx_path = os.environ["OHMYXILINX"]
-    script = "vivadocompile.sh"
-    # vivadocompile.sh <top-level-entity> <fp0.tcl#fp1.tcl> <clk-name (opt)> <fpga-part (opt)>
-    call_omx = "zsh %s/%s %s %s %s %s %f" % (
-        omx_path,
-        script,
-        top_name,
-        '"%s"' % "#".join(float_ip_tcl),
-        clk_name,
-        fpga_part,
-        float(clk_period_ns),
-    )
-    call_omx = call_omx.split()
-    launch_process_helper(call_omx, proc_env=os.environ.copy(), cwd=verilog_dir)
-
-    vivado_proj_folder = "%s/results_%s" % (verilog_dir, top_name)
-    res_counts_path = vivado_proj_folder + "/res.txt"
-
-    with open(res_counts_path, "r") as myfile:
-        res_data = myfile.read().split("\n")
-    ret = {}
-    ret["vivado_proj_folder"] = vivado_proj_folder
-    for res_line in res_data:
-        res_fields = res_line.split("=")
-        print(res_fields)
-        try:
-            ret[res_fields[0]] = float(res_fields[1])
-        except ValueError:
-            ret[res_fields[0]] = 0
-        except IndexError:
-            ret[res_fields[0]] = 0
-    if ret["WNS"] == 0:
-        ret["fmax_mhz"] = 0
-    else:
-        ret["fmax_mhz"] = 1000.0 / (clk_period_ns - ret["WNS"])
-    return ret
-
 
 def _parse_vivado_utilization_report(report_path):
     """Parse a Vivado utilization report file to extract resource counts.

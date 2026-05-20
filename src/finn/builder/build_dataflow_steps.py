@@ -119,7 +119,6 @@ from finn.transformation.fpgadataflow.set_fifo_depths import (
 from finn.transformation.fpgadataflow.set_folding import SetFolding
 from finn.transformation.fpgadataflow.set_loop_boundary import SetLoopBoundary
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
-from finn.transformation.fpgadataflow.synth_ooc import SynthOutOfContext
 from finn.transformation.fpgadataflow.transpose_decomposition import (
     InferInnerOuterShuffles,
     ShuffleDecomposition,
@@ -1076,11 +1075,17 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig):
             vivado_stitch_proj = model.get_metadata_prop("vivado_stitch_proj")
             ooc_res_dict = parse_ooc_synth_results(vivado_stitch_proj)
             if ooc_res_dict is not None:
-                model.set_metadata_prop("res_total_ooc_synth_pnr", str(ooc_res_dict))
+                # Calculate estimated throughput from fmax and cycle analysis
+                estimate_network_performance = model.analysis(dataflow_performance)
+                n_clock_cycles_per_sec = float(ooc_res_dict["fmax_mhz"]) * (10**6)
+                est_fps = n_clock_cycles_per_sec / estimate_network_performance["max_cycles"]
+                ooc_res_dict["estimated_throughput_fps"] = est_fps
+
+                model.set_metadata_prop("res_total_ooc_synth", str(ooc_res_dict))
                 # Write results to report directory
                 report_dir = cfg.output_dir + "/report"
                 os.makedirs(report_dir, exist_ok=True)
-                with open(report_dir + "/ooc_synth_and_timing_pnr.json", "w") as f:
+                with open(report_dir + "/ooc_synth_and_timing.json", "w") as f:
                     json.dump(ooc_res_dict, f, indent=2)
 
         # TODO copy all ip sources into output dir? as zip?
@@ -1222,35 +1227,6 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig):
         print(
             """Neither DataflowOutputType.PYNQ_DRIVER nor DataflowOutputType.CPP_DRIVER
             in requested outputs, skipping step_make_driver."""
-        )
-    return model
-
-
-def step_out_of_context_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig):
-    """Run out-of-context synthesis and generate reports.
-    Depends on the DataflowOutputType.STITCHED_IP output product."""
-    if DataflowOutputType.OOC_SYNTH in cfg.generate_outputs:
-        assert DataflowOutputType.STITCHED_IP in cfg.generate_outputs, "OOC needs stitched IP"
-        model = model.transform(
-            SynthOutOfContext(part=cfg._resolve_fpga_part(), clk_period_ns=cfg.synth_clk_period_ns)
-        )
-        report_dir = cfg.output_dir + "/report"
-        os.makedirs(report_dir, exist_ok=True)
-        ooc_res_dict = model.get_metadata_prop("res_total_ooc_synth")
-        ooc_res_dict = eval(ooc_res_dict)
-
-        estimate_network_performance = model.analysis(dataflow_performance)
-        # add some more metrics to estimated performance
-        n_clock_cycles_per_sec = float(ooc_res_dict["fmax_mhz"]) * (10**6)
-        est_fps = n_clock_cycles_per_sec / estimate_network_performance["max_cycles"]
-        ooc_res_dict["estimated_throughput_fps"] = est_fps
-        with open(report_dir + "/ooc_synth_and_timing.json", "w") as f:
-            json.dump(ooc_res_dict, f, indent=2)
-
-    else:
-        print(
-            """DataflowOutputType.OOC_SYNTH not in requested outputs,
-            skipping step_out_of_context_synthesis."""
         )
     return model
 
@@ -1413,7 +1389,6 @@ build_dataflow_step_lookup = {
     "step_create_stitched_ip": step_create_stitched_ip,
     "step_measure_rtlsim_performance": step_measure_rtlsim_performance,
     "step_make_driver": step_make_driver,
-    "step_out_of_context_synthesis": step_out_of_context_synthesis,
     "step_synthesize_bitfile": step_synthesize_bitfile,
     "step_deployment_package": step_deployment_package,
     "step_loop_rolling": step_loop_rolling,
