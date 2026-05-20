@@ -86,6 +86,8 @@ class GenerateInstrumentationIP(Transformation):
         ) as f:
             instrwrp_cpp = f.read()
         instrwrp_cpp = instrwrp_cpp.replace("@PENDING@", str(pending))
+        # Fixed max average window size for now:
+        instrwrp_cpp = instrwrp_cpp.replace("@AVG_N@", str(65536))
         instrwrp_cpp = instrwrp_cpp.replace("@ILEN@", str(ilen))
         instrwrp_cpp = instrwrp_cpp.replace("@OLEN@", str(olen))
         instrwrp_cpp = instrwrp_cpp.replace("@TI@", str(ti))
