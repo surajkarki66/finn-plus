@@ -153,6 +153,7 @@ def register_build_dataflow_step(
     """
 
     def _decorator(step_fn: BuildDataflowStep) -> BuildDataflowStep:
+        """Register the build step function in the lookup table."""
         key = step_name if step_name is not None else step_fn.__name__
         if key in build_dataflow_step_lookup:
             raise ValueError(f"Duplicate build step registration: {key}")
@@ -726,6 +727,7 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
     def apply_if_relevant(
         model: ModelWrapper, op_types: list[str], transform: Transformation, desc: str = ""
     ) -> ModelWrapper:
+        """Apply a transform only if relevant op types exist in the model."""
         # Check if any of the relevant op types exist in the model
         if any(len(model.get_nodes_by_op_type(op_type)) > 0 for op_type in op_types):
             if desc:
@@ -1170,6 +1172,7 @@ def step_insert_dwc(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapp
 
 
 def verify_mlo(model: ModelWrapper, cfg: DataflowBuildConfig, step: str):
+    """Verify a multi-layer offload model via RTL simulation."""
     finn_loop = model.get_nodes_by_op_type("FINNLoop")
     # TODO: allow for multiple FINNLoops
     mlo_prehook = mlo_prehook_func_factory(finn_loop[0])

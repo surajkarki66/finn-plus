@@ -1,3 +1,4 @@
+"""Module for gathering operator and parameter counts from nodes in a model."""
 # Copyright (c) 2020, Xilinx
 # All rights reserved.
 #
@@ -27,9 +28,12 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import qonnx.custom_op.registry as registry
+from qonnx.core.modelwrapper import ModelWrapper
+from finn.util.basic import getHWCustomOp
 
 
-def aggregate_dict_keys(res_dict):
+def aggregate_dict_keys(res_dict: dict[str, dict[str, int]]) -> dict[str, int]:
+    """Aggregate counts across all nodes in the provided dictionary."""
     total_dict = {}
     for layer in res_dict:
         layer_res_dict = res_dict[layer]
@@ -45,12 +49,12 @@ def aggregate_dict_keys(res_dict):
     return total_dict
 
 
-def op_and_param_counts(model):
+def op_and_param_counts(model: ModelWrapper) -> dict[str, dict[str, int]]:
     """Return per-node and aggregate op counts per inference."""
-    ret_dict = {}
+    ret_dict: dict[str, dict[str, int]] = {}
     for node in model.graph.node:
         if registry.is_custom_op(node.domain):
-            inst = registry.getCustomOp(node)
+            inst = getHWCustomOp(node)
             if hasattr(inst, "get_op_and_param_counts"):
                 node_op_and_param_counts = inst.get_op_and_param_counts()
                 ret_dict[node.name] = node_op_and_param_counts

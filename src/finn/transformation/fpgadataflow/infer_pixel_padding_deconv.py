@@ -1,3 +1,5 @@
+"""Infer pixel-padding lowering for ConvTranspose nodes."""
+
 import numpy as np
 from onnx import TensorProto, helper
 from qonnx.transformation.base import Transformation
@@ -16,6 +18,7 @@ class InferPixelPaddingDeconv(Transformation):
     """
 
     def apply(self, model):
+        """Apply ConvTranspose lowering into pixel padding and matmul."""
         graph = model.graph
         node_ind = 0
         graph_modified = False

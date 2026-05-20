@@ -26,6 +26,8 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Transformation for externalizing weight parameters via IODMA inputs."""
+
 
 from qonnx.transformation.base import Transformation
 from qonnx.util.basic import get_by_name
@@ -36,12 +38,15 @@ class ExternalizeParams(Transformation):
     marked as external using mem_mode="external"."""
 
     def __init__(self):
+        """Initialize the transformation."""
         super().__init__()
 
     def apply(self, model):
+        """Apply the transformation to externalize DMA-fed weights."""
         graph_modified = False
 
         def filter_fc_extw(x):
+            """Return True for IODMA nodes using external wrap burst mode."""
             if x.op_type == "IODMA_hls":
                 burst_mode = get_by_name(x.attribute, "burstMode")
                 if burst_mode is not None:

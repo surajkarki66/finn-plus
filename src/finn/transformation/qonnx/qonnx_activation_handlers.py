@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+"""Handlers for converting QONNX activations into FINN graph patterns."""
 import numpy as np
 from abc import ABC, abstractmethod
 from onnx import TensorProto, helper
@@ -291,12 +293,14 @@ class QuantReluHandler(QuantActBaseHandler):
 
     @classmethod
     def valid_predecessor_op_types(self):
+        """Return supported predecessor op types for quantized ReLU."""
         return [
             "Relu",
             "Selu",
         ]
 
     def _check_compatibility(self):
+        """Validate that the quantized activation is FINN-compatible."""
         if self._q_node.op_type == "Quant":
             q_inst = getCustomOp(self._q_node)
             narrow = q_inst.get_nodeattr("narrow")
@@ -320,6 +324,7 @@ class QuantReluHandler(QuantActBaseHandler):
             raise RuntimeError("Got an unexpected quantizer node type")
 
     def _calculate_act_bias(self):
+        """Calculate activation bias for the replacement pattern."""
         # No bias allowed for Relu activations, see: https://github.com/Xilinx/
         # brevitas/blob/a5bfd6dc5e030f0047ac1ee47932b60e8e873e17/src/brevitas/
         # export/onnx/finn/handler/act.py#L48
@@ -351,6 +356,7 @@ class QuantReluHandler(QuantActBaseHandler):
         return bias
 
     def _calculate_thresholds(self):
+        """Calculate MultiThreshold thresholds for the activation."""
         # Gather parameters
         if self._q_node.op_type == "Quant":
             bit_width = self._model.get_initializer(self._q_node.input[3])
@@ -444,6 +450,7 @@ class QuantReluHandler(QuantActBaseHandler):
         return thresholds
 
     def _calculate_act_scale(self):
+        """Calculate activation scale for the replacement pattern."""
         # Gather parameters
         quant_scale = self._model.get_initializer(self._q_node.input[1])
         # Calculate scale, see: https://github.com/Xilinx/brevitas/blob/
@@ -453,6 +460,7 @@ class QuantReluHandler(QuantActBaseHandler):
         return scale
 
     def _remove_activation_node(self, multi_threshold_node):
+        """Remove the activation node preceding the Quant node."""
         # Find the activation node
         act_node = self._model.find_direct_predecessors(self._q_node)
         if act_node is None:
@@ -482,6 +490,7 @@ class QuantIdentityHandler(QuantActBaseHandler):
 
     @classmethod
     def valid_predecessor_op_types(self):
+        """Return supported predecessor op types for quantized identity."""
         return [
             "BatchNormalization",
             "Sub",
@@ -493,6 +502,7 @@ class QuantIdentityHandler(QuantActBaseHandler):
         ]
 
     def _check_compatibility(self):
+        """Validate that the quantized identity is FINN-compatible."""
         # Gather parameters to check
         if self._q_node.op_type == "Quant":
             q_inst = getCustomOp(self._q_node)
@@ -515,6 +525,7 @@ class QuantIdentityHandler(QuantActBaseHandler):
             raise RuntimeError("Got an unexpected quantizer node type")
 
     def _calculate_act_bias(self):
+        """Calculate activation bias for identity activations."""
         # Gather parameters
         q_inst = getCustomOp(self._q_node)
         if self._q_node.op_type == "Quant":
@@ -538,6 +549,7 @@ class QuantIdentityHandler(QuantActBaseHandler):
         return bias
 
     def _calculate_thresholds(self):
+        """Calculate MultiThreshold thresholds for identity activations."""
         # Gather parameters
         quant_scale = self._model.get_initializer(self._q_node.input[1])
         q_inst = getCustomOp(self._q_node)
@@ -618,6 +630,7 @@ class QuantIdentityHandler(QuantActBaseHandler):
         return thresholds
 
     def _calculate_act_scale(self):
+        """Calculate activation scale for identity activations."""
         # Gather parameters
         if self._q_node.op_type == "Quant":
             bit_width = self._model.get_initializer(self._q_node.input[3])
@@ -638,5 +651,6 @@ class QuantIdentityHandler(QuantActBaseHandler):
         return scale
 
     def _remove_activation_node(self, multi_threshold_node):
+        """Remove the activation node if one exists (no-op)."""
         # The Quant identity activation has per definition no explicit activation node
         return

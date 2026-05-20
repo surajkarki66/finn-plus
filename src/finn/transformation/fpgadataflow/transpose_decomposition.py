@@ -6,6 +6,7 @@
 #
 # @author       Shane T. Fleming <shane.fleming@amd.com>
 ############################################################################
+"""Decompose Shuffle nodes into inner/outer shuffle operations."""
 import numpy as np
 from collections import deque
 from onnx import helper
@@ -302,21 +303,25 @@ class ShuffleDecomposition(Transformation):
     """
 
     def __init__(self, debug=False):
+        """Initialize the transformation with optional debug logging."""
         super().__init__()
         self.debug = debug
         self._name_counter = 0
 
     def _unique(self, base):
+        """Return a unique name using the provided base string."""
         self._name_counter += 1
         return f"{base}_{self._name_counter}"
 
     def get_perm(self, node) -> list[int]:
+        """Extract the permutation list from a Shuffle node."""
         for a in node.attribute:
             if a.name == "perm":
                 return list(a.ints)
         raise RuntimeError("Unable to determine the permutations from the Transpose node")
 
     def apply(self, model):
+        """Apply shuffle decomposition to eligible Shuffle nodes."""
         g = model.graph
         original_nodes = list(g.node)
 
@@ -427,9 +432,11 @@ class InferInnerOuterShuffles(Transformation):
     """
 
     def __init__(self):
+        """Initialize the transformation."""
         super().__init__()
 
     def apply(self, model):
+        """Replace Shuffle nodes with InnerShuffle or OuterShuffle nodes."""
         graph = model.graph
         graph_modified = False
         node_ind = 0

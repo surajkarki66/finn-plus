@@ -15,6 +15,7 @@ import numpy as np
 # provided via pybind11
 import xsi
 from collections.abc import Generator, Iterator
+from numpy._typing._array_like import NDArray
 from typing import Literal
 
 
@@ -484,7 +485,9 @@ class SimEngine:
     class AximmRoImage:
         """Serve a read-only AXI memory image from a byte buffer."""
 
-        def __init__(self, top: "SimEngine", mm_axi: "str", base: int, img: list[str]) -> None:
+        def __init__(
+            self, top: "SimEngine", mm_axi: "str", base: int, img: NDArray[np.uint8]
+        ) -> None:
             """Bind to AXI memory ports and stage the image data."""
             self.mm_axi = mm_axi
             self.rd_count = 0
@@ -572,7 +575,9 @@ class SimEngine:
 
             return ret
 
-    def aximm_ro_image(self, mm_axi: "str", base: int, img: list[str]) -> "SimEngine.AximmRoImage":
+    def aximm_ro_image(
+        self, mm_axi: "str", base: int, img: NDArray[np.uint8]
+    ) -> "SimEngine.AximmRoImage":
         """Register a read-only AXI memory image task."""
         ret = SimEngine.AximmRoImage(self, mm_axi, base, img)
         self.enlist(ret)

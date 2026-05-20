@@ -26,6 +26,8 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Insert IODMA nodes at graph boundaries and external weights."""
+
 import math
 import numpy as np
 from onnx import TensorProto
@@ -47,6 +49,7 @@ class InsertIODMA(Transformation):
         insert_output=True,
         insert_extmemw=True,
     ):
+        """Initialize the transformation with insertion options."""
         super().__init__()
         self.insert_input = insert_input
         self.insert_output = insert_output
@@ -92,6 +95,7 @@ class InsertIODMA(Transformation):
         return reshaped_w
 
     def apply(self, model):
+        """Insert IODMA nodes for inputs, outputs, and external weights."""
         modified = False
         # only makes sense for a pure fpgadataflow graph -- so we check!
         all_nodes = list(model.graph.node)

@@ -26,6 +26,8 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Elementwise binary HW custom ops for FINN dataflow."""
+
 import numpy as np
 
 # Helper for creating ONNX nodes
@@ -45,6 +47,8 @@ from finn.util.logging import log
 
 # Generic implementation for elementwise binary operations
 class ElementwiseBinaryOperation(HWCustomOp):
+    """Base class for elementwise binary dataflow operators."""
+
     # Specifies the elementwise operation to be implemented
     #   Format: (Identifier, Python, C++, RTL)
     _operation: tuple[str, np.ufunc, str, str] | None = None
@@ -52,25 +56,30 @@ class ElementwiseBinaryOperation(HWCustomOp):
     # Numpy operation available as property
     @property
     def npy_op(self) -> np.ufunc:
+        """Return the NumPy ufunc implementing the operation."""
         return self._operation[1]
 
     # C++ operation template available as property
     @property
     def cpp_op(self) -> str:
+        """Return the C++ operator template string."""
         return self._operation[2]
 
     # RTL operation template available as property
     @property
     def rtl_op(self) -> str:
+        """Return the RTL operator template string."""
         return self._operation[3]
 
     # Initializes the operator given an onnx graph node
     def __init__(self, onnx_node, **kwargs):
+        """Initialize the custom op wrapper."""
         # Just forward all arguments to the init method of the CustomOp base
         super().__init__(onnx_node, **kwargs)
 
     # Defines attributes which must be present on this node
     def get_nodeattr_types(self):
+        """Return the node attribute schema for this operator."""
         # Start from parent operator class attributes
         attrs = HWCustomOp.get_nodeattr_types(self)
         # Update attributes dictionary for new custom operator
@@ -120,60 +129,71 @@ class ElementwiseBinaryOperation(HWCustomOp):
     # Datatype attribute as property for convenience
     @property
     def lhs_dtype(self):
+        """Return the lhs data type as a QONNX ``DataType``."""
         # Note: Converts from string to QONNX data type
         return DataType[self.get_nodeattr("lhs_dtype")]
 
     # Datatype attribute as property for convenience
     @property
     def rhs_dtype(self):
+        """Return the rhs data type as a QONNX ``DataType``."""
         # Note: Converts from string to QONNX data type
         return DataType[self.get_nodeattr("rhs_dtype")]
 
     # Datatype attribute as property for convenience
     @property
     def out_dtype(self):
+        """Return the output data type as a QONNX ``DataType``."""
         # Note: Converts from string to QONNX data type
         return DataType[self.get_nodeattr("out_dtype")]
 
     # Shape attribute as property for convenience
     @property
     def lhs_shape(self) -> np.ndarray:
+        """Return the stored lhs shape."""
         return cast("np.ndarray", self.get_nodeattr("lhs_shape"))
 
     # Shape attribute as property for convenience
     @property
     def rhs_shape(self) -> np.ndarray:
+        """Return the stored rhs shape."""
         return cast("np.ndarray", self.get_nodeattr("rhs_shape"))
 
     # Shape attribute as property for convenience
     @property
     def out_shape(self) -> np.ndarray:
+        """Return the stored output shape."""
         return cast("np.ndarray", self.get_nodeattr("out_shape"))
 
     # Style attribute as property for convenience
     @property
     def lhs_style(self):
+        """Return the lhs input style attribute."""
         return self.get_nodeattr("lhs_style")
 
     # Style attribute as property for convenience
     @property
     def rhs_style(self):
+        """Return the rhs input style attribute."""
         return self.get_nodeattr("rhs_style")
 
     # Number of parallel processed elements as property for convenience
     @property
     def pe(self):
+        """Return the parallelism (PE) setting."""
         return self.get_nodeattr("PE")
 
     # Checks whether the last axis is broadcast
     @property
     def broadcast_last_axis(self):
+        """Return True if only one input broadcasts the last axis."""
         return (self.lhs_shape[-1] == 1) != (self.rhs_shape[-1] == 1)
 
     # Makes an operation compatible with the output shape for shape inference
     #   Note: Propagates shape forward, i.e., never asks for the shape of the
     #   output, even if it seems easier.
     def make_shape_compatible_op(self, model: ModelWrapper) -> NodeProto:
+        """Return an ONNX op used for shape inference with validated shapes."""
         # Get the node wrapped by this custom op
         node = self.onnx_node
         # There must be exactly two inputs to the binary operation
@@ -202,6 +222,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Infers the datatype of the node output
     def infer_node_datatype(self, model: ModelWrapper) -> None:
+        """Infer and update output datatype metadata."""
         # Get the node wrapped by this custom op
         node = self.onnx_node
         # Test for changing left-hand-side input datatype
@@ -224,6 +245,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
         model.set_tensor_datatype(node.output[0], self.out_dtype)
 
     def execute_node(self, context, graph) -> None:
+        """Execute the elementwise op in a numpy-based context."""
         # Get the node wrapped by this custom op
         node = self.onnx_node
         # Get the inputs out of the execution context
@@ -249,26 +271,31 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Gets the datatype of input at index ind
     def get_input_datatype(self, ind=0):
+        """Return input datatype for the requested index."""
         # Get input data type by index, order inputs from left to right
         return [self.lhs_dtype, self.rhs_dtype][ind]
 
     # Gets the datatype of the output at index ind
     def get_output_datatype(self, ind=0):
+        """Return output datatype for the requested index."""
         # There is only one output, the type is set as an attribute
         return self.out_dtype
 
     # Gets the shape of the input at index ind without folding
     def get_normal_input_shape(self, ind=0):
+        """Return the non-folded input shape for the requested index."""
         # Input shapes are stored as a node attributes
         return [self.lhs_shape, self.rhs_shape][ind]
 
     # Gets the shape of the output at index ind without folding
     def get_normal_output_shape(self, ind=0):
+        """Return the non-folded output shape."""
         # The output shape is stored as a node attribute
         return self.out_shape
 
     # Gets the shape of the input at index ind with folding
     def get_folded_input_shape(self, ind=0):
+        """Return the folded input shape for the requested index."""
         # Get the normal shape before applying folding
         *num_inputs, num_elems = self.get_normal_input_shape(ind=ind)
         # Folding only applies if the folded axis is not broadcast
@@ -283,6 +310,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Gets the shape of the output at index ind with folding
     def get_folded_output_shape(self, ind=0):
+        """Return the folded output shape."""
         # Get the normal shape before applying folding
         *num_inputs, num_elems = self.get_normal_output_shape(ind=ind)
         # Valid folding requires the PE to divide the number of elements
@@ -297,6 +325,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Widths of the input data stream of the input at index ind
     def get_instream_width(self, ind=0):
+        """Return the input stream width in bits."""
         mem_mode = self.get_nodeattr("mem_mode")
         mlo_enabled = self.get_nodeattr("mlo_max_iter")
         lhs_const = self.get_nodeattr("lhs_style") == "const"
@@ -320,6 +349,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Widths of the output data stream of the output at index ind
     def get_outstream_width(self, ind=0):
+        """Return the output stream width in bits."""
         # Get the number of bits used to represent the output
         o_bits = self.get_output_datatype(ind).bitwidth()
         # Parallelism is the number of elements in the last dimension of the
@@ -331,6 +361,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
     # Minimizes the width of the accumulator data type, 'accumulator width' here
     # due to convention, it is actually the output data type
     def minimize_accumulator_width(self, model: ModelWrapper):
+        """Minimize output bit-width when possible."""
         # If any of the inputs is not an integer, the bit-width cannot be
         # minimized
         if not all([self.lhs_dtype.is_integer(), self.rhs_dtype.is_integer()]):
@@ -354,6 +385,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
 
     # Derives the optimal width of the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output data type for this operation."""
         # Depends on the actual operation performed and must be specialized by
         # the concrete implementations
         raise NotImplementedError(
@@ -363,6 +395,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
     # Minimizes the width of the weight data type, 'weight' here due to
     # convention, it actually applies to any constant initializer input
     def minimize_weight_bit_width(self, model: ModelWrapper):
+        """Minimize constant input bit-widths when possible."""
         # Check for an initializer providing the left hand side input
         lhs = model.get_initializer(self.onnx_node.input[0])
         # If the left hand side input is provided as initializer, minimize the
@@ -451,6 +484,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
     # Derives the expected cycles for the elementwise binary operation given the
     # folding configuration
     def get_exp_cycles(self):
+        """Return expected cycles based on the folded output shape."""
         # Number of iterations required to process the whole folded input stream
         #   Note: This is all but the PE (last, parallelized) dimension
         return np.prod(self.get_folded_output_shape()[:-1])
@@ -459,12 +493,15 @@ class ElementwiseBinaryOperation(HWCustomOp):
 # Derive a specialization to implement elementwise addition of two inputs
 @register_custom_op
 class ElementwiseAdd(ElementwiseBinaryOperation):
+    """Elementwise addition custom op."""
+
     # Specialize to implement the addition operation of left hand side and right
     # hand side input
     _operation = "Add", np.add, "({0} + {1})", None
 
     # Derives the output data type according to UG1399
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for addition."""
         # Get the width of the data types of the inputs and the larger of the
         # two widths
         lhs_width = self.lhs_dtype.bitwidth()
@@ -499,12 +536,15 @@ class ElementwiseAdd(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise subtraction of two inputs
 @register_custom_op
 class ElementwiseSub(ElementwiseBinaryOperation):
+    """Elementwise subtraction custom op."""
+
     # Specialize to implement the subtraction operation of left hand side and
     # right hand side input
     _operation = "Sub", np.subtract, "({0} - {1})", None
 
     # Derives the output data type according to UG1399
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for subtraction."""
         # Get the width of the data types of the inputs and the larger of the
         # two widths
         lhs_width = self.lhs_dtype.bitwidth()
@@ -535,25 +575,31 @@ class ElementwiseSub(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise absolute difference of two inputs
 @register_custom_op
 class ElementwiseAbsDiff(ElementwiseBinaryOperation):
+    """Elementwise absolute difference custom op."""
+
     # Specialize to implement the absolute difference operation of left hand side
     # and right hand side input
     @property
     def npy_op(self):
+        """Return the NumPy abs-diff implementation."""
         # NumPy doesn't have a built-in absdiff, so we use a lambda
         return lambda a, b: np.abs(a - b)
 
     # C++ operation template available as property
     @property
     def cpp_op(self) -> str:
+        """Return the C++ operator template string."""
         return "({0} > {1} ? {0} - {1} : {1} - {0})"
 
     # RTL operation template available as property
     @property
     def rtl_op(self) -> str:
+        """Return the RTL operator template string."""
         return None
 
     # Derives the output data type - AbsDiff result is always unsigned for integers
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for absolute difference."""
         # If either input is floating-point, output is the same float type
         if self.lhs_dtype in [DataType["FLOAT32"], DataType["FLOAT16"]]:
             return self.lhs_dtype
@@ -573,12 +619,15 @@ class ElementwiseAbsDiff(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise multiplication of two inputs
 @register_custom_op
 class ElementwiseMul(ElementwiseBinaryOperation):
+    """Elementwise multiplication custom op."""
+
     # Specialize to implement the multiplication operation of left hand side and
     # right hand side input
     _operation = "Mul", np.multiply, "({0} * {1})", None
 
     # Derives the output data type according to UG1399
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for multiplication."""
         # Get the width of the data types of the inputs
         lhs_width = self.lhs_dtype.bitwidth()
         rhs_width = self.rhs_dtype.bitwidth()
@@ -594,6 +643,8 @@ class ElementwiseMul(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise division of two inputs
 @register_custom_op
 class ElementwiseDiv(ElementwiseBinaryOperation):
+    """Elementwise division custom op."""
+
     # TODO: Not tested due to divide by zero from randomly generated inputs...
     # Specialize to implement the division operation of left hand side and
     # right hand side input
@@ -601,6 +652,7 @@ class ElementwiseDiv(ElementwiseBinaryOperation):
 
     # Derives the output data type according to UG1399
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for division."""
         # Get the width of the data types of the inputs
         lhs_width = self.lhs_dtype.bitwidth()
         # Check whether the addition operation is a signed addition
@@ -620,12 +672,15 @@ class ElementwiseDiv(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise logical and of two inputs
 @register_custom_op
 class ElementwiseAnd(ElementwiseBinaryOperation):
+    """Elementwise logical and custom op."""
+
     # Specialize to implement the logical and operation of left hand side and
     # right hand side input
     _operation = "And", np.logical_and, "({0} && {1})", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical and."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -634,12 +689,15 @@ class ElementwiseAnd(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise logical or of two inputs
 @register_custom_op
 class ElementwiseOr(ElementwiseBinaryOperation):
+    """Elementwise logical or custom op."""
+
     # Specialize to implement the logical or operation of left hand side and
     # right hand side input
     _operation = "Or", np.logical_or, "({0} || {1})", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical or."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -648,12 +706,15 @@ class ElementwiseOr(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise logical xor of two inputs
 @register_custom_op
 class ElementwiseXor(ElementwiseBinaryOperation):
+    """Elementwise logical xor custom op."""
+
     # Specialize to implement the logical xor operation of left hand side and
     # right hand side input
     _operation = "Xor", np.logical_xor, "(bool({0}) != bool({1}))", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical xor."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -662,12 +723,15 @@ class ElementwiseXor(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise equality of two inputs
 @register_custom_op
 class ElementwiseEqual(ElementwiseBinaryOperation):
+    """Elementwise logical equal custom op."""
+
     # Specialize to implement the logical equal operation of left hand side and
     # right hand side input
     _operation = "Equal", np.equal, "({0} == {1})", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical equal."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -676,12 +740,15 @@ class ElementwiseEqual(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise less of two inputs
 @register_custom_op
 class ElementwiseLess(ElementwiseBinaryOperation):
+    """Elementwise logical less custom op."""
+
     # Specialize to implement the logical less operation of left hand side and
     # right hand side input
     _operation = "Less", np.less, "({0} < {1})", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical less."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -690,12 +757,15 @@ class ElementwiseLess(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise less or equal of two inputs
 @register_custom_op
 class ElementwiseLessOrEqual(ElementwiseBinaryOperation):
+    """Elementwise logical less-or-equal custom op."""
+
     # Specialize to implement the logical less or equal operation of left hand
     # side and right hand side input
     _operation = "LessOrEqual", np.less_equal, "({0} <= {1})", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical less-or-equal."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -704,12 +774,15 @@ class ElementwiseLessOrEqual(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise greater of two inputs
 @register_custom_op
 class ElementwiseGreater(ElementwiseBinaryOperation):
+    """Elementwise logical greater custom op."""
+
     # Specialize to implement the logical greater operation of left hand side
     # and right hand side input
     _operation = "Greater", np.greater, "({0} > {1})", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical greater."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -719,12 +792,15 @@ class ElementwiseGreater(ElementwiseBinaryOperation):
 # inputs
 @register_custom_op
 class ElementwiseGreaterOrEqual(ElementwiseBinaryOperation):
+    """Elementwise logical greater-or-equal custom op."""
+
     # Specialize to implement the logical greater or equal operation of left
     # hand side and right hand side input
     _operation = "GreaterOrEqual", np.greater_equal, "({0} >= {1})", None
 
     # Derives the output data type
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for logical greater-or-equal."""
         # Treat the boolean output of a logical operation as unsigned integer of
         # width 1, i.e., a single bit True/False
         return DataType["BINARY"]
@@ -733,12 +809,15 @@ class ElementwiseGreaterOrEqual(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise bitwise and of two inputs
 @register_custom_op
 class ElementwiseBitwiseAnd(ElementwiseBinaryOperation):
+    """Elementwise bitwise and custom op."""
+
     # Specialize to implement the bitwise and operation of left hand side and
     # right hand side input
     _operation = "BitwiseAnd", np.bitwise_and, "({0} & {1})", None
 
     # Derives the output data type according to UG1399
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for bitwise and."""
         # Get the width of the data types of the inputs
         lhs_width = self.lhs_dtype.bitwidth()
         rhs_width = self.rhs_dtype.bitwidth()
@@ -755,12 +834,15 @@ class ElementwiseBitwiseAnd(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise bitwise or of two inputs
 @register_custom_op
 class ElementwiseBitwiseOr(ElementwiseBinaryOperation):
+    """Elementwise bitwise or custom op."""
+
     # Specialize to implement the bitwise or operation of left hand side and
     # right hand side input
     _operation = "BitwiseOr", np.bitwise_or, "({0} | {1})", None
 
     # Derives the output data type according to UG1399
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for bitwise or."""
         # Get the width of the data types of the inputs
         lhs_width = self.lhs_dtype.bitwidth()
         rhs_width = self.rhs_dtype.bitwidth()
@@ -777,12 +859,15 @@ class ElementwiseBitwiseOr(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise bitwise xor of two inputs
 @register_custom_op
 class ElementwiseBitwiseXor(ElementwiseBinaryOperation):
+    """Elementwise bitwise xor custom op."""
+
     # Specialize to implement the bitwise xor operation of left hand side and
     # right hand side input
     _operation = "BitwiseXor", np.bitwise_xor, "({0} ^ {1})", None
 
     # Derives the output data type according to UG1399
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for bitwise xor."""
         # Get the width of the data types of the inputs
         lhs_width = self.lhs_dtype.bitwidth()
         rhs_width = self.rhs_dtype.bitwidth()
@@ -799,8 +884,11 @@ class ElementwiseBitwiseXor(ElementwiseBinaryOperation):
 # ElementwiseBitShift - Requires extra attribute selecting the direction
 @register_custom_op
 class ElementwiseBitShift(ElementwiseBinaryOperation):
+    """Elementwise bit shift custom op."""
+
     # Defines attributes which must be present on this node
     def get_nodeattr_types(self):
+        """Return the attribute schema including shift direction."""
         # Start from parent operator class attributes
         attrs = ElementwiseBinaryOperation.get_nodeattr_types(self)
         # Update attributes dictionary for new custom operator
@@ -815,20 +903,24 @@ class ElementwiseBitShift(ElementwiseBinaryOperation):
 
     @property
     def npy_op(self):
+        """Return the NumPy shift operation for the configured direction."""
         return {"LEFT": np.left_shift, "RIGHT": np.right_shift}[self.get_nodeattr("direction")]
 
     # C++ operation template available as property
     @property
     def cpp_op(self) -> str:
+        """Return the C++ operator template string."""
         return {"LEFT": "({0} << {1})", "RIGHT": "({0} >> {1})"}[self.get_nodeattr("direction")]
 
     # RTL operation template available as property
     @property
     def rtl_op(self) -> str:
+        """Return the RTL operator template string."""
         return None
 
     # Derives the output data type just as annotated...
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype from the configured attribute."""
         # The attributes decide the output datatype
         return DataType[self.get_nodeattr("out_dtype")]
 
@@ -846,23 +938,29 @@ class ElementwiseBitShift(ElementwiseBinaryOperation):
 # Derive a specialization to implement elementwise maximum of two inputs
 @register_custom_op
 class ElementwiseMax(ElementwiseBinaryOperation):
+    """Elementwise maximum custom op."""
+
     @property
     def npy_op(self) -> np.ufunc:
+        """Return the NumPy maximum implementation."""
         return np.maximum
 
     # C++ operation template available as property
     @property
     def cpp_op(self) -> str:
+        """Return the C++ operator template string."""
         odt_hls_name = self.out_dtype.get_hls_datatype_str()
         return "({0} >= {1} ? (%s){0} : (%s){1})" % (odt_hls_name, odt_hls_name)
 
     # RTL operation template available as property
     @property
     def rtl_op(self) -> str:
+        """Return the RTL operator template string."""
         return None
 
     # Override minimize_weight_bit_width to prevent type incompatibility
     def minimize_weight_bit_width(self, model: ModelWrapper):
+        """Skip minimization when float comparisons would be incompatible."""
         # For comparison operations like max/min, both operands must have
         # compatible types. Don't minimize if one side is float and the
         # minimized constant would become integer.
@@ -881,6 +979,7 @@ class ElementwiseMax(ElementwiseBinaryOperation):
         super().minimize_weight_bit_width(model)
 
     def _derive_out_dtype(self, model: ModelWrapper):
+        """Derive the output datatype for the max operation."""
         if self.lhs_dtype.get_canonical_name().startswith(
             "FLOAT"
         ) or self.rhs_dtype.get_canonical_name().startswith("FLOAT"):

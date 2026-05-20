@@ -26,6 +26,8 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+"""Floorplanning transformation for dataflow graphs."""
+
 import json
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
@@ -52,10 +54,12 @@ class Floorplan(Transformation):
     """
 
     def __init__(self, floorplan=None):
+        """Initialize the transform with an optional floorplan file."""
         super().__init__()
         self.user_floorplan = floorplan
 
     def apply(self, model):
+        """Apply floorplanning and partition assignment to the model."""
         # read in a user-specified floorplan or generate a default one
         if self.user_floorplan is None:
             self.user_floorplan = model.analysis(floorplan_params)

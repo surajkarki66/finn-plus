@@ -1,3 +1,4 @@
+"""Module for gathering floorplanning parameters from nodes in a model."""
 # Copyright (c) 2020, Xilinx
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 # All rights reserved.

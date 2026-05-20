@@ -11,6 +11,8 @@
 ###################################################################################
 # ruff: noqa: SLF001
 
+"""Loop extraction and rolling utilities for fpgadataflow graphs."""
+
 import copy
 import numpy as np
 import onnx
@@ -55,6 +57,7 @@ def same_values(inputs):
 
 
 def build_loop_replace_pattern(graph, LoopBody):
+    """Build a replacement pattern graph for a repeated loop body."""
     nodes = osh.find_nodes_of_optype(graph, LoopBody.function.name)
     iterations = len(nodes)
 
@@ -211,7 +214,10 @@ def build_loop_replace_pattern(graph, LoopBody):
 
 
 class LoopExtraction(Transformation):
+    """Extract repeated subgraphs into a loop body template."""
+
     def __init__(self, hierarchy_list: list[list[str]]):
+        """Initialize with a list of module hierarchies to extract."""
         super().__init__()
 
         assert isinstance(hierarchy_list, list), "Hierarchy list must be a list of strings"
@@ -224,6 +230,7 @@ class LoopExtraction(Transformation):
         self.loop_body_template = None
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+        """Apply loop extraction and replace nodes with function calls."""
         # Apply the loop extraction transformation
         # Extract the Loop Body from ONNX metadata
         model_ir = onnxscript.ir.serde.deserialize_model(model.model)
@@ -296,6 +303,7 @@ class LoopExtraction(Transformation):
 
 
 def add_finn_datatype_if_needed(tensor):
+    """Ensure the tensor metadata includes a FINN datatype."""
     if not tensor_has_finn_datatype(tensor):
         if "quant_parameter_tensor_names" not in tensor.meta:
             tensor.meta["quant_parameter_tensor_names"] = {}
@@ -305,10 +313,12 @@ def add_finn_datatype_if_needed(tensor):
 
 
 def validate_loop_type(loop_node: ir.Node):
+    """Validate that the node is a FINNLoop."""
     assert loop_node.op_type == "FINNLoop", "Node is not a FINNLoop"
 
 
 def validate_loop_attributes(loop_node: ir.Node):
+    """Validate required attributes on the FINNLoop node."""
     required_attrs = ["body", "backend", "iteration", "inputDataType", "outputDataType"]
     for attr in required_attrs:
         assert attr in loop_node.attributes, f"FINNLoop node missing required attribute: {attr}"
@@ -325,6 +335,7 @@ def validate_loop_attributes(loop_node: ir.Node):
 
 
 def tensor_has_finn_datatype(tensor):
+    """Return True if the tensor metadata includes a FINN datatype."""
     return (
         "quant_parameter_tensor_names" in tensor.meta
         and "finn_datatype" in tensor.meta["quant_parameter_tensor_names"]
@@ -332,18 +343,22 @@ def tensor_has_finn_datatype(tensor):
 
 
 def finn_datatypes_match(datatype_a, datatype_b):
+    """Return True when two FINN datatype strings match."""
     return datatype_a == datatype_b
 
 
 def tensor_types_match(value_a, value_b):
+    """Return True when two IR values have the same type."""
     return value_a.type == value_b.type
 
 
 def tensor_shapes_match(value_a, value_b):
+    """Return True when two IR values have the same shape."""
     return value_a.shape == value_b.shape
 
 
 def validate_loop_io_tensor_pair(tensor_a, tensor_b):
+    """Validate type, shape, and FINN datatype alignment for a tensor pair."""
     assert tensor_types_match(
         tensor_a, tensor_b
     ), f"FINNLoop body activation input/output type mismatch {tensor_a.type} != {tensor_b.type}"
@@ -363,6 +378,7 @@ def validate_loop_io_tensor_pair(tensor_a, tensor_b):
 
 
 def validate_loop_io_tensors(loop_node: ir.Node):
+    """Validate FINNLoop input/output tensor pairs."""
     # Validate that loop body activation input and output types and shapes match
     body_graph = loop_node.attributes["body"].value
     for i in range(len(body_graph.outputs)):
@@ -372,12 +388,15 @@ def validate_loop_io_tensors(loop_node: ir.Node):
 
 
 def validate_loop_node(loop_node: ir.Node):
+    """Validate FINNLoop node structure and metadata."""
     validate_loop_type(loop_node)
     validate_loop_attributes(loop_node)
     validate_loop_io_tensors(loop_node)
 
 
 class LoopBodyInputType(Enum):
+    """Enumeration of loop body input kinds."""
+
     UNDEFINED = 0
     ACTIVATION = 1
     CONSTANT = 2
@@ -386,11 +405,15 @@ class LoopBodyInputType(Enum):
     CONDITION = 5
 
     def __str__(self):
+        """Return the enum name as a string."""
         return self.name
 
 
 class LoopBodyTemplate:
+    """Encapsulate loop body graph patterns and function templates."""
+
     def __init__(self, filename):
+        """Load a loop body template from disk."""
         self.load(filename)
         self._ir_graph.sort()
         self.pattern = osh.direct_convert_ir_graph_to_pattern(self._ir_graph)
@@ -399,11 +422,13 @@ class LoopBodyTemplate:
         self.signature = [LoopBodyInputType.UNDEFINED] * len(self._ir_graph.inputs)
 
     def _build_ir_function(self):
+        """Build an IR function from the loop body graph."""
         return ir.Function(
             domain="loop", name="fn_" + self._ir_graph.name, graph=self._ir_graph, attributes=[]
         )
 
     def _build_function_replace_pattern(self):
+        """Build a replacement pattern that calls the loop body function."""
         inputs = [osh.vdisconnect(copy.copy(x)) for x in self._ir_graph.inputs]
         outputs = [osh.vdisconnect(copy.copy(x)) for x in self._ir_graph.outputs]
 
@@ -420,6 +445,7 @@ class LoopBodyTemplate:
         return osh.ReplacementPatternGraph(g)
 
     def build_function_match_pattern(self, graph, use_iteration_ext=True):
+        """Build a pattern that matches inlined loop body instances."""
         graph.sort()
         nodes = osh.find_nodes_of_optype(graph, self.function.name)
         if use_iteration_ext:
@@ -436,23 +462,28 @@ class LoopBodyTemplate:
         return (pattern, nodes)
 
     def load(self, filename):
+        """Load the loop body template from an ONNX file."""
         self._model_proto = onnx.load(filename)
         self._ir_model = ir.serde.deserialize_model(self._model_proto)
         self._ir_graph = self._ir_model.graph
 
     def update(self):
+        """Refresh the serialized model proto from the IR graph."""
         self._ir_model = ir.Model(self._ir_graph, ir_version=self._model_proto.ir_version)
         self._model_proto = ir.serde.serialize_model(self._ir_model)
 
     def save(self, filename):
+        """Save the loop body template to an ONNX file."""
         self.update()
         onnx.save(self._model_proto, filename)
 
     def set_signature_index(self, index, stype):
+        """Set the input signature type at the given index."""
         self.signature[index] = stype
 
     @property
     def output_signature(self):
+        """Return the output signature (without iterator/condition inputs)."""
         # The output signature is the same as the input signature but without the iteration input
         return self.signature[1:]
 
@@ -461,10 +492,12 @@ class LoopRolling(Transformation):
     """Boilerplate Transformation for loop rolling in fpgadataflow."""
 
     def __init__(self, loop_body_template):
+        """Initialize the transformation with a loop body template."""
         super().__init__()
         self.loop_body_template = loop_body_template
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+        """Apply loop rolling to repeated function calls."""
         model_ir = onnxscript.ir.serde.deserialize_model(model.model)
         graph = model_ir.graph
         LoopBody = self.loop_body_template
