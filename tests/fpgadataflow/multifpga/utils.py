@@ -4,6 +4,7 @@ import pytest
 import brevitas.nn as qnn
 import configparser
 import hashlib
+import logging
 import onnx.helper as oh
 import random
 import torch
@@ -12,10 +13,11 @@ from brevitas_examples.bnn_pynq.models.resnet import quant_resnet18
 from copy import deepcopy
 from networkx.classes.digraph import DiGraph
 from pathlib import Path
+from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.util.cleanup import cleanup as qonnx_cleanup
 from testing_util.test import get_test_model
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from finn.builder.build_dataflow import resolve_build_steps
 from finn.builder.build_dataflow_config import DataflowBuildConfig
@@ -95,7 +97,7 @@ mn_pre_multifpga_steps = [
     "step_tidy_up",
     "finn.builder.custom_step_library.mobilenet.step_mobilenet_streamline",  # Custom step
     "finn.builder.custom_step_library.mobilenet.step_mobilenet_lower_convs",  # Custom step
-    "finn.builder.custom_step_library.mobilenet.step_mobilenet_convert_to_hw_layers_separate_th",
+    "finn.builder.custom_step_library.mobilenet.step_mobilenet_convert_to_hw_layers",
     "step_create_dataflow_partition",
     "step_specialize_layers",
     "step_apply_folding_config",
@@ -114,6 +116,9 @@ def generate_mobilenet(
     """Provide a mobilenet modelwrapper."""
     fc = get_test_model("mobilenet", wbits, abits, pretrained)
     export_qonnx(fc, torch.randn((1, 3, 224, 224)), str(model_onnx_path))
+    model = ModelWrapper(str(model_onnx_path))
+    model.set_tensor_datatype(model.get_first_global_in(), DataType["UINT8"])
+    model.save(str(model_onnx_path))
     qonnx_cleanup(str(model_onnx_path), out_file=str(model_onnx_path))
     return ModelWrapper(str(model_onnx_path))
 
@@ -216,15 +221,18 @@ def get_model(
     ------
         `FINNError`: If the last step is unknown, no valid model(type) is passed, etc.
     """
+    log = logging.getLogger("Model Request")
 
-    def get_test_identifier(steps: list[str | Any]) -> str:
+    def get_test_identifier(
+        steps: list[str | Callable[[ModelWrapper, DataflowBuildConfig], ModelWrapper]]
+    ) -> str:
         return (
             f"{identifier}_{model}_{wbits}_{abits}_{pretrained}_"
             f"{skip_fifo_sizing}_{cfg.target_fps}_{cfg.mvau_wwidth_max}_"
             f"{cfg.folding_two_pass_relaxation}_"
             f"{cfg.shell_flow_type.name if cfg.shell_flow_type is not None else 'SHELL'}_"
-            f"{cfg.board}_{cfg._resolve_fpga_part()}_{cfg.hls_clk_period_ns}_"
-            f"{'_'.join([str(step) for step in steps])}"
+            f"{cfg.board}_{cfg._resolve_fpga_part()}_{cfg.hls_clk_period_ns}_"  # noqa
+            f"{'_'.join([step if type(step) is str else step.__name__ for step in steps])}"
         )
 
     def get_cache_key(identifier: str) -> str:
@@ -278,23 +286,40 @@ def get_model(
             until_step = str(cfg.steps[cfg.steps.index(until_step) - 1])
         cfg.steps.remove("step_set_fifo_depths")
 
+    # Had to manually cast here because of the type checker
+    cached_steps = cast(
+        "list[str | Callable[[ModelWrapper, DataflowBuildConfig], ModelWrapper]]",
+        cfg.steps[: cfg.steps.index(until_step) + 1],
+    )
+    leftover_steps = []
+
     # Test the cache
     # Remove steps one by one to find the latest model
-    cached_steps = cfg.steps[: cfg.steps.index(until_step) + 1]
-    leftover_steps = []
     if pytestconfig is not None:
         while True:
+            log.debug(
+                f"TESTING MODEL CACHE: Trying cached {len(cached_steps)} "
+                f"/ leftover {len(leftover_steps)} "
+                f"({get_cache_key(get_test_identifier(cached_steps))[:5]}...)"
+            )
             value = pytestconfig.cache.get(
                 get_cache_key(get_test_identifier(cached_steps)), default=None
             )
             if value is not None:
                 modelpath = Path(value)
                 if modelpath.exists():
+                    log.debug(
+                        "FOUND CACHED MODEL. Most recent "
+                        + f"step in this model was: {cached_steps[-1]} ("
+                        + get_cache_key(get_test_identifier(cached_steps))[:5]
+                        + "...)"
+                    )
                     modelwrapper = ModelWrapper(str(modelpath.absolute()))
                     break
 
             # If we have checked all steps, break
             if len(cached_steps) == 0:
+                log.debug("NO CACHED MODEL FOUND")
                 break
 
             # Add the latest step to the list yet to do
@@ -321,6 +346,7 @@ def get_model(
     # is then "identifier_A_B_C_D_E"
     for i, step in enumerate(steps):
         # Execute the new step
+        log.debug("RUNNING: " + str(step.__name__))
         modelwrapper = step(modelwrapper, cfg)
 
         # From this generate the newest identifier
@@ -331,6 +357,11 @@ def get_model(
         fn = cache_dir / ("".join([random.choice("ABCDEF0123456789") for _ in range(30)]) + ".onnx")
         modelwrapper.save(str(fn))
         if pytestconfig is not None:
+            log.debug(
+                f"STORING model after step: {done[-1]} ("
+                + get_cache_key(test_identifier)[:5]
+                + "...)"
+            )
             pytestconfig.cache.set(get_cache_key(test_identifier), str(fn))
 
     # Restore steps

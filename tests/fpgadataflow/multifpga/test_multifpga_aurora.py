@@ -283,7 +283,7 @@ class TestAuroraFlowPartitioning:
         """
         typename, wbits, abits, pretrained = model_type
         test_identifier = (
-            f"test_partitioning_{model_type}_{wbits}_{abits}_{pretrained}_"
+            f"test_partitioning_{typename}_{wbits}_{abits}_{pretrained}_"
             f"{devices}_{partition_strategy.name}_{topology.name}_{board}_{max_util}_{ideal_util}"
         )
         flow_type = self.get_shell_flow_type(board)
@@ -310,7 +310,7 @@ class TestAuroraFlowPartitioning:
         )
 
         # Get the model
-        model = get_model(
+        model, cfg = get_model(
             typename,
             wbits,
             abits,
@@ -326,10 +326,11 @@ class TestAuroraFlowPartitioning:
         assert cfg.partitioning_configuration is not None
         part = PartitionForMultiFPGA(
             cfg.partitioning_configuration,
-            cfg._resolve_fpga_part(),
+            cfg._resolve_fpga_part(),  # noqa
             board,
             Path(make_build_dir("")),
-        )  # noqa
+        )
+        model = model.transform(part)
 
         # Check that partitioning was successful
         assert part.partitioner is not None
