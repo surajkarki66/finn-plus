@@ -146,7 +146,9 @@ class VitisBuild(Transformation):
             log.info("Modifying linking configuration for Multi-FPGA...")
             match self.cfg.partitioning_configuration.communication_kernel:
                 case MFCommunicationKernel.AURORA:
-                    model = model.transform(AddAuroraToLinkConfig(board=self.cfg.board))
+                    model = model.transform(
+                        AddAuroraToLinkConfig(platform_name=self.cfg._resolve_vitis_platform())
+                    )
                 case _:
                     raise FINNInternalError(
                         f"Vitis linking confíguration modifications for kernel type "

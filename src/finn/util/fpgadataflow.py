@@ -31,6 +31,7 @@ from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp, is_custom_op
 from qonnx.util.basic import get_by_name
+from typing import cast
 
 from finn.util.exception import FINNInternalError, FINNUserError
 
@@ -95,6 +96,19 @@ def get_submodel(node: NodeProto) -> tuple[ModelWrapper, Path]:
             f"Cannot open model of SDP node {node.name}: " f"No file found at path: {p}"
         )
     return ModelWrapper(str(p)), p
+
+
+def get_device_id(node: NodeProto) -> int | None:
+    """Return the node's device ID. If no nodeattribute exists returns None."""
+    try:
+        return cast("int", (getCustomOp(node).get_nodeattr("device_id")))
+    except ValueError:
+        return None
+
+
+def set_device_id(node: NodeProto, value: int) -> None:
+    """Set the device_id nodeattribute of the given node."""
+    getCustomOp(node).set_nodeattr("device_id", value)
 
 
 def get_input_nodes(model: ModelWrapper) -> list[tuple[NodeProto, int]]:

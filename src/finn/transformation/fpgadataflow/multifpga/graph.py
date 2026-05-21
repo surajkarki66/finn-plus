@@ -4,14 +4,15 @@ import itertools
 import networkx as nx
 from qonnx.core.modelwrapper import ModelWrapper
 
-from finn.util.deprecated import deprecated
 from finn.util.exception import FINNMultiFPGAError
 
 
-@deprecated
 def onnx_to_networkx(model: ModelWrapper) -> nx.DiGraph:
     """Naively build a directed networkx graph from an ONNX graph.
-    DEPRECATED: Will be replaced by a matching function from onnx-passes soon.
+
+    This differs from onnx-passes.utils.networkx.onnx_to_nx in that this function does _not_
+    consider graph inputs and outputs as nodes, since in this context we only care about
+    HW-synthesizable nodes which can have a designated device ID.
     """
     nxg = nx.DiGraph()
     for node in model.graph.node:

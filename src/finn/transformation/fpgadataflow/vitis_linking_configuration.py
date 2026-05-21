@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING, cast
 
 from finn.builder.build_dataflow_config import FpgaMemoryType, VitisOptStrategy
 from finn.templates import get_jinja_environment
-from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError, FINNVitisLinkConfigError
 from finn.util.fpgadataflow import (
     check_all_sdp_nodes,
     check_graph_is_line,
+    get_device_id,
     get_submodel,
     get_vitis_xo,
 )

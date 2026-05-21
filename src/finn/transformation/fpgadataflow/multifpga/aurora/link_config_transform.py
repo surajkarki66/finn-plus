@@ -6,9 +6,9 @@ from typing import cast
 
 from finn.transformation.fpgadataflow.multifpga.aurora.metadata import AuroraNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.metadata import DataDirection
-from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.transformation.fpgadataflow.vitis_linking_configuration import VitisLinkConfiguration
 from finn.util.exception import FINNInternalError, FINNUserError
+from finn.util.fpgadataflow import get_device_id
 from finn.util.logging import log
 from finn.util.platforms import Platform, platforms
 from finn.util.settings import get_settings
