@@ -51,7 +51,7 @@ from finn.util.logging import log
 from finn.util.settings import get_settings
 
 
-def update_bitfile_path_after_copy(bitfile_path: str, json_path: str) -> None:
+def update_bitfile_path_after_copy(bitfile_path: Path, json_path: Path) -> None:
     """
     Update the xclbinPath in the JSON configuration to point to the new bitfile location.
 

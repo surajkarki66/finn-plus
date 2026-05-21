@@ -1704,26 +1704,27 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
 def step_deployment_package(model: ModelWrapper, cfg: DataflowBuildConfig):
     """Create a deployment package including the driver and bitfile."""
 
-    if DataflowOutputType.DEPLOYMENT_PACKAGE in cfg.generate_outputs:
-        deploy_dir = cfg.output_dir + "/deploy"
-        bitfile_dir = cfg.output_dir + "/bitfile"
-        driver_dir = cfg.output_dir + "/driver"
-        os.makedirs(deploy_dir, exist_ok=True)
-        shutil.copytree(bitfile_dir, deploy_dir + "/bitfile", dirs_exist_ok=True)
-        shutil.copytree(
-            driver_dir, deploy_dir + "/driver", dirs_exist_ok=True, copy_function=shutil.copyfile
-        )
-        if DataflowOutputType.CPP_DRIVER in cfg.generate_outputs:
-            update_bitfile_path_after_copy(
-                os.path.join(deploy_dir, "bitfile", "finn-accel.xclbin"),
-                os.path.join(deploy_dir, "driver", "acceleratorconfig.json"),
-            )
-
-    else:
-        log.info(
+    if DataflowOutputType.DEPLOYMENT_PACKAGE not in cfg.generate_outputs:
+        log.warning(
             """DataflowOutputType.DEPLOYMENT_PACKAGE not in requested outputs,
             skipping step_deployment_package."""
         )
+        return model
+
+    # Copy bitstream and driver into the deployment directory
+    deploy_dir = Path(cfg.output_dir) / "deploy"
+    bitfile_dir = Path(cfg.output_dir) / "bitfile"
+    driver_dir = Path(cfg.output_dir) / "driver"
+    deploy_dir.mkdir(exist_ok=True)
+    shutil.copytree(bitfile_dir, deploy_dir / "bitfile", dirs_exist_ok=True)
+    shutil.copytree(
+        driver_dir, deploy_dir / "driver", dirs_exist_ok=True, copy_function=shutil.copyfile
+    )
+    if DataflowOutputType.CPP_DRIVER in cfg.generate_outputs:
+        for new_bitfile in (deploy_dir / "bitfile").absolute().iterdir():
+            update_bitfile_path_after_copy(
+                new_bitfile, deploy_dir / "driver" / "acceleratorconfig.json"
+            )
     return model
 
 
