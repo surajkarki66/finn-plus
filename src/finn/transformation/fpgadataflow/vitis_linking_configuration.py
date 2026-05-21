@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, cast
 
 from finn.builder.build_dataflow_config import FpgaMemoryType, VitisOptStrategy
 from finn.templates import get_jinja_environment
-from finn.util.basic import make_build_dir
+from finn.util.basic import get_metadata_prop_path, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError, FINNVitisLinkConfigError
 from finn.util.fpgadataflow import (
     check_all_sdp_nodes,
@@ -54,6 +54,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
     optimization_level: str
     platform: str
     run_script_path: Path = field(init=False, default_factory=lambda: Path())
+    gen_report_xml_path: Path = field(init=False, default_factory=lambda: Path())
     cu: list[str] = field(default_factory=list)
     nk: list[tuple[str, str]] = field(default_factory=list)
     sc: dict[str, list[str]] = field(default_factory=dict)
@@ -68,6 +69,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         self.config_path.parent.mkdir(exist_ok=True, parents=True)
         self.run_script_path = self.config_path.parent / "run_link.sh"
         self.run_script_path.parent.mkdir(exist_ok=True, parents=True)
+        self.gen_report_xml_path = self.config_path.parent / "vitis_gen_report_xml.tcl"
 
     def store(self, p: Path) -> None:
         """Store the config as a YAML file, so that it can be loaded
@@ -94,18 +96,16 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
             dict[int, VitisLinkConfiguration]: Maps device-IDs to their respective
                 linking configurations.
         """
-        storage_path = model.get_metadata_prop("vitis_link_configs")
-        if storage_path is None:
-            raise FINNVitisLinkConfigError(
+        storage_path = get_metadata_prop_path(
+            model,
+            "vitis_link_configs",
+            must_exist=True,
+            custom_error=(
                 "Cannot load VitisLinkConfig from model, "
                 "since the metadata prop "
                 "'vitis_link_configs' was not found!"
-            )
-        storage_path = Path(storage_path)
-        if not storage_path.exists():
-            raise FINNVitisLinkConfigError(
-                f"Cannot load VitisLinkConfigs from invalid path: {storage_path}"
-            )
+            ),
+        )
 
         configs = {}
         for device_path in storage_path.iterdir():
@@ -469,6 +469,15 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         )
         self.config_path.write_text(rendered)
 
+    def generate_report_tcl_script(self) -> None:
+        """Generate a tcl script to output a resource report as an XML. Stored
+        in the link directory as "vitis_gen_report_xml.tcl".
+        """
+        env = get_jinja_environment()
+        template = env.get_template("vitis_link/vitis_gen_report_xml.tcl.jinja")
+        rendered = template.render(VITIS_PROJ_PATH=str(self.config_path.parent.absolute()))
+        self.gen_report_xml_path.write_text(rendered)
+
     def generate_run_script(self) -> None:
         """Generate a shell script to start v++ with the correct parameters.
         Produces the shell script next to the path of the config file
@@ -661,4 +670,5 @@ class BuildBasicVitisLinkConfig(Transformation):
         for config in configs.values():
             config.generate_config()
             config.generate_run_script()
+            config.generate_report_tcl_script()
         return model, False

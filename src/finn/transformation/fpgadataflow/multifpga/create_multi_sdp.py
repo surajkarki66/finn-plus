@@ -10,12 +10,8 @@ from typing import TYPE_CHECKING
 
 from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
-from finn.transformation.fpgadataflow.multifpga.utils import (
-    get_device_id,
-    get_submodel,
-    set_device_id,
-)
 from finn.util.exception import FINNMultiFPGAUserError
+from finn.util.fpgadataflow import get_device_id, get_submodel, set_device_id
 from finn.util.logging import log
 
 if TYPE_CHECKING:
@@ -127,7 +123,7 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
 
         # Set the SDP's device_id
         for node in model.graph.node:
-            device_id = get_device_id(get_submodel(node).graph.node[0])
+            device_id = get_device_id(get_submodel(node)[0].graph.node[0])
             assert device_id is not None
             set_device_id(node, device_id)
         return model, False

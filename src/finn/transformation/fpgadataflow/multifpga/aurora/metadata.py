@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from finn.transformation.fpgadataflow.multifpga.metadata import DataDirection, NetworkMetadata
+from finn.util.basic import get_metadata_prop_path
 from finn.util.exception import FINNInternalError, FINNMultiFPGAConfigError
 
 if TYPE_CHECKING:
@@ -60,15 +61,15 @@ class AuroraNetworkMetadata(NetworkMetadata, DataClassYAMLMixin):
     @staticmethod
     def from_model(model: ModelWrapper) -> AuroraNetworkMetadata:
         """Load metadata from the model."""
-        p = model.get_metadata_prop("network_metadata")
-        if p is None:
-            raise FINNInternalError(
+        p = get_metadata_prop_path(
+            model,
+            "network_metadata",
+            must_exist=True,
+            custom_error=(
                 "Cannot load metadata from model, since no 'network_metadata' prop was set. "
                 "Did you forget to run the 'AssignMetadata' transformation before this?"
-            )
-        p = Path(p)
-        if not p.exists():
-            raise FINNInternalError(f"Cannot load metadata. File not found: {p}.")
+            ),
+        )
         meta = AuroraNetworkMetadata.load(p)
         meta.loaded_from_path = p
         return meta

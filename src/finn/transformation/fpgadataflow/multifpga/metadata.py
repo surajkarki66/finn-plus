@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from finn.builder.build_dataflow_config import MFVerbosity
-from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.util.basic import make_build_dir
 from finn.util.exception import FINNMultiFPGAError
+from finn.util.fpgadataflow import get_device_id
 from finn.util.logging import log
 
 if TYPE_CHECKING:

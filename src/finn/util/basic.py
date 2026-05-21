@@ -48,16 +48,15 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.util.basic import gen_finn_dt_tensor
-from typing import Dict, Final
+from typing import Any, Dict, Final
 
 from finn.util.data_packing import finnpy_to_packed_bytearray
+from finn.util.exception import FINNInternalError
 from finn.util.logging import log
 from finn.util.settings import get_settings
-
 
 MAX_ALLOWED_AP_INT_W: Final[int] = 8191
 """Constant which describes the max width of an `ap_int` HLS datatype.
@@ -122,6 +121,36 @@ part_map: dict[str, str] = {**pynq_part_map, **alveo_part_map}
 part_map["VEK280"] = "xcve2802-vsvh1760-2MP-e-S"
 part_map["VCK190"] = "xcvc1902-vsva2197-2MP-e-S"
 part_map["V80"] = "xcv80-lsva4737-2MHP-e-s"
+
+
+def get_metadata_prop_safe(model: ModelWrapper, key: str, custom_error: str | None = None) -> Any:
+    """Get a metadata prop from the model. If the key does not exist,
+    this raises a FINNInternalError, and thus never returns none.
+    """
+    data = model.get_metadata_prop(key)
+    if data is None:
+        if custom_error is None:
+            raise FINNInternalError(
+                f"Unable to read metadata prop '{key}' " "from model. No such key exists."
+            )
+        raise FINNInternalError(custom_error)
+    return data
+
+
+def get_metadata_prop_path(
+    model: ModelWrapper, key: str, must_exist: bool, custom_error: str | None = None
+) -> Path:
+    """Convenience function to load a path from a metadata prop. If the key does not exist,
+    a FINNInternalError is raised. If `must_exist` is set to True, the existence of
+    the file/directory is checked as well.
+    """  # noqa
+    path = Path(get_metadata_prop_safe(model, key, custom_error))
+    if must_exist and not path.exists():
+        raise FINNInternalError(
+            f"Path read from metadata prop {key} does "
+            f"not point to an existing file or directory."
+        )
+    return path
 
 
 def get_rtlsim_trace_depth():

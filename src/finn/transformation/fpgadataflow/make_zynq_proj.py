@@ -588,8 +588,10 @@ class MakeZYNQProject(Transformation):
             )
         deploy_bitfile_name = vivado_pynq_proj_dir + "/resizer.bit"
         copy(bitfile_name, deploy_bitfile_name)
-        # set bitfile attribute
-        model.set_metadata_prop("bitfile", deploy_bitfile_name)
+
+        # set bitfile attribute (device - path mapping to be in sync with the alveo flow,
+        # which needs to support multiple bitstream output files due to Multi-FPGA
+        model.set_metadata_prop("bitfile", json.dumps({0: deploy_bitfile_name}))
         hwh_name_alts = [
             vivado_pynq_proj_dir + "/finn_zynq_link.srcs/sources_1/bd/top/hw_handoff/top.hwh",
             vivado_pynq_proj_dir + "/finn_zynq_link.gen/sources_1/bd/top/hw_handoff/top.hwh",
@@ -608,7 +610,8 @@ class MakeZYNQProject(Transformation):
         model.set_metadata_prop("hw_handoff", deploy_hwh_name)
         # filename for the synth utilization report
         synth_report_filename = vivado_pynq_proj_dir + "/synth_report.xml"
-        model.set_metadata_prop("vivado_synth_rpt", synth_report_filename)
+        # Stored as a json for Multi-FPGA support (on the alveo side)
+        model.set_metadata_prop("vivado_synth_rpt", json.dumps({0: synth_report_filename}))
         return (model, False)
 
 

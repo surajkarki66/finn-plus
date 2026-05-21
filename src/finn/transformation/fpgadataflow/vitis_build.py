@@ -78,6 +78,17 @@ class ParallelVitisSynthesis(Transformation):
                 f"at {config.run_script_path.parent}.",
                 config.run_script_path.parent / "v++_a.log",
             )
+
+        # Try to generate resource reports, but don't raise an exception if this fails
+        gen_result = subprocess.run(
+            shlex.split(f"vivado -mode batch -source {config.gen_report_xml_path}"),
+            cwd=config.gen_report_xml_path.parent,
+        )
+        if gen_result.returncode != 0:
+            log.error(
+                f"Could not create post-synthesis resource report in "
+                f"{config.gen_report_xml_path.parent}. Continuing now."
+            )
         return config.run_script_path.parent / "a.xclbin"
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
@@ -105,7 +116,7 @@ class ParallelVitisSynthesis(Transformation):
         results = {}
         for i, future in futures.items():
             result = cast("Path", future.result())
-            results[i] = str(result)
+            results[i] = str(result.absolute())
             if not result.exists():
                 log.critical(
                     f"XCLBIN for device {i} not found. Check "
@@ -113,8 +124,11 @@ class ParallelVitisSynthesis(Transformation):
                 )
 
         # Store paths for usage in driver generation, etc.
-        # TODO: Find a better way to do this
-        model.set_metadata_prop("bitfile_output", json.dumps(results))
+        model.set_metadata_prop("bitfile", json.dumps(results))
+        model.set_metadata_prop(
+            "vivado_synth_rpt",
+            json.dumps({device: Path(p).parent / "synth_report.xml" for device, p in results}),
+        )
         return model, False
 
 
@@ -168,5 +182,4 @@ class VitisBuild(Transformation):
         # Run the synthesis
         log.info("Starting synthesis...")
         model = model.transform(ParallelVitisSynthesis(self.cfg))
-
         return model, False

@@ -451,7 +451,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
 
     #: Which output(s) to generate from the build flow.  See documentation of
     #: DataflowOutputType for available options.
-    generate_outputs: Optional[list[DataflowOutputType]] = field(
+    generate_outputs: list[DataflowOutputType] = field(
         default_factory=lambda: [
             DataflowOutputType.STITCHED_IP,
             DataflowOutputType.ESTIMATE_REPORTS,

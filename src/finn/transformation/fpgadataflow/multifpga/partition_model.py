@@ -22,7 +22,6 @@ from finn.transformation.fpgadataflow.multifpga.graph import (
     is_single_in_out_model,
 )
 from finn.transformation.fpgadataflow.multifpga.partitioner import Partitioner
-from finn.transformation.fpgadataflow.multifpga.utils import set_device_id
 from finn.util.basic import make_build_dir
 from finn.util.exception import (
     FINNInternalError,
@@ -31,6 +30,7 @@ from finn.util.exception import (
     FINNMultiFPGANoPartitionerSolutionError,
     FINNMultiFPGAUserError,
 )
+from finn.util.fpgadataflow import set_device_id
 from finn.util.logging import LogDisabledConsole, log
 from finn.util.platforms import platforms
 from finn.util.resources import available_resources, get_estimated_model_resources
