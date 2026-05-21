@@ -197,6 +197,37 @@ class AuroraNetworkMetadata(NetworkMetadata, DataClassYAMLMixin):
             receiver_device, receiver_node, sender_device, sender_node, DataDirection.RX
         )
 
+    def node_is_sender(self, node: str) -> bool:
+        """Return whether the given node acts as a sender (TX) on its device."""
+        for device in self.data.keys():
+            for i in range(len(self.data[device])):
+                nodes = self.data[device][i].connecting_kernels[DataDirection.TX]
+                if nodes is not None and nodes[0] == node:
+                    return True
+        return False
+
+    def node_is_receiver(self, node: str) -> bool:
+        """Return whether the given node acts as a receiver (RX) on its device."""
+        for device in self.data.keys():
+            for i in range(len(self.data[device])):
+                nodes = self.data[device][i].connecting_kernels[DataDirection.RX]
+                if nodes is not None and nodes[0] == node:
+                    return True
+        return False
+
+    def get_partner_node(self, node: str, direction: DataDirection) -> str | None:
+        """Search through all nodes and return the one that acts as a communication partner
+        in the given direction. If A <-> B, then get_partner_node(A, TX) returns B and
+        get_partner_node(B, RX) returns A. (get_partner_node(A, RX) would return None,
+        since A is not a receiving from any node.)
+        """  # noqa
+        for device_data in self.data.values():
+            for i in range(len(device_data)):
+                node_tuple = device_data[i].connecting_kernels[direction]
+                if node_tuple is not None and node_tuple[0] == node:
+                    return node_tuple[1]
+        return None
+
     def get_unprepared_aurora_kernels(self) -> list[tuple[int, int]]:
         """Return a list of all device:kernel_index combinations which do not yet have
         an associated AuroraFlow kernel XO file. This can be used for the packaging transformations.

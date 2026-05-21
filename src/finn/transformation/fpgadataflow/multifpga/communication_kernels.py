@@ -13,9 +13,9 @@ class PrepareCommunicationKernels(Transformation):
     prevents the user from having to differentiate it by themselves.
     """
 
-    def __init__(
+    def __init__(  # noqa
         self, platform: str, fpga_part: str, pcfg: PartitioningConfiguration
-    ) -> None:  # noqa
+    ) -> None:
         super().__init__()
         self.platform = platform
         self.fpga_part = fpga_part

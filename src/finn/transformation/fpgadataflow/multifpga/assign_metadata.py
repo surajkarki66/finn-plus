@@ -6,7 +6,7 @@ from qonnx.transformation.base import Transformation
 from typing import TYPE_CHECKING, Final
 
 from finn.builder.build_dataflow_config import MFCommunicationKernel, MFTopology, MFVerbosity
-from finn.transformation.fpgadataflow.multifpga.aurora_metadata import AuroraNetworkMetadata
+from finn.transformation.fpgadataflow.multifpga.aurora.metadata import AuroraNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.metadata import (
     CreateChainNetworkMetadata,
     CreateNetworkMetadata,
@@ -16,6 +16,7 @@ from finn.util.exception import FINNUserError
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
+
     from finn.transformation.fpgadataflow.multifpga.metadata import NetworkMetadata
 
 
@@ -61,8 +62,8 @@ class AssignNetworkMetadata(Transformation):
         super().__init__()
         self.verbosity = verbosity
         try:
-            creator_type = AssignNetworkMetadata.TOPOLOGY_CREATOR_MAP[topology]
-            metadata_type = AssignNetworkMetadata.COMMUNICATION_KERNEL_METADATA_MAP[
+            self.creator_type = AssignNetworkMetadata.TOPOLOGY_CREATOR_MAP[topology]
+            self.metadata_type = AssignNetworkMetadata.COMMUNICATION_KERNEL_METADATA_MAP[
                 communication_kernel
             ]
         except KeyError as e:
@@ -71,8 +72,8 @@ class AssignNetworkMetadata(Transformation):
                 f" and communication kernel {communication_kernel.name}, "
                 f"since no creator/metadata type was written/connected for it yet. "
             ) from e
-        self.creator: CreateNetworkMetadata = creator_type(
-            save_as_format=metadata_type, verbosity=verbosity
+        self.creator: CreateNetworkMetadata = self.creator_type(
+            save_as_format=self.metadata_type, verbosity=verbosity
         )
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa

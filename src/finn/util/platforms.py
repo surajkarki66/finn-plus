@@ -71,13 +71,14 @@ ETH_RESOURCE_REQUIREMENTS = {
 class Platform:
     def __init__(
         self,
-        nslr=1,
-        ndevices=1,
+        nslr: int = 1,
+        ndevices: int = 1,
         sll_count=[],
         hbm_slr=-1,
         ddr_slr=[0],
         eth_slr=0,
         eth_gbps=0,
+        qsfp_slr: str | None = None,
         limits=DEFAULT_RES_LIMITS,
         avg_constraints=DEFAULT_AVG_CONSTRAINTS,
     ):
@@ -88,6 +89,7 @@ class Platform:
         self.ndevices = ndevices
         self.hbm_slr = hbm_slr
         self.ddr_slr = ddr_slr
+        self.qsfp_slr = qsfp_slr
         # limits must be a np.array either of
         # the same shape as compute_resources
         # or broadcastable to it
@@ -345,6 +347,7 @@ class Alveo_NxU50_Platform(Platform):
             hbm_slr=0,
             eth_slr=1,
             eth_gbps=100,
+            qsfp_slr="SLR1",
             limits=limits,
             avg_constraints=avg_constraints,
         )
@@ -376,6 +379,7 @@ class Alveo_NxU200_Platform(Platform):
             ddr_slr=[0, 2],
             eth_slr=2,
             eth_gbps=100,
+            qsfp_slr="SLR2",
             limits=limits,
             avg_constraints=avg_constraints,
         )
@@ -414,6 +418,7 @@ class Alveo_NxU250_Platform(Platform):
             ddr_slr=[0, 1, 2, 3],
             eth_slr=3,
             eth_gbps=100,
+            qsfp_slr="SLR2",
             limits=limits,
             avg_constraints=avg_constraints,
         )
@@ -443,6 +448,7 @@ class Alveo_NxU280_Platform(Platform):
             hbm_slr=0,
             eth_slr=2,
             eth_gbps=100,
+            qsfp_slr="SLR2",
             limits=limits,
             avg_constraints=avg_constraints,
         )
@@ -477,6 +483,7 @@ class Alveo_NxU55C_Platform(Platform):
             hbm_slr=0,
             eth_slr=1,
             eth_gbps=100,
+            qsfp_slr="SLR1",
             limits=limits,
             avg_constraints=avg_constraints,
         )

@@ -10,6 +10,7 @@ from finn.transformation.fpgadataflow.multifpga.utils import get_device_id
 from finn.transformation.fpgadataflow.vitis_linking_configuration import VitisLinkConfiguration
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
+from finn.util.platforms import Platform, platforms
 from finn.util.settings import get_settings
 
 
@@ -18,22 +19,9 @@ class AddAuroraToLinkConfig(Transformation):
     connecting them to the existing SDP kernels.
     """
 
-    def __init__(self, board: str) -> None:  # noqa
+    def __init__(self, platform_name: str) -> None:  # noqa
         super().__init__()
-        self.aurora_slr_mapping = {
-            "u280": "SLR2",
-            "u55c": "SLR1",
-            "u250": "SLR2",
-            "u200": "SLR2",
-            "u50": "SLR1",
-        }
-        self.board = board
-        if self.board.lower() not in self.aurora_slr_mapping:
-            raise FINNUserError(
-                f"Cannot place AuroraFlow kernels on device "
-                f"{self.board} because expected SLR placement "
-                f"of the kernel is not known."
-            )
+        self.platform: Platform = platforms[platform_name]()
 
     def package_dummy_kernels(self) -> tuple[Path, Path]:
         """Prepare dummy kernels that might be needed when a kernel is in duplex mode
@@ -86,9 +74,15 @@ class AddAuroraToLinkConfig(Transformation):
                 if (tx_kernel_pair is not None and tx_kernel_pair[0] == node.name) or (
                     rx_kernel_pair is not None and rx_kernel_pair[0] == node.name
                 ):
+                    if self.platform.qsfp_slr is None:
+                        raise FINNUserError(
+                            f"Cannot place AuroraFlow kernels on device with platform"
+                            f"{type(self.platform).__name__} because expected SLR placement "
+                            f"of the kernel is not known."
+                        )
                     configs[device].add_xo(aurora_data.aurora_xo)
                     configs[device].add_cu(aurora_cu, aurora_cu)
-                    configs[device].add_slr(aurora_cu, self.aurora_slr_mapping[self.board.lower()])
+                    configs[device].add_slr(aurora_cu, self.platform.qsfp_slr)
                     configs[device].add_connect(
                         f"io_clk_qsfp{index}_refclkb_00", f"{aurora_cu}/gt_refclk_{index}"
                     )

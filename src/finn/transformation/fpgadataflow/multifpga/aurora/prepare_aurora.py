@@ -52,6 +52,7 @@ class PrepareAuroraFlow(Transformation):
         The directory is named 'aurora_device_<device>_index_<index>'.
         Inside are the packaged xo files.
 
+        >>> from finn.builder.build_dataflow_config import MFCommunicationKernel
         >>> p = PartitioningConfiguration(
         ...     num_fpgas=2, ports_per_device=2, communication_kernel=MFCommunicationKernel.AURORA
         ... )
@@ -61,7 +62,7 @@ class PrepareAuroraFlow(Transformation):
         True
         >>> xo.name
         'aurora_flow_hw_0.xo'
-        >>> xo.parent.name
+        >>> xo.parent.parent.name
         'auroraflow_build_dev0_ind0'
         """
         if self.verbosity == MFVerbosity.HIGH:

@@ -109,7 +109,7 @@ from finn.transformation.fpgadataflow.multifpga.communication_kernels import (
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
-from finn.transformation.fpgadataflow.multifpga.partitioner import (
+from finn.transformation.fpgadataflow.multifpga.partition_model import (
     ApplyPartitioning,
     PartitionForMultiFPGA,
 )

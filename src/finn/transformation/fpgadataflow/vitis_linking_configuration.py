@@ -132,6 +132,15 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         Returns:
         -------
             ModelWrapper: The modified modelwrapper with the updated metadata prop.
+
+        >>> from tests.testing_util.test import get_empty_modelwrapper
+        >>> config = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
+        >>> model = VitisLinkConfiguration.store_to_model({0: config}, get_empty_modelwrapper())
+        >>> path = Path(model.get_metadata_prop("vitis_link_configs"))
+        >>> path.exists()
+        True
+        >>> (path / "0" / "config.yaml").exists()
+        True
         """
         path = model.get_metadata_prop("vitis_link_configs")
         if path is None:
@@ -144,7 +153,15 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         return model
 
     def add_cu(self, kernel_name: str, cu_name: str) -> None:
-        """Add a compute unit (instance of a kernel)."""
+        """Add a compute unit (instance of a kernel).
+
+        >>> lc = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
+        >>> lc.add_cu("Kernel", "cu")
+        >>> lc.cu
+        ['cu']
+        >>> lc.nk
+        [('Kernel', 'cu')]
+        """
         if cu_name in self.cu:
             kern = next(kname for kname, cname in self.nk if cname == cu_name)
             raise FINNVitisLinkConfigError(
@@ -156,7 +173,8 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
     def add_sc(self, cu_sender: str, cu_receiver: str) -> None:
         """Add a Streaming Connection between two CUs:
-        >>> lc = VitisLinkConfiguration("", "", 100)
+
+        >>> lc = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
         >>> lc.add_cu("A", "a")
         >>> lc.add_cu("B", "b")
         >>> lc.add_sc("a.out", "b.in")
@@ -203,7 +221,13 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         self.slr[cu] = slr
 
     def add_sp(self, cu_port_name: str, mem_type: str) -> None:
-        """Add an SP assignment."""
+        """Add an SP assignment.
+
+        >>> lc = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
+        >>> lc.add_sp("cu.arg", "HBM[0]")
+        >>> lc.sp["cu.arg"]
+        'HBM[0]'
+        """
         match = SYSTEM_PORT_REGEX.match(mem_type)
         if match is None:
             log.warning(
@@ -222,7 +246,7 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
     def add_xo(self, xo_files: Path | list[Path] | str) -> None:
         """Add an XO file to the list of XO files that will be passed upon linking.
-        Ignores duplicate calls.
+        Ignores duplicate calls. The files must exist when the method is called.
         """
         all_xos = []
         if type(xo_files) in [Path, str]:
@@ -248,7 +272,10 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
 
     def _get_kerneldefs(self) -> dict[str, dict[str, str]]:
         """Use the `kernelinfo` utility to get information on all used kernels.
-        Returns the kernel info indexed by kernel name."""
+
+        Returns the kernel info indexed by kernel name. (Key is the kernel name,
+        value is the `kernelinfo` utility output, read from JSON.)
+        """
         infos = {}
         for xo in self.xo:
             result = subprocess.run(
@@ -262,9 +289,19 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         return infos
 
     def _get_kernel_from_cu(self, cu: str) -> str:
-        """Return the kernel of the given CU."""
+        """Return the kernel of the given CU.
+
+        >>> lc = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
+        >>> lc.add_cu("Kernel", "cu")
+        >>> lc._get_kernel_from_cu("cu")
+        'Kernel'
+        >>> lc._get_kernel_from_cu("cu2")
+        Traceback (most recent call last):
+            ...
+        finn.util.exception.FINNInternalError: Cannot retrieve kernel of unknown CU: cu2
+        """
         if cu not in self.cu:
-            raise FINNInternalError(f"Cannot retrieve kernel of unknown CU {cu}")
+            raise FINNInternalError(f"Cannot retrieve kernel of unknown CU: {cu}")
         for kernel, name in self.nk:
             if cu == name:
                 return kernel
@@ -278,10 +315,22 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         return [port["name"] for port in kerneldefs[kernel]["ports"]]
 
     def _get_used_ports_for_cu(self, cu: str) -> list[str]:
-        """List all ports that are used in streaming-connections involving this CU."""
-        ports = []
+        """List all ports that are used in streaming-connections involving this CU.
 
-        # Ports used to send and receive data
+        >>> lc = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
+        >>> lc.add_cu("A", "a")
+        >>> lc.add_cu("B", "b")
+        >>> lc.add_cu("C", "c")
+        >>> lc.add_sc("a.out", "b.in")
+        >>> lc.add_sc("c.out", "a.in")
+        >>> lc._get_used_ports_for_cu("a")
+        ['out', 'in']
+        >>> lc._get_used_ports_for_cu("b")
+        ['in']
+        >>> lc._get_used_ports_for_cu("c")
+        ['out']
+        """
+        ports = []
         for send in self.sc.keys():
             for recv in self.sc[send]:
                 send_name, send_port = send.split(".")

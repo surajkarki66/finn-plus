@@ -38,7 +38,7 @@ from qonnx.transformation.base import Transformation
 from typing import TYPE_CHECKING, cast
 
 from finn.builder.build_dataflow_config import DataflowBuildConfig, MFCommunicationKernel
-from finn.transformation.fpgadataflow.multifpga.aurora_link_config_transform import (
+from finn.transformation.fpgadataflow.multifpga.aurora.link_config_transform import (
     AddAuroraToLinkConfig,
 )
 from finn.transformation.fpgadataflow.vitis_linking_configuration import (
