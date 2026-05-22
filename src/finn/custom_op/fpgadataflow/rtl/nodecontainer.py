@@ -17,7 +17,12 @@ from finn.util.settings import get_settings
 
 
 class NodeContainer(HWCustomOp, RTLBackend):
-    # Some functions are (partially) copied from FINNLoop
+    """Some functions are (partially) copied from FINNLoop
+        Currently unsupported features:
+            - Multiple inputs/outputs
+            - FIFO sizing
+            - Minimizing bitwitdh 
+    """
     def __init__(self, onnx_node, **kwargs):
         super().__init__(onnx_node, **kwargs)
         bodies_attr = get_by_name(self.onnx_node.attribute, "bodies")

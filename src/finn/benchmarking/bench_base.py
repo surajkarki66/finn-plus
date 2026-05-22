@@ -351,6 +351,9 @@ class bench:
         # Initialize from YAML (default) or custom script (if dedicated subclass is defined)
         cfg = self._step_build_setup()
 
+        if "multi_dnn_config_path" in self._params:
+            cfg.multi_dnn_config_path = self._params["multi_dnn_config_path"]
+
         if "model_dir" in self._params:
             # input ONNX model and verification input/output pairs are provided
             model_dir = self._params["model_dir"]
@@ -372,8 +375,6 @@ class bench:
                 # microbenchmarks might skip because no model can be generated for given params
                 return "skipped"
 
-        if "multi_dnn_config_path" in self._params:
-            cfg.multi_dnn_config_path = self._params["multi_dnn_config_path"]
 
         # Set some global defaults (could still be overwritten by run-specific YAML)
         cfg.output_dir = self._build_inputs["build_dir"]
