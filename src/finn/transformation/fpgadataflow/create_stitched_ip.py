@@ -523,7 +523,10 @@ class CreateStitchedIP(Transformation):
 
         # create a temporary folder for the project
         prjname = "finn_vivado_stitch_proj"
-        vivado_stitch_proj_dir = make_build_dir(prefix="vivado_stitch_proj_")
+        build_dir_prefix = "vivado_stitch_proj_"
+        if len(model.graph.node) <= 3:
+            build_dir_prefix = "".join([node.name + "_" for node in model.graph.node])
+        vivado_stitch_proj_dir = make_build_dir(prefix=build_dir_prefix)
         model.set_metadata_prop("vivado_stitch_proj", vivado_stitch_proj_dir)
         # start building the tcl script
         tcl = []
@@ -589,6 +592,14 @@ class CreateStitchedIP(Transformation):
             tcl.append(
                 "report_utilization -hierarchical -hierarchical_depth 5 "
                 "-file %s_partition_util.rpt" % block_name
+            )
+            tcl.append(
+                "report_utilization -hierarchical -hierarchical_depth 5 "
+                "-file %s_partition_util.xml -format xml" % block_name
+            )
+            model.set_metadata_prop(
+                "vivado_synth_rpt",
+                "%s/%s_partition_util.xml" % (vivado_stitch_proj_dir, block_name),
             )
         # export block design itself as an IP core
         block_vendor = "xilinx_finn"
