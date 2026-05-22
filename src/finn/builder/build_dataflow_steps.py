@@ -102,13 +102,13 @@ from finn.transformation.fpgadataflow.make_driver import (
 from finn.transformation.fpgadataflow.make_zynq_proj import ZynqBuild
 from finn.transformation.fpgadataflow.minimize_accumulator_width import MinimizeAccumulatorWidth
 from finn.transformation.fpgadataflow.minimize_weight_bit_width import MinimizeWeightBitWidth
-from finn.transformation.fpgadataflow.multifpga.assign_metadata import AssignNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.communication_kernels import (
     PrepareCommunicationKernels,
 )
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
+from finn.transformation.fpgadataflow.multifpga.create_network_metadata import CreateNetworkMetadata
 from finn.transformation.fpgadataflow.multifpga.partition_model import (
     ApplyPartitioning,
     PartitionForMultiFPGA,
@@ -1572,7 +1572,7 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
                     )
                 )
                 model = model.transform(
-                    AssignNetworkMetadata(pc.communication_kernel, pc.topology, pc.verbosity)
+                    CreateNetworkMetadata(pc.communication_kernel, pc.verbosity)
                 )
                 model = model.transform(PrepareCommunicationKernels(platform, part, pc))
 

@@ -37,6 +37,7 @@ def _merge_resource_estimations(
 
         # Layer estimates in both
         else:
+            result[layer] = {}
             all_res_types = set(list(finn_estimates[layer]) + list(hls_estimates[layer]))
             for restype in all_res_types:
                 # Resource estimates only in A

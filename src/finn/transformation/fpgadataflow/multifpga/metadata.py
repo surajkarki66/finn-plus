@@ -6,17 +6,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from finn.builder.build_dataflow_config import MFVerbosity
-from finn.util.basic import make_build_dir
-from finn.util.exception import FINNMultiFPGAError
-from finn.util.fpgadataflow import get_device_id
-from finn.util.logging import log
-
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from pathlib import Path
     from qonnx.core.modelwrapper import ModelWrapper
 
 
@@ -87,67 +80,3 @@ class NetworkMetadata(ABC):
         get_partner_node(B, RX) returns A. (get_partner_node(A, RX) would return None,
         since A is not a receiving from any node.)
         """  # noqa
-
-
-class CreateNetworkMetadata(ABC):
-    """Run this transformation to create metadata necessary for Multi-FPGA settings. Pass the type
-    of metadata as a type to the constructor, or a factory producing one.
-    """
-
-    def __init__(  # noqa
-        self,
-        save_as_format: type[NetworkMetadata] | Callable[[], NetworkMetadata],
-        verbosity: MFVerbosity,
-    ) -> None:
-        super().__init__()
-        self.verbosity = verbosity
-        self.metadata_type = save_as_format
-        self.metadata = self.metadata_type()
-
-    def save_metadata(self, model: ModelWrapper, suffix: str = "yaml") -> Path:
-        """Save the metadata and store the path as a metadata prop in the modelwrapper instance."""
-        metadata_dir = Path(make_build_dir("network_metadata_")).absolute()
-        metadata_path = metadata_dir / ("metadata." + suffix)
-        self.metadata.save(metadata_path)
-        model.set_metadata_prop("network_metadata", str(metadata_path))
-        return metadata_path
-
-    @abstractmethod
-    def create_metadata(self, model: ModelWrapper) -> None:
-        """Create the metadata and assign it to the object variable.
-        When creating a new type of network metadata this has to be implemented.
-        """
-        raise NotImplementedError()
-
-
-class CreateChainNetworkMetadata(CreateNetworkMetadata):
-    """Create a simple network with FPGAs connected in a simple line."""
-
-    def __init__(  # noqa
-        self, save_as_format: type[NetworkMetadata], verbosity: MFVerbosity
-    ) -> None:
-        super().__init__(save_as_format, verbosity)
-
-    def create_metadata(self, model: ModelWrapper) -> None:
-        """Create network metadata from the given model."""
-        for n1 in model.graph.node:
-            sucs = model.find_direct_successors(n1)
-            if sucs is None:
-                continue
-            for n2 in sucs:
-                d1 = get_device_id(n1)
-                d2 = get_device_id(n2)
-                if d1 is None:
-                    raise FINNMultiFPGAError(f"Node {n1.name} does not have a device id!")
-                if d2 is None:
-                    raise FINNMultiFPGAError(f"Node {n2.name} does not have a device id!")
-                if d1 != d2:
-                    if self.verbosity.value > MFVerbosity.MEDIUM.value:
-                        log.info(f"Adding connection:  {n1.name} [{d1}] ----> {n2.name} [{d2}]")
-                    self.metadata.add_connection(int(d1), n1.name, int(d2), n2.name)
-
-
-class CreateReturnChainNetworkMetadata(CreateNetworkMetadata):
-    """Create a network with a chain that returns across the devices."""
-
-    pass  # noqa
