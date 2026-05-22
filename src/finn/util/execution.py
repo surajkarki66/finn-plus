@@ -32,14 +32,15 @@ This module contains functions for executing parent models containing
 StreamingDataflowPartition nodes and other execution-related utilities.
 """
 
-import os
+import numpy as np
+from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 
 from finn.core.onnx_exec import execute_onnx
 
 
-def load_model_checkpoint(filename):
+def load_model_checkpoint(filename: str) -> ModelWrapper:
     """Load given .onnx file and return ModelWrapper.
 
     Args:
@@ -51,13 +52,15 @@ def load_model_checkpoint(filename):
     Raises:
         FileNotFoundError: If the model file doesn't exist
     """
-    if os.path.isfile(filename):
+    if Path(filename).is_file():
         model = ModelWrapper(filename)
         return model
     raise FileNotFoundError(f"Model file {filename} not found")
 
 
-def execute_parent(parent_path, child_path, input_tensor_npy, return_full_ctx=False):
+def execute_parent(
+    parent_path: str, child_path: str, input_tensor_npy: np.ndarray, return_full_ctx: bool = False
+) -> np.ndarray | dict[str, np.ndarray]:
     """Execute parent model containing a single StreamingDataflowPartition by
     replacing it with the model at child_path and return result.
 

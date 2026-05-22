@@ -124,28 +124,30 @@ Port& Port::set_binstr(const std::string& val) {
         uint32_t a = 0;
         uint32_t b = 0;
 
-        // Process up to 32 characters for this buffer element
-        const size_t chars_to_process = std::min(32UL, val_length - chars_processed);
+        // chars_to_process is the number of binary digits this buffer word should
+        // consume from the input. It is needed because one 32-bit word can hold
+        // at most 32 binary digits, and we must not read past the end of val.
+        // Examples: "1" -> 1 digit here, "1011..." with more than 32 digits ->
+        // 32 digits in this word and the rest in later words, empty input -> 0
+        // digits.
+        const size_t chars_to_process = std::min(32UL, val_length > chars_processed ? val_length - chars_processed : 0);
 
         for (size_t j = 0; j < chars_to_process; ++j) {
-            a <<= 1;
-            b <<= 1;
+            const unsigned shift = static_cast<unsigned>(j);
 
-            if (val_iter != val.crend()) {
-                switch (*val_iter++) {
-                    case '1':
-                        a |= 1;
-                        [[fallthrough]];
-                    case '0':
-                        break;
-                    default:
-                        a |= 1;
-                        [[fallthrough]];
-                    case 'Z':
-                    case 'z':
-                        b |= 1;
-                        break;
-                }
+            switch (*val_iter++) {
+                case '1':
+                    a |= (1u << shift);
+                    [[fallthrough]];
+                case '0':
+                    break;
+                default:
+                    a |= (1u << shift);
+                    [[fallthrough]];
+                case 'Z':
+                case 'z':
+                    b |= (1u << shift);
+                    break;
             }
         }
 
@@ -153,8 +155,6 @@ Port& Port::set_binstr(const std::string& val) {
         elem.bVal = b;
 
         chars_processed += chars_to_process;
-        if (chars_processed >= val_length)
-            break;
     }
 
     return *this;
@@ -170,27 +170,28 @@ Port& Port::set_hexstr(const std::string& val) {
         uint32_t a = 0;
         uint32_t b = 0;
 
-        // Process up to 8 hex characters (32 bits) for this buffer element
-        const size_t chars_to_process = std::min(8UL, val_length - chars_processed);
+        // chars_to_process is the number of hex digits this buffer word should
+        // consume from the input. It is needed because one 32-bit word can hold
+        // at most 8 hex digits, and we must not read past the end of val.
+        // Examples: "1" -> 1 digit here, "9fa42b4a3" -> 8 digits in this word
+        // and 1 digit in the next, empty input -> 0 digits.
+        const size_t chars_to_process = std::min(8UL, val_length > chars_processed ? val_length - chars_processed : 0);
 
         for (size_t j = 0; j < chars_to_process; ++j) {
-            a <<= 4;
-            b <<= 4;
+            const unsigned shift = static_cast<unsigned>(j * 4);
 
-            if (val_iter != val.crend()) {
-                char c = *val_iter++;
+            char c = *val_iter++;
 
-                if (('0' <= c) && c <= '9') {
-                    a |= c & 0xF;
+            if (('0' <= c) && c <= '9') {
+                a |= (static_cast<uint32_t>(c - '0') << shift);
+            } else {
+                c |= 0x20;  // Convert to lowercase
+                if (('a' <= c) && (c <= 'f')) {
+                    a |= (static_cast<uint32_t>(c - ('a' - 10)) << shift);
                 } else {
-                    c |= 0x20;  // Convert to lowercase
-                    if (('a' <= c) && (c <= 'f')) {
-                        a |= static_cast<uint32_t>(c - ('a' - 10));
-                    } else {
-                        b |= 0xF;
-                        if (c != 'z') {
-                            a |= 0xF;
-                        }
+                    b |= (0xFu << shift);
+                    if (c != 'z') {
+                        a |= (0xFu << shift);
                     }
                 }
             }
@@ -200,9 +201,6 @@ Port& Port::set_hexstr(const std::string& val) {
         elem.bVal = b;
 
         chars_processed += chars_to_process;
-        if (chars_processed >= val_length)
-            break;
     }
-
     return *this;
 }

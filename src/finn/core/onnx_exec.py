@@ -40,15 +40,10 @@ Key Functions:
 
 import copy
 import numpy as np
-import qonnx.analysis.topology as ta
 from collections.abc import Callable
 from onnx import NodeProto
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.core.onnx_exec import execute_onnx as execute_onnx_base
-from typing import cast
-
-from finn.core.rtlsim_exec import rtlsim_exec
-from finn.util.exception import FINNInternalError, FINNUserError
 
 
 def execute_onnx(
@@ -68,57 +63,7 @@ def execute_onnx(
     If they are set to particular ONNX nodes, only the subgraph between (and
     including) those nodes is executed.
     """
-    # check if model has an execution mode set
-    # if None, execute model node using the QONNX-provided execute_onnx impl
-    # if set to "rtlsim" execute model using xsi
-    model_exec_mode = model.get_metadata_prop("exec_mode")
-    if (model_exec_mode is None) or (model_exec_mode == ""):
-        return execute_onnx_base(model, input_dict, return_full_exec_context, start_node, end_node)
-    if model_exec_mode == "rtlsim":
-        # check sanity of model and then use stitched IP for rtlsim
-        if not model.check_all_tensor_shapes_specified():
-            raise FINNUserError("Found unspecified tensor shapes, try infer_shapes")
-        ret = model.analysis(ta.nodes_topologically_sorted)
-        assert (
-            ret["nodes_topologically_sorted"] is True
-        ), """Nodes must be
-        topologically sorted."""
-
-        graph = model.graph
-        # first, we need to make sure that every variable required by the graph has
-        # some buffer associated with it. this includes graph inputs (which includes
-        # the input data as well as the trained parameters) and the graph ValueInfo
-        # (intermediate tensors between layers)
-        # this is provided by the execution_context, which is a dict of np.ndarray
-        execution_context = cast("dict[str, np.ndarray]", model.make_empty_exec_context())
-        # fill in any inputs provided to this function
-        for inp_name in input_dict.keys():
-            if inp_name in execution_context:
-                if execution_context[inp_name].shape == input_dict[inp_name].shape:
-                    execution_context[inp_name] = input_dict[inp_name]
-                else:
-                    raise FINNInternalError(
-                        f"Shape mismatch for provided input {inp_name}: found "
-                        f"{execution_context[inp_name].shape!s} expected "
-                        f"{input_dict[inp_name].shape!s} "
-                    )
-
-        # use stitched IP for rtlsim
-        rtlsim_exec(model, execution_context)
-    else:
-        raise FINNInternalError(
-            """Metadata property "exec_mode" is set to an unknown value. Can be left
-            unset or has to be set to "rtlsim" for execution using xsi!"""
-        )
-
-    if return_full_exec_context:
-        return execution_context
-    # provide outputs as dict
-    output_dict = {}
-    for out_tensor in graph.output:
-        out_name = out_tensor.name
-        output_dict[out_name] = execution_context[out_name]
-    return output_dict
+    return execute_onnx_base(model, input_dict, return_full_exec_context, start_node, end_node)
 
 
 def execute_onnx_and_make_model(

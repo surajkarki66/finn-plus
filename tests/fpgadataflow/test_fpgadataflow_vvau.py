@@ -359,7 +359,6 @@ def test_fpgadataflow_vvau(
             model = model.transform(HLSSynthIP())
             model = model.transform(CreateStitchedIP("xczu7ev-ffvc1156-2-e", 5))
 
-            model.set_metadata_prop("exec_mode", "rtlsim")
             y_expected = oxe.execute_onnx(model, input_dict)["global_out"]
 
             assert (
@@ -540,8 +539,6 @@ def test_fpgadataflow_vvau_rtl(
     partitioned_model = partitioned_model.transform(PrepareIP(part, 5))
     partitioned_model = partitioned_model.transform(HLSSynthIP())
     partitioned_model = partitioned_model.transform(CreateStitchedIP(part, 5))
-    # set top-level prop for stitched-ip rtlsim and launch
-    partitioned_model.set_metadata_prop("exec_mode", "rtlsim")
     # transpose input since we're now simulating HW layers (NCHW --> NHWC)
     input_dict["global_in"] = np.transpose(input_dict["global_in"], (0, 2, 3, 1))
     output_vvau_stitched = oxe.execute_onnx(

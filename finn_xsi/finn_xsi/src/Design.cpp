@@ -6,7 +6,7 @@ using namespace xsi;
 Design::Design(xsi::Kernel& kernel, const std::string& design_lib, const s_xsi_setup_info& setup_info) : _kernel(std::move(kernel)) { _kernel.open(design_lib, setup_info); }
 
 Design::Design(xsi::Kernel& kernel, const std::string& design_lib, const char* const log_file, const char* const wdb_file)
-    : Design(kernel, design_lib, s_xsi_setup_info{.logFileName = const_cast<char*>(log_file), .wdbFileName = const_cast<char*>(wdb_file), .xsimDir = ""}) {}
+    : Design(kernel, design_lib, s_xsi_setup_info{.logFileName = const_cast<char*>(log_file), .wdbFileName = const_cast<char*>(wdb_file)}) {}
 
 // Destructor
 Design::~Design() { _kernel.close(); }

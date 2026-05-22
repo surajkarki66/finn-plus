@@ -602,7 +602,7 @@ class SimulationBuilder:
                 else build_dir
             )
             sim_base, sim_rel = finnxsi.compile_sim_obj(
-                top_module_name, all_verilog_srcs, sim_dir, debug=debug
+                top_module_name, all_verilog_srcs, sim_dir, debug=debug, fifosim=True
             )
             rtlsim_so = Path(sim_base) / Path(sim_rel)
             model.set_metadata_prop("rtlsim_so", str(rtlsim_so))

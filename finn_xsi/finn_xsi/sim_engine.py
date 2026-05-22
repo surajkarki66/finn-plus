@@ -57,8 +57,6 @@ class SimEngine:
         """Create a simulation engine bound to the given kernel and design."""
         top = xsi.Design(xsi.Kernel(kernel), design, log, wdb)
         clk = top.getPort("ap_clk")
-        for port in top.ports():
-            print(port.name())
         # If clock pumping is disabled, set clk2x to None
         try:
             clk2x = top.getPort("ap_clk2x")
@@ -71,6 +69,7 @@ class SimEngine:
         def cycle(updates: dict[xsi.Port, str]) -> None:
             """Perform one clock cycle with the given port updates."""
             # Rising Edge
+            top.run(1)
             clk.set(1).write_back()
             if clk2x is not None:
                 clk2x.set(1).write_back()
@@ -83,7 +82,7 @@ class SimEngine:
             if clk2x is None:
                 top.run(4999)
                 clk.set(0).write_back()
-                top.run(5000)
+                top.run(4999)
             else:
                 top.run(2499)
                 clk2x.set(0).write_back()
@@ -92,12 +91,21 @@ class SimEngine:
                 clk2x.set(1).write_back()
                 top.run(2500)
                 clk2x.set(0).write_back()
-                top.run(2500)
+                top.run(2499)
 
         self.top = top
         self.cycle = cycle
         self.ticks = 0
-        self.tasks = []
+        self.tasks: list[
+            SimEngine.Reset
+            | SimEngine.InputStreamer
+            | SimEngine.OutputCollector
+            | SimEngine.StreamTracer
+            | SimEngine.AxiLiteWriter
+            | SimEngine.AxiLiteReader
+            | SimEngine.AximmRoImage
+            | SimEngine.AximmQueue
+        ] = []
         self.watchdogs: list[SimEngine.Watchdog] = []
 
     # ------------------------------------------------------------------------
@@ -116,7 +124,7 @@ class SimEngine:
     # Task Scheduling
     def enlist(
         self,
-        task: "SimEngine.Reset | SimEngine.InputStreamer | SimEngine.OutputCollector | SimEngine.Watchdog | SimEngine.StreamTracer | SimEngine.AxiLiteWriter | SimEngine.AxiLiteReader | SimEngine.AximmRoImage | SimEngine.AximmQueue",  # noqa
+        task: "SimEngine.Reset | SimEngine.InputStreamer | SimEngine.OutputCollector | SimEngine.StreamTracer | SimEngine.AxiLiteWriter | SimEngine.AxiLiteReader | SimEngine.AximmRoImage | SimEngine.AximmQueue",  # noqa
     ) -> None:
         """Register a task to be driven by the simulation loop."""
         self.tasks.append(task)

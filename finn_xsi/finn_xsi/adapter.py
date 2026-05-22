@@ -40,6 +40,7 @@ def compile_sim_obj(
     sim_out_dir: Path,
     debug: bool = False,
     behav: bool = False,
+    fifosim: bool = False,
 ) -> tuple[Path, Path]:
     """Compile the simulation object (.so) for the given top module and source files."""
     # create a .prj file with the source files
@@ -92,7 +93,7 @@ def compile_sim_obj(
 
     cmd_xelab = [
         "xelab",
-        "work." + top_module_name,
+        "work." + top_module_name if not fifosim else "finn_design_wrapper",
         "-relax",
         "-dll",
         "--O3",

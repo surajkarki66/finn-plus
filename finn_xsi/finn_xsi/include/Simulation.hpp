@@ -48,10 +48,10 @@ class Simulation {
 
         // Find I/O Streams and initialize their Status
         for (size_t i = 0; i < _istream_descs.size(); ++i) {
-            istreams[i] = S_AXIS_Control{top, clk, std::data(_istream_descs)[i].job_size, std::data(_istream_descs)[i].job_size, std::data(_istream_descs)[i].name};
+            istreams[i] = S_AXIS_Control{top, clk, std::data(_istream_descs)[i].job_size, std::data(_istream_descs)[i].job_size, std::string(std::data(_istream_descs)[i].name)};
         }
         for (size_t i = 0; i < _ostream_descs.size(); ++i) {
-            ostreams[i] = M_AXIS_Control{top, clk, std::data(_ostream_descs)[i].job_size, std::data(_ostream_descs)[i].name};
+            ostreams[i] = M_AXIS_Control{top, clk, std::data(_ostream_descs)[i].job_size, std::string(std::data(_ostream_descs)[i].name)};
         }
 
         // Save simulation input output behaviour

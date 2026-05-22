@@ -41,7 +41,7 @@ from pathlib import Path
 from qonnx.core.datatype import BaseDataType
 from qonnx.custom_op.base import CustomOp
 from qonnx.util.basic import roundup_to_integer_multiple
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from finn.util.basic import get_liveness_threshold_cycles, is_versal
 from finn.util.exception import FINNInternalError
@@ -298,7 +298,9 @@ class HWCustomOp(CustomOp):
         """Set reset input in finnxsi to zero, toggle the clock and set it back to one."""
         finnxsi.reset_rtlsim(sim)
 
-    def rtlsim_multi_io(self, sim: SimEngine, io_dict: dict[str, Any], sname: str = "_V") -> None:
+    def rtlsim_multi_io(
+        self, sim: SimEngine, io_dict: dict[str, dict[str, list[int]]], sname: str = "_V"
+    ) -> None:
         """Run rtlsim for this node, supports multiple i/o streams."""
         num_out_values = self.get_number_output_values()
         # Use the larger of expected cycles or liveness threshold
