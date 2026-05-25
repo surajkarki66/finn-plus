@@ -19,11 +19,12 @@ from finn.util.settings import get_settings
 
 class NodeContainer(HWCustomOp, RTLBackend):
     """Some functions are (partially) copied from FINNLoop
-        Currently unsupported features:
-            - Multiple inputs/outputs
-            - FIFO sizing
-            - Minimizing bitwitdh 
+    Currently unsupported features:
+        - Multiple inputs/outputs
+        - FIFO sizing
+        - Minimizing bitwitdh
     """
+
     def __init__(self, onnx_node, **kwargs):
         """Initialize NodeContainer and read the number of body graphs."""
         super().__init__(onnx_node, **kwargs)

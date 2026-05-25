@@ -394,7 +394,6 @@ class bench:
                 # microbenchmarks might skip because no model can be generated for given params
                 return "skipped"
 
-
         # Set some global defaults (could still be overwritten by run-specific YAML)
         cfg.output_dir = self._build_inputs["build_dir"]
         # enable extra performance optimizations (physopt)

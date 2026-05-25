@@ -6,7 +6,7 @@ from qonnx.transformation.base import Transformation
 
 
 class ExtractSelectableWeights(Transformation):
-    """Merge structurally identical DNN bodies into a single NodeContainer with selectable weights."""
+    """Merge identical DNN bodies into a single NodeContainer with selectable weights."""
 
     def __init__(self, **kwargs):
         """Initialize with a 'models' list of submodel names to merge."""
