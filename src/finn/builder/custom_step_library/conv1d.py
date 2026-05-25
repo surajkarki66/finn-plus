@@ -1,3 +1,4 @@
+"""Custom build steps for 1D convolution models."""
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.change_3d_tensors_to_4d import Change3DTo4DTensors
 from qonnx.transformation.general import GiveUniqueNodeNames
@@ -8,12 +9,14 @@ from finn.builder.build_dataflow_config import DataflowBuildConfig
 
 
 def step_pre_streamline(model: ModelWrapper, cfg: DataflowBuildConfig):
+    """Pre-streamlining transformations specific to 1D convolution models."""
     model = model.transform(Change3DTo4DTensors())
     model = model.transform(absorb.AbsorbScalarMulAddIntoTopK())
     return model
 
 
 def step_convert_final_layers(model: ModelWrapper, cfg: DataflowBuildConfig):
+    """Final transformations to convert remaining operations to HW layers."""
     model = model.transform(to_hw.InferElementwiseBinaryOperation())
     model = model.transform(to_hw.InferLabelSelectLayer())
     model = model.transform(GiveUniqueNodeNames())

@@ -1,3 +1,4 @@
+"""Transformation to extract selectable weights from multi-DNN models."""
 from onnx import TensorProto, helper
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -5,11 +6,15 @@ from qonnx.transformation.base import Transformation
 
 
 class ExtractSelectableWeights(Transformation):
+    """Merge structurally identical DNN bodies into a single NodeContainer with selectable weights."""
+
     def __init__(self, **kwargs):
+        """Initialize with a 'models' list of submodel names to merge."""
         super().__init__()
         self.models = kwargs.get("models", None)  # First model is always the "master model"
 
     def apply(self, model: ModelWrapper) -> ModelWrapper:
+        """Extract selectable weights and restructure model into a NodeContainer."""
         if len(self.models) < 2:
             return model, False
 

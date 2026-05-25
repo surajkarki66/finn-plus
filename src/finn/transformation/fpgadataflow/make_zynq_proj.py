@@ -123,6 +123,7 @@ class MakeZYNQProject(Transformation):
         enable_finn_switch=False,
         live_fifo_sizing=False,
     ):
+        """Initialize MakeZYNQProject with the target platform and clock period."""
         super().__init__()
         self.platform = platform
         self.period_ns = period_ns
@@ -716,6 +717,7 @@ class MakeZYNQProject(Transformation):
         return (model, False)
 
     def _generate_pr_flow(self, model):
+        """Generate partial reconfiguration hardware and bitstreams."""
         pr_config = []
         sdp_nodes = model.get_nodes_by_op_type("StreamingDataflowPartition")
         pr_sdp_nodes = []

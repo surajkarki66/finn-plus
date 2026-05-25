@@ -1,3 +1,4 @@
+"""Custom RTL op for wrapping multiple DNN bodies in a single NodeContainer."""
 import json
 import math
 import numpy as np
@@ -24,11 +25,13 @@ class NodeContainer(HWCustomOp, RTLBackend):
             - Minimizing bitwitdh 
     """
     def __init__(self, onnx_node, **kwargs):
+        """Initialize NodeContainer and read the number of body graphs."""
         super().__init__(onnx_node, **kwargs)
         bodies_attr = get_by_name(self.onnx_node.attribute, "bodies")
         self.bodies = bodies_attr.i if bodies_attr is not None else 0
 
     def get_nodeattr_types(self):
+        """Return attribute type definitions including per-body graph attributes."""
         b = {f"body_{i}": ("g", True, "") for i in range(self.bodies)}
         my_attrs = {
             "bodies": ("i", True, 0),
@@ -41,6 +44,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return my_attrs
 
     def get_nodeattr(self, name):
+        """Get a node attribute by name, handling graph-type attributes."""
         try:
             (dtype, req, def_val, allowed_values) = self.get_nodeattr_def(name)
             attr = get_by_name(self.onnx_node.attribute, name)
@@ -67,6 +71,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
             raise AttributeError("Op has no such attribute: " + name)
 
     def set_nodeattr(self, name, value):
+        """Set a node attribute by name, handling graph-type attributes."""
         try:
             (dtype, req, def_val, allowed_values) = self.get_nodeattr_def(name)
             attr = get_by_name(self.onnx_node.attribute, name)
@@ -83,11 +88,13 @@ class NodeContainer(HWCustomOp, RTLBackend):
             raise AttributeError("Op has no such attribute: " + name)
 
     def _get_reference_body(self):
+        """Return the first body model (body_0) as the reference."""
         # Return the first body
         # For the selectable_weights case we can assume that all bodies have the same structure
         return self.get_nodeattr("body_0")
 
     def _get_reference_node(self):
+        """Return the first node of the first body as the reference node."""
         # Return the first node of the first body
         # For the selectable_weights case we can assume that all bodies have one node
         # And that they have the same structure (folding, datatype, etc)
@@ -95,6 +102,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return body.graph.node[0]
 
     def _check_types(self, node, types: list):
+        """Return True if node.op_type matches any entry in the types list."""
         node_type = node.op_type
         for t in types:
             if t.endswith("_hls") or t.endswith("_rtl"):
@@ -106,6 +114,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return False
 
     def get_normal_input_shape(self, ind=0):
+        """Return the unfolded input shape."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         node = body.graph.node[0]
@@ -114,6 +123,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return ishape
 
     def get_normal_output_shape(self, ind=0):
+        """Return the unfolded output shape."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         node = body.graph.node[-1]
@@ -122,6 +132,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return oshape
 
     def get_folded_input_shape(self, ind=0):
+        """Return the folded input shape."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         node = body.graph.node[0]
@@ -130,6 +141,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return ishape
 
     def get_folded_output_shape(self, ind=0):
+        """Return the folded output shape."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         node = body.graph.node[-1]
@@ -138,9 +150,11 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return s
 
     def infer_node_datatype(self, model):
+        """Infer output datatype (not applicable for NodeContainer)."""
         pass
 
     def get_input_datatype(self, ind=0):
+        """Return the input datatype."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         first_inst = getCustomOp(body.graph.node[0])
@@ -148,6 +162,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return idt
 
     def get_output_datatype(self, ind=0):
+        """Return the output datatype."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         last_inst = getCustomOp(body.graph.node[-1])
@@ -155,6 +170,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return odt
 
     def get_instream_width(self, ind=0):
+        """Return the input stream width."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         node = body.graph.node[0]
@@ -163,6 +179,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return iwidth
 
     def get_exp_cycles(self):
+        """Return expected cycle count based on the multi_dnn_type attribute."""
         if self.get_nodeattr("multi_dnn_type") == "selectable_weights":
             body = self._get_reference_body()
             node = body.graph.node[-1]
@@ -180,6 +197,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return exp_cycles
 
     def get_outstream_width(self, ind=0):
+        """Return the output stream width."""
         assert ind == 0  # We currently only support one input
         body = self._get_reference_body()
         node = body.graph.node[-1]
@@ -187,6 +205,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return inst.get_outstream_width(ind=ind)
 
     def generate_hdl_memstream(self, fpgapart, pumped_memory=0):
+        """Delegate memstream HDL generation to the reference node's implementation."""
         inst = getCustomOp(self._get_reference_node())
         bodies = self.get_nodeattr("bodies")
         inst.set_nodeattr("bodies", bodies)
@@ -197,6 +216,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         inst.generate_hdl_memstream(fpgapart, pumped_memory)
 
     def generate_params(self, model, path):
+        """Write weight parameter files for all bodies into the given path."""
         num_bodies = self.get_nodeattr("bodies")
         reference_node = self._get_reference_node()
         reference_inst = getCustomOp(reference_node)
@@ -283,6 +303,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
                             os.remove(body_file)
 
     def generate_hdl(self, model, fpgapart, clk):
+        """Generate HDL for the NodeContainer based on multi_dnn_type."""
         multi_dnn_type = self.get_nodeattr("multi_dnn_type")
         if multi_dnn_type == "selectable_weights":
             self.generate_hdl_memstream(fpgapart)
@@ -348,6 +369,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return
 
     def collect_ip_dirs(self, model, ipstitch_path):
+        """Collect IP directories needed for stitching from all nodes in the model."""
         # collect list of all IP dirs
         ip_dirs = []
         need_memstreamer = False
@@ -369,6 +391,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return ip_dirs
 
     def code_generation_ipi(self):
+        """Return Vivado IPI tcl commands to instantiate the NodeContainer IP."""
         ip_vlnv = self.get_nodeattr("ip_vlnv")
         stitched_top = self.onnx_node.name + "_wrapper"
         if ip_vlnv and self.get_nodeattr("gen_top_module") == stitched_top:
@@ -534,6 +557,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return cmd
 
     def execute_node(self, context, graph):
+        """Execute the NodeContainer by delegating to the reference node's executor."""
         node = self._get_reference_node()
         inst = getCustomOp(node)
         set_attr_inst = ["code_gen_dir_ipgen", "gen_top_module"]
@@ -545,6 +569,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return ret
 
     def get_rtl_file_list(self, abspath=False):
+        """Return the list of RTL source files."""
         node = self._get_reference_node()
         inst = getCustomOp(node)
         code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
@@ -554,6 +579,7 @@ class NodeContainer(HWCustomOp, RTLBackend):
         return inst.get_rtl_file_list(abspath)
 
     def get_verilog_top_module_intf_names(self):
+        """Return Verilog interface names for the NodeContainer top module."""
         if self.get_nodeattr("multi_dnn_type") == "selectable_weights":
             inst = getCustomOp(self._get_reference_node())
             intf_names = inst.get_verilog_top_module_intf_names()

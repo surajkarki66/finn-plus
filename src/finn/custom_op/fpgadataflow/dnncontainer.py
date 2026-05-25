@@ -1,3 +1,4 @@
+"""Custom op for wrapping a sub-graph (DNN) as a container node."""
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.base import CustomOp
 from qonnx.util.basic import get_by_name, qonnx_make_model
@@ -6,13 +7,17 @@ from finn.core.onnx_exec import execute_onnx
 
 
 class DNNContainer(CustomOp):
+    """ONNX custom op that encapsulates an entire DNN subgraph as one node."""
+
     def get_nodeattr_types(self):
+        """Return attribute type definitions for DNNContainer."""
         return {
             "body": ("g", True, ""),
             "io_map": ("s", True, "{}"),
         }
 
     def get_nodeattr(self, name):
+        """Get a node attribute by name, handling graph-type attributes."""
         # Copied from FinnLoop OP
         try:
             (dtype, req, def_val, allowed_values) = self.get_nodeattr_def(name)
@@ -40,6 +45,7 @@ class DNNContainer(CustomOp):
             raise AttributeError("Op has no such attribute: " + name)
 
     def set_nodeattr(self, name, value):
+        """Set a node attribute by name, handling graph-type attributes."""
         # Copied from FinnLoop OP
         try:
             (dtype, req, def_val, allowed_values) = self.get_nodeattr_def(name)
@@ -57,12 +63,15 @@ class DNNContainer(CustomOp):
             raise AttributeError("Op has no such attribute: " + name)
 
     def make_shape_compatible_op(self, model):
+        """Return a shape-compatible op (not applicable for DNNContainer)."""
         pass
 
     def infer_node_datatype(self, model):
+        """Infer output datatype (not applicable for DNNContainer)."""
         pass
 
     def execute_node(self, context, graph):
+        """Execute the contained subgraph using the FINN ONNX executor."""
         # Copied from GenericPartition
         # Validate this code
         model = self.get_nodeattr("body")
@@ -87,6 +96,7 @@ class DNNContainer(CustomOp):
                     context[node.name + "_" + tname] = ret[tname]
 
     def verify_node(self):
+        """Verify that the DNNContainer node has the correct number of attributes."""
         # Copied from GenericPartition
         info_messages = []
 

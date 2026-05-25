@@ -1,3 +1,4 @@
+"""Benchmark DUT for multi-DNN MVAU configurations."""
 import json
 import numpy as np
 import os
@@ -18,7 +19,10 @@ from finn.transformation.fpgadataflow.minimize_weight_bit_width import MinimizeW
 
 
 class bench_mvau_multi_dnn(bench):
+    """Benchmark class for multi-DNN MVAU hardware configurations."""
+
     def __init__(self, params, task_id, run_id, work_dir, artifacts_dir, save_dir, debug=False):
+        """Initialize benchmark with parameters and output directories."""
         super().__init__(params, task_id, run_id, work_dir, artifacts_dir, save_dir, debug=debug)
 
     def _make_single_mvau_model(
@@ -38,6 +42,7 @@ class bench_mvau_multi_dnn(bench):
         ram_style_thresholds="auto",
         backend="hls",
     ):
+        """Build and return a single MVAU ONNX model with the given parameters."""
         mw = W.shape[0]
         mh = W.shape[1]
 
@@ -122,6 +127,7 @@ class bench_mvau_multi_dnn(bench):
         return model
 
     def _apply_sparsity(self, W, mw, mh):
+        """Apply random sparsity to weight matrix W."""
         sparsity_amount = self._params.get("sparsity_amount", 0)
         if sparsity_amount == 0:
             return W
@@ -132,10 +138,12 @@ class bench_mvau_multi_dnn(bench):
         return W
 
     def _step_export_onnx(self):
+        """Generate and save multi-DNN ONNX models and config."""
         result = self._generate_multi_dnn_models_and_config()
         self._multi_dnn_config_path = result
 
     def _generate_multi_dnn_models_and_config(self):
+        """Create two MVAU submodels and their multi-DNN config JSON; return config path."""
         scenario, mem_mode = self._params["scenario_mem_mode"]
         idt = DataType[self._params["idt"]]
         wdt = DataType[self._params["wdt"]]
@@ -227,6 +235,7 @@ class bench_mvau_multi_dnn(bench):
         return cfg_json_path
 
     def _create_multi_dnn_config_json(self, scenario, model_a_path, model_b_path, backend):
+        """Return a multi-DNN configuration dict for the given scenario."""
         post_collapse_steps = [
             {"step_minimize_bit_width": "Collapsed_Model"},
             {"step_generate_estimate_reports": "Collapsed_Model"},
@@ -277,6 +286,7 @@ class bench_mvau_multi_dnn(bench):
         }
 
     def _step_build_setup(self):
+        """Return a default DataflowBuildConfig for the multi-DNN build."""
         cfg = build_cfg.DataflowBuildConfig(
             target_fps=None,
             steps=None,
@@ -284,9 +294,11 @@ class bench_mvau_multi_dnn(bench):
         return cfg
 
     def run(self):
+        """Run the multi-DNN build flow."""
         return self._steps_multi_dnn_build_flow()
 
     def _steps_multi_dnn_build_flow(self):
+        """Execute multi-DNN build flow steps in order."""
         cfg = self._step_build_setup()
         multi_dnn_cfg_path = self._generate_multi_dnn_models_and_config()
         if multi_dnn_cfg_path is None:

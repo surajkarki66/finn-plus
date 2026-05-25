@@ -1,3 +1,4 @@
+"""Configuration loader for multi-DNN build flows."""
 import json
 import os
 from copy import deepcopy
@@ -7,19 +8,24 @@ from finn.builder.build_dataflow_config import DataflowBuildConfig
 
 
 class MultiDNNConfig:
+    """Parses and provides access to a multi-DNN JSON configuration file."""
+
     virtual_keywords = {"output_dir"}
 
     def __init__(self, multi_dnn_config_path):
+        """Load and parse the multi-DNN config JSON from the given path."""
         with open(multi_dnn_config_path, "r") as fp_json:
             self.multi_dnn_config = json.load(fp_json)
             self.submodel_names = list(self.multi_dnn_config["Submodels"].keys())
 
     def get_submodel_model(self, model_name):
+        """Return the ModelWrapper for the named submodel."""
         return ModelWrapper(
             self.multi_dnn_config["Submodels"][model_name].get("model_path", None), True
         )
 
     def get_steps(self):
+        """Return the list of (step_name, target_names) tuples from the config."""
         steps = self.multi_dnn_config.get("Steps", None)
         if steps is None:
             return None
@@ -39,6 +45,7 @@ class MultiDNNConfig:
     def generate_virtual_configs(
         self, model_names: str | list[str], cfg: DataflowBuildConfig
     ) -> dict[str, DataflowBuildConfig]:
+        """Create per-submodel DataflowBuildConfig copies with adjusted output paths."""
         output_configs = {}
         if "Multi_DNN_Wrapper" in model_names or "Collapsed_Model" in model_names:
             output_configs = {

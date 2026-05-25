@@ -1,3 +1,4 @@
+"""Wrapper class for managing a collection of DNN submodels as a multi-DNN graph."""
 from onnx import helper
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -8,13 +9,17 @@ from finn.custom_op.fpgadataflow.dnncontainer import DNNContainer
 
 
 class MultiDNNWrapper:
+    """Wraps multiple DNN models into a single multi-DNN ONNX graph with DNNContainer nodes."""
+
     def __init__(self, model_dict):
+        """Initialize from a dict mapping submodel names to ONNX model paths."""
         model_dict = {key: ModelWrapper(value) for key, value in model_dict.items()}
         assert all(isinstance(value, ModelWrapper) for value in model_dict.values())
         self.multi_model = self._create_multi_dnn_graph(model_dict)
         self._collapsed = False
 
     def _create_multi_dnn_graph(self, model_dict: dict):
+        """Build and return an ONNX model wrapping each submodel in a DNNContainer."""
         nodes = []
         for key, model in model_dict.items():
             model.graph.name = key
@@ -41,6 +46,7 @@ class MultiDNNWrapper:
         return model
 
     def apply_step(self, step, targets: str | list, cfgs: dict[str, DataflowBuildConfig]):
+        """Apply a build step to the specified target submodel(s) or the wrapper model."""
         # Names Multi_DNN_Wrapper and Collapsed_Model are reserved target names.
         # Do not name submodels as such
         assert not (
@@ -77,6 +83,7 @@ class MultiDNNWrapper:
                 self[target] = step(self[target], cfgs[target])
 
     def get_container_dict(self):
+        """Return a dict mapping submodel names to their ModelWrapper bodies."""
         if self._collapsed:
             raise Exception("Container dict is not defined if model is collapsed.")
 
@@ -90,6 +97,7 @@ class MultiDNNWrapper:
         return models
 
     def __getitem__(self, key):
+        """Return the submodel ModelWrapper for the given submodel name."""
         if self._collapsed:
             raise Exception("Index access is not allowed if model is collapsed.")
 
@@ -104,6 +112,7 @@ class MultiDNNWrapper:
                         return submodel
 
     def __setitem__(self, key, value):
+        """Update the submodel body for the given submodel name."""
         if self._collapsed:
             raise Exception("Index access is not allowed if model is collapsed.")
 
@@ -119,6 +128,7 @@ class MultiDNNWrapper:
                         break
 
     def __len__(self):
+        """Return the number of submodels in the wrapper."""
         if self._collapsed:
             raise Exception("Length is not defined if model is collapsed.")
 

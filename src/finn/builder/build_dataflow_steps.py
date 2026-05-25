@@ -374,6 +374,7 @@ def prepare_for_stitched_ip_rtlsim(verify_model, cfg):
 
 
 def prepare_loop_ops_fifo_sizing(node, cfg):
+    """Apply FIFO sizing transformations to the subgraph of a FINNLoop node."""
     node_inst = getCustomOp(node)
     loop_model = node_inst.get_nodeattr("body")
     loop_model = loop_model.transform(GiveUniqueNodeNames(prefix=node.name + "_"))
@@ -409,6 +410,7 @@ def prepare_loop_ops_fifo_sizing(node, cfg):
 
 
 def prepare_loop_ops_ipgen(node, cfg):
+    """Run HLS synthesis and IP stitching for the subgraph of a FINNLoop node."""
     node_inst = getCustomOp(node)
     loop_model = node_inst.get_nodeattr("body")
     # go first into subgraph to check if there are other loop ops
@@ -427,6 +429,7 @@ def prepare_loop_ops_ipgen(node, cfg):
 
 
 def step_prepare_nodecontainer(model: ModelWrapper, cfg: DataflowBuildConfig):
+    """Prepare NodeContainer nodes in the model."""
     # Generate a stitched ip of every nodecontainer (body)
     # For selectable weights generate a stitiched ip for the entire container
     # For the partial reconfiguration case generate a stitched ip for every body
@@ -523,6 +526,7 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig):
 
     # Helper function to conditionally apply transformation
     def apply_if_relevant(model, op_types, transform, desc=""):
+        """Apply transform only if at least one node of op_types exists in model."""
         # Check if any of the relevant op types exist in the model
         if any(len(model.get_nodes_by_op_type(op_type)) > 0 for op_type in op_types):
             if desc:
@@ -1243,6 +1247,7 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
 
 
 def verify_mlo(model: ModelWrapper, cfg: DataflowBuildConfig, step: str):
+    """Run RTL simulation verification for a MLO model."""
     finn_loop = model.get_nodes_by_op_type("FINNLoop")
     # TODO: allow for multiple FINNLoops
     mlo_prehook = mlo_prehook_func_factory(finn_loop[0])

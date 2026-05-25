@@ -1,3 +1,4 @@
+"""Build-flow steps for multi-DNN model construction and collapsing."""
 import json
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.general import GiveUniqueNodeNames
@@ -18,6 +19,7 @@ from finn.transformation.multi_dnn.nodecontainer_transformations import NameNode
 
 
 def _resolve_multi_dnn_mode(cfg: DataflowBuildConfig):
+    """Read the generation mode and kwargs from the multi-DNN config JSON."""
     with open(cfg.multi_dnn_config_path, "r") as fp_json:
         multi_dnn_config = json.load(fp_json)
     gen = multi_dnn_config.get("Generation")
@@ -25,6 +27,7 @@ def _resolve_multi_dnn_mode(cfg: DataflowBuildConfig):
 
 
 def step_apply_multi_dnn(model: ModelWrapper, cfg: DataflowBuildConfig):
+    """Apply the appropriate multi-DNN transformation (Parallel, SelectableWeights, or PR)."""
     mode, kwargs = _resolve_multi_dnn_mode(cfg)
     if mode == "Parallel":
         if kwargs is not None:
@@ -48,6 +51,7 @@ def step_apply_multi_dnn(model: ModelWrapper, cfg: DataflowBuildConfig):
 
 
 def step_collapse_multi_dnn(model: ModelWrapper, cfg: DataflowBuildConfig):
+    """Collapse all DNNContainer subgraphs and specialize the resulting concat/split nodes."""
     model = model.transform(CollapseModels())
     model = model.transform(InferSplitIntoSplitMultiHeads())
     model = model.transform(to_hw.InferConcatLayer())

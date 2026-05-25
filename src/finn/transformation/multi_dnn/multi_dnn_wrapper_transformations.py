@@ -1,3 +1,4 @@
+"""ONNX transformations for multi-DNN wrapper graphs."""
 import copy
 import json
 import numpy as np
@@ -10,8 +11,11 @@ from finn.custom_op.fpgadataflow.dnncontainer import DNNContainer
 
 
 class MultiDNNWrapperExposeIO(Transformation):
+    """Expose the IO of each DNNContainer as top-level graph inputs/outputs."""
+
     # Call this before doing any further transformations. This transformation is used to map the IO
     def apply(self, model):
+        """Map DNNContainer body IO to the top-level graph."""
         for node in model.graph.node:
             if node.op_type == "DNNContainer":
                 # Check if this node is not connected to anything else
@@ -62,7 +66,10 @@ class MultiDNNWrapperExposeIO(Transformation):
 
 
 class CollapseModels(Transformation):
+    """Collapse all DNNContainer nodes by inlining their subgraphs into the parent graph."""
+
     def apply(self, model):
+        """Inline each DNNContainer body into the top-level graph."""
         inital_nodes = copy.deepcopy(model.graph.node)
         for node in inital_nodes:
             if node.op_type == "DNNContainer":
@@ -141,7 +148,10 @@ class CollapseModels(Transformation):
 
 
 class CombineInputsChannelwise(Transformation):
+    """Merge all graph inputs into one tensor by concatenating along the channel dimension."""
+
     def apply(self, model):
+        """Insert a Split node and combine graph inputs channel-wise."""
         inputs = model.graph.input
         if len(inputs) < 2:
             return model, False
@@ -213,7 +223,10 @@ class CombineInputsChannelwise(Transformation):
 
 
 class CombineOutputsChannelwise(Transformation):
+    """Merge all graph outputs into one tensor by concatenating along the channel dimension."""
+
     def apply(self, model):
+        """Insert a Concat node and combine graph outputs channel-wise."""
         outputs = model.graph.output
         if len(outputs) < 2:
             return model, False

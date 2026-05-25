@@ -1023,6 +1023,8 @@ class ElementwiseAbsDiff_hls(
     ElementwiseBinaryOperation_hls,
     elementwise_binary.ElementwiseAbsDiff,
 ):
+    """HLS specialization for elementwise absolute difference of two inputs."""
+
     pass
 
 

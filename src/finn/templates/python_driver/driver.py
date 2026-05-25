@@ -1359,25 +1359,34 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
     """FINN overlay for DMA and instrumentation (with Switch Block)."""
 
     class Selector:
+        """Controls a hardware time-multiplexing for weight switching."""
+
         def __init__(self, ip_dict_entry):
+            """Initialize Selector from an IP dictionary entry."""
             base_addr = ip_dict_entry["phys_addr"]
             addr_range = ip_dict_entry["addr_range"]
             self.mmio = MMIO(base_addr, addr_range)
 
         def halt(self):
+            """Halt the selector."""
             self.mmio.write(0x00, 0x0000_0000)
 
         def start(self):
+            """Start the selector."""
             self.mmio.write(0x00, 0x0000_0001)
 
         def set_schedule(self, schedule: list[int]):
+            """Write a schedule (list of repetition counts) to the selector registers."""
             for i, rep in enumerate(schedule):
                 value = (i & 0xFFFF) | ((rep & 0xFFFF) << 16)
                 self.mmio.write(0x04 + 4 * i, value)
 
     class DFXController:
+        """Manages the DFX Controller IP for partial reconfiguration."""
+
         # Note: sockets have to ordered correctly.
         def __init__(self, dfx_controller_inst, sockets: list[str], bitstream_folder=None):
+            """Initialize DFXController, load bitstreams and configure the hardware."""
             self.dfx_controller_inst = dfx_controller_inst
             self.bitstream_folder = bitstream_folder
             assert os.path.isdir(self.bitstream_folder)
@@ -1436,11 +1445,13 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                 self.restart_with_status(vsm=socket, is_full=True, rm_id=0)
 
         def _map_socket(self, socket_name):
+            """Map a socket name or integer index to its numeric index."""
             if isinstance(socket_name, int):
                 return socket_name
             return self.socket_map[socket_name]
 
         def _reg_addr(self, vsm, bank, reg_select):
+            """Compute the register address from VSM, bank and register-select fields."""
             return (
                 (vsm << self.vsm_select_shift)
                 | (bank << self.bank_select_shift)
@@ -1448,10 +1459,12 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             )
 
         def _extract_bits(self, value, high, low):
+            """Extract a bit field from value between positions high and low (inclusive)."""
             mask = (1 << (high - low + 1)) - 1
             return (value >> low) & mask
 
         def get_status(self, vsm):
+            """Return a status dict for the given virtual socket manager."""
             vsm = self._map_socket(vsm)
             addr = self._reg_addr(vsm, bank=0, reg_select=0)
             raw = self.dfx_controller_inst.read(addr)
@@ -1468,6 +1481,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             }
 
         def set_control(self, cmd, vsm, byte_field=0, halfword_field=0):
+            """Write a control word to the DFX controller for the given VSM."""
             vsm = self._map_socket(vsm)
             control_value = (
                 ((halfword_field & 0xFFFF) << 16) | ((byte_field & 0xFF) << 8) | (cmd & 0xFF)
@@ -1476,13 +1490,16 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             self.dfx_controller_inst.write(addr, control_value)
 
         def shutdown(self, vsm):
+            """Shutdown the given virtual socket manager."""
             self.set_control(0, vsm=vsm)
 
         def restart_with_status(self, vsm, is_full=False, rm_id=0):
+            """Restart the VSM, optionally with a full reconfiguration for a given RM."""
             byte_field = 1 if is_full else 0
             self.set_control(2, vsm=vsm, byte_field=byte_field, halfword_field=rm_id)
 
         def set_rm_bs_index(self, rm_id, bs_index, vsm, clear_bs_index=0):
+            """Map a reconfigurable module ID to a bitstream index in the controller."""
             vsm = self._map_socket(vsm)
             reg_sel = (rm_id << 1) | 0
             addr = self._reg_addr(vsm, bank=2, reg_select=reg_sel)
@@ -1498,6 +1515,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             reset_required=0,
             reset_duration=1,
         ):
+            """Write control flags for a reconfigurable module to the controller."""
             vsm = self._map_socket(vsm)
             reg_sel = (rm_id << 1) | 1
             addr = self._reg_addr(vsm, bank=2, reg_select=reg_sel)
@@ -1510,6 +1528,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             self.dfx_controller_inst.write(addr, value)
 
         def set_bs_id(self, bs_row, bs_id, vsm):
+            """Write the bitstream ID for the given row to the controller."""
             vsm = self._map_socket(vsm)
             reg_sel = (bs_row << 2) | 0
             addr = self._reg_addr(vsm, bank=3, reg_select=reg_sel)
@@ -1517,18 +1536,21 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             self.dfx_controller_inst.write(addr, value)
 
         def set_bs_address(self, bs_row, address, vsm):
+            """Write the bitstream memory address for the given row to the controller."""
             vsm = self._map_socket(vsm)
             reg_sel = (bs_row << 2) | 1
             addr = self._reg_addr(vsm, bank=3, reg_select=reg_sel)
             self.dfx_controller_inst.write(addr, address)
 
         def set_bs_size(self, bs_row, size, vsm):
+            """Write the bitstream byte size for the given row to the controller."""
             vsm = self._map_socket(vsm)
             reg_sel = (bs_row << 2) | 2
             addr = self._reg_addr(vsm, bank=3, reg_select=reg_sel)
             self.dfx_controller_inst.write(addr, size)
 
         def print_status(self, vsm):
+            """Print the current status of the given virtual socket manager."""
             s = self.get_status(vsm=vsm)
             print(f"VSM {vsm} Status: {s['raw']}")
             print(f"RM ID: {s['rm_id']}")
@@ -1537,74 +1559,93 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             print(f"State: {s['state']}")
 
     def get_config_reg(self):
+        """Read and return the ZynqMP configuration register value."""
         os.system("echo 0xffca3008 > /sys/firmware/zynqmp/config_reg")
         result = os.popen("cat /sys/firmware/zynqmp/config_reg").read()
         return result.strip()
 
     def enable_icap(self):
+        """Enable ICAP as the configuration source."""
         os.system("echo 0xffca3008 0xff 0x0 > /sys/firmware/zynqmp/config_reg")
 
     def enable_pcap(self):
+        """Enable PCAP as the configuration source."""
         os.system("echo 0xffca3008 0xff 0x1 > /sys/firmware/zynqmp/config_reg")
 
     class DFXScheduler:
+        """Hardware scheduler for timed DFX reconfiguration slots."""
+
         def __init__(self, ip_dict_entry, num_slots):
+            """Initialize DFXScheduler from an IP dictionary entry and slot count."""
             base_addr = ip_dict_entry["phys_addr"]
             addr_range = ip_dict_entry["addr_range"]
             self.mmio = MMIO(base_addr, addr_range)
             self.num_slots = num_slots
 
         def write64(self, msb_offset, value):
+            """Write a 64-bit value split across two 32-bit registers at msb_offset."""
             self.mmio.write(msb_offset, (value >> 32) & 0xFFFF_FFFF)
             self.mmio.write(msb_offset + 4, value & 0xFFFF_FFFF)
 
         def read64(self, msb_offset):
+            """Read a 64-bit value from two 32-bit registers at msb_offset."""
             msb = self.mmio.read(msb_offset)
             lsb = self.mmio.read(msb_offset + 4)
             return (msb << 32) | lsb
 
         def slot_offset(self, slot):
+            """Return the register offset for the given slot index."""
             if slot < 0 or slot >= self.num_slots:
                 raise ValueError(f"slot must be in range [0, {self.num_slots - 1}], got {slot}")
             return 0x1C + slot * 0x0C
 
         def start(self):
+            """Start the DFX scheduler."""
             self.mmio.write(0, 0x1)
 
         def stop(self):
+            """Stop the DFX scheduler."""
             ctrl = self.mmio.read(0)
             self.mmio.write(0, ctrl & ~(0x1))
 
         @property
         def running(self):
+            """Return True if the scheduler is currently running."""
             return bool(self.mmio.read(0) & (1 << 0))
 
         @property
         def error(self):
+            """Return True if the scheduler has encountered an error."""
             return bool(self.mmio.read(0) & (1 << 1))
 
         @property
         def max_cycles(self):
+            """Return the maximum cycle count observed by the scheduler."""
             return self.read64(0x04)
 
         @property
         def min_cycles(self):
+            """Return the minimum cycle count observed by the scheduler."""
             return self.read64(0x0C)
 
         @property
         def pre_decouple_cycles(self):
+            """Return the pre-decouple cycle count."""
             return self.read64(0x14)
 
         @pre_decouple_cycles.setter
         def pre_decouple_cycles(self, value):
+            """Set the pre-decouple cycle count."""
             self.write64(0x14, value)
 
         def set_slot(self, slot, rm_id, cycles_wait):
+            """Configure a scheduler slot with an RM ID and wait-cycle count."""
             base = self.slot_offset(slot)
             self.mmio.write(base, (1 << rm_id) & 0xFFFF_FFFF)
             self.write64(base + 4, cycles_wait)
 
         def status(self):
+            """Return a status dict with running, error, and cycle-count fields."""
             return {
                 "running": self.running,
                 "error": self.error,
@@ -1685,6 +1726,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         return super().validate(*args, **kwargs)
 
     def experiment_ma(self, **kwargs):
+        """Run a multi-DNN reconfiguration experiment and save results."""
         report_dir = kwargs.get("report_dir")
         os.makedirs(report_dir, exist_ok=True)
         report = {}

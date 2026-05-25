@@ -1,3 +1,4 @@
+"""Transformations for generating and naming NodeContainer stitched IP blocks."""
 from onnx import TensorProto, helper
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -20,11 +21,15 @@ from finn.transformation.general import ApplyConfig
 
 
 class GenerateNodeContainerStitched(Transformation):
+    """Generate stitched HLS/RTL IP for each NodeContainer in the model."""
+
     def __init__(self, cfg):
+        """Initialize with the DataflowBuildConfig used for IP generation."""
         self.cfg = cfg
         super().__init__()
 
     def apply(self, model):
+        """Generate stitched IP for selectable-weights and PR NodeContainer nodes."""
         for node in model.graph.node:
             if node.op_type == "NodeContainer":
                 node_inst = getCustomOp(node)
@@ -125,7 +130,10 @@ class GenerateNodeContainerStitched(Transformation):
 
 
 class NameNodeContainerNodes(Transformation):
+    """Assign unique names to nodes inside partial-reconfiguration NodeContainer bodies."""
+
     def apply(self, model):
+        """Rename all nodes inside PR NodeContainer bodies with unique prefixed names."""
         for node in model.graph.node:
             if node.op_type != "NodeContainer":
                 continue

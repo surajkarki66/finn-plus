@@ -615,7 +615,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     #: If set, appends experiments_config to settings file during driver generation
     experiments_config_path: Optional[str] = None
 
-    # : If set, enable Multi-DNN build flow
+    #: If set, enable Multi-DNN build flow
     multi_dnn_config_path: Optional[str] = None
 
     def _resolve_hls_clk_period(self) -> float:

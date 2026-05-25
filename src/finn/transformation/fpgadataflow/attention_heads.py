@@ -869,7 +869,10 @@ class UnrollMultiHeadAttention(Transformation):
 
 
 class InferSplitIntoSplitMultiHeads(Transformation):
+    """Infer multi-head split layers from ONNX Split nodes operating on the last axis."""
+
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+        """Replace eligible Split nodes with SplitMultiHeads HW nodes."""
         graph = model.graph
         graph_modified = False
         for index, node in enumerate(graph.node):
