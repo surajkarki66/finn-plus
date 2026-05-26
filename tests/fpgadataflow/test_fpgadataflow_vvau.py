@@ -69,6 +69,8 @@ from finn.transformation.general import ApplyConfig
 def insert_and_set_fifo_depths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
     """Run FIFO sizing for testing."""
     cfg = DataflowBuildConfig()
+    cfg.fpga_part = fpga_part
+    cfg.synth_clk_period_ns = clk_ns
     model = model.transform(
         BuildSimulation(
             fpga_part,
@@ -358,6 +360,7 @@ def test_fpgadataflow_vvau(
             model = model.transform(PrepareIP("xczu7ev-ffvc1156-2-e", 5))
             model = model.transform(HLSSynthIP())
             model = model.transform(CreateStitchedIP("xczu7ev-ffvc1156-2-e", 5))
+            model.set_metadata_prop("exec_mode", "rtlsim")
 
             y_expected = oxe.execute_onnx(model, input_dict)["global_out"]
 
