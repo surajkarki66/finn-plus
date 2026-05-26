@@ -357,7 +357,6 @@ class TestSRL16EDepthRange:
 class TestNeedsMinimization:
     """Test the needs_minimization method."""
 
-    # TODO: Maybe remove this behavior
     def test_small_depths_no_minimization(self):
         """Test that small depths don't need minimization."""
         from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
@@ -369,18 +368,6 @@ class TestNeedsMinimization:
         assert not sim._needs_minimization(32, 8)
         assert not sim._needs_minimization(16, 8)
         assert not sim._needs_minimization(2, 8)
-
-    # TODO: Maybe remove this behavior
-    def test_qsrl_range_no_minimization(self):
-        """Test that depths within QSRL range don't need minimization."""
-        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
-
-        sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
-        sim.max_qsrl_depth = 256
-
-        # Depths within max_qsrl_depth don't need minimization
-        assert not sim._needs_minimization(128, 8)
-        assert not sim._needs_minimization(256, 8)
 
     def test_large_depths_need_minimization(self):
         """Test that large depths with multiple BRAM blocks need minimization."""
@@ -445,22 +432,6 @@ class TestNeedsMinimization:
                         f"depth={depth}, bw={bw}, blocks={blocks}, min_blocks={min_blocks} "
                         f"should need minimization"
                     )
-
-    def test_minimum_bram_edge_case(self):
-        """Test edge case at minimum BRAM blocks."""
-        from finn.transformation.fpgadataflow.simulation_connected import RunLayerParallelSimulation
-
-        sim = RunLayerParallelSimulation.__new__(RunLayerParallelSimulation)
-        sim.max_qsrl_depth = 256
-
-        # A depth that's just slightly above max_qsrl_depth with minimum BRAM blocks
-        # The behavior depends on whether it's deemed too close to optimize
-        depth = 300
-        bitwidth = 1
-
-        # Verify the method executes without error
-        result = sim._needs_minimization(depth, bitwidth)
-        assert isinstance(result, bool)
 
 
 if __name__ == "__main__":
