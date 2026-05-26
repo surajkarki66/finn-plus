@@ -292,6 +292,9 @@ class FINNSettings(BaseModel):
         # Make everything lower case
         modified_data = self.model_dump()
         for key in data.keys():
+            # Ignore key if no data is passed (can happen when reading the CLI arguments)
+            if data[key] is None:
+                continue
             lkey = key.lower()
             if lkey in modified_data:
                 modified_data[lkey] = data[key]
