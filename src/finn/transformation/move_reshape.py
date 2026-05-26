@@ -77,12 +77,14 @@ class RemoveCNVtoFCFlatten(Transformation):
                                     (_b, h, w, c) = shape
                                     # absorb transpose into weight matrix,
                                     # allowing FC layer to operate on the NHWC input
-                                    w = cast("np.ndarray", model.get_initializer(consumer.input[1]))
-                                    if w is None:
+                                    w_arr = cast(
+                                        "np.ndarray", model.get_initializer(consumer.input[1])
+                                    )
+                                    if w_arr is None:
                                         raise FINNInternalError(
                                             "Initializer for matmul weights is not set."
                                         )
-                                    w_new = w.reshape(c, h, w, mh)
+                                    w_new = w_arr.reshape(c, h, w, mh)
                                     w_new = w_new.transpose((1, 2, 0, 3))
                                     w_new = w_new.reshape(mw, mh)
                                     model.set_initializer(consumer.input[1], w_new)
