@@ -30,7 +30,7 @@ variables:
     value: "1"
   SLURM_TIMEOUT:
     description: "Select SLURM timeout"
-    value: "1-0" # [days-hours]
+    value: "2-0" # [days-hours]
   SLURM_PARTITION:
     description: "Slurm partition (e.g., normal, largemem, fpga, gpu)"
     value: "normal"
