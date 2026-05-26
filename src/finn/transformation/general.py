@@ -17,7 +17,7 @@ import warnings
 
 # Protobuf onnx graph node type
 from onnx import AttributeProto, NodeProto, mapping  # noqa
-from qonnx.custom_op.registry import getCustomOp
+from qonnx.custom_op.registry import getCustomOp, is_custom_op
 from qonnx.transformation.base import Transformation
 
 
@@ -69,7 +69,7 @@ class ApplyConfig(Transformation):
             if node_config:
                 self.used_configurations += [config_key]
 
-            try:
+            if is_custom_op(node.domain, node.op_type):
                 inst = getCustomOp(node)
 
                 if "Defaults" in model_config.keys():
@@ -92,9 +92,6 @@ class ApplyConfig(Transformation):
                 # set node attributes from specified configuration
                 for attr_name, value in node_config.items():
                     inst.set_nodeattr(attr_name, value)
-            except Exception:
-                # Node is not a custom op, but it might have subgraphs
-                pass
 
             # Recursively handle nested subgraphs
             for attr in node.attribute:

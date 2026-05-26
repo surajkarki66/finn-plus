@@ -193,3 +193,14 @@ def test_roundtrip_export_import():
 
     if os.path.exists(config_json_file):
         os.remove(config_json_file)
+
+
+@pytest.mark.util
+def test_apply_config_reports_invalid_custom_op_attr():
+    """Test invalid custom-op configs fail instead of being silently ignored."""
+
+    model, _ = make_im2col_test_model()
+    im2col_node = model.graph.node[0]
+
+    with pytest.raises(Exception):
+        model.transform(ApplyConfig({im2col_node.name: {"not_an_im2col_attr": 1}}))
