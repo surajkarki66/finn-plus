@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 
 from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
-from finn.util.exception import FINNMultiFPGAUserError
+from finn.transformation.fpgadataflow.multifpga.graph import get_inseparable_nodes
+from finn.util.exception import FINNMultiFPGAError, FINNMultiFPGAUserError
 from finn.util.fpgadataflow import get_device_id, get_submodel, set_device_id
 from finn.util.logging import log
 
@@ -62,6 +63,24 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
                     f"Cannot create SDPs in graph: Node "
                     f"{node.name} is already a dataflow partition."
                 )
+
+        # Check that all inseparable nodes have the same device
+        inseparable_nodes = get_inseparable_nodes(model)
+        for group in inseparable_nodes:
+            for i in range(1, len(group)):
+                n0 = model.graph.node[group[i]]
+                n1 = model.graph.node[group[i - 1]]
+                d0 = get_device_id(n0)
+                d1 = get_device_id(n1)
+                if d0 != d1:
+                    raise FINNMultiFPGAError(
+                        f"Nodes in branches of the graph have different device"
+                        f" IDs. This should be prevented by the automatic "
+                        f"partitioning, but can happen with a manual "
+                        f"partitioning configuration. The nodes are "
+                        f"{n0.name} (device {d0}) and "
+                        f"{n1.name} (device {d1})"
+                    )
 
         # Prepare everything
         current_device = get_device_id(model.graph.node[0])
