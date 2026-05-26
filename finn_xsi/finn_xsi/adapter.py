@@ -11,6 +11,7 @@
 #############################################################################
 
 import errno
+import numpy as np
 import os
 import re
 from finn_xsi.sim_engine import SimEngine
@@ -187,7 +188,7 @@ def close_rtlsim(sim: SimEngine) -> None:
 def rtlsim_multi_io(
     sim: SimEngine,
     io_dict: dict[str, dict[str, list[int]]],
-    num_out_values: int | dict[str, int],
+    num_out_values: int | np.integer | dict[str, int | np.integer],
     sname: str = "_V_V",
     liveness_threshold: int = 10000,
 ) -> int:
@@ -198,8 +199,11 @@ def rtlsim_multi_io(
     else:
         # num_out_values is provided as integer (indicating the expected
         # outputs from the single output stream) - make into dict
-        if not isinstance(num_out_values, int):
-            raise FINNInternalError("num_out_values must be int for single output stream")
+        if not isinstance(num_out_values, int) and not (isinstance(num_out_values, np.integer)):
+            raise FINNInternalError(
+                f"num_out_values must be int for single output stream, "
+                f"but got {type(num_out_values)}"
+            )
         oname = next(iter(io_dict["outputs"].keys()))
         num_out_values = {oname: num_out_values}
 
@@ -219,7 +223,7 @@ def rtlsim_multi_io(
         stream_name = out + sname
         hex_output_streams[out] = sim.collect_output(
             stream_name,
-            num_out_values[out],
+            int(num_out_values[out]),
             watchdog=sim.create_watchdog(f"{stream_name} timeout", liveness_threshold),
         )
 
