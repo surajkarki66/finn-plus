@@ -36,6 +36,7 @@ class PrepareAuroraFlow(Transformation):
         self.make_args = " ".join(
             f"{k}={v}" for k, v in partitioning_configuration.communication_kernel_arguments.items()
         )
+        self.ports = partitioning_configuration.ports_per_device
         self.aurora_storage = Path(make_build_dir("aurora_storage_")).absolute()
         self.aurora_path = get_settings().finn_deps / "AuroraFlow"
         if not self.aurora_path.exists():
@@ -65,6 +66,12 @@ class PrepareAuroraFlow(Transformation):
         >>> xo.parent.parent.name
         'auroraflow_build_dev0_ind0'
         """
+        if index >= self.ports:
+            raise FINNMultiFPGAConfigError(
+                f"Cannot create aurora kernel number {index+1} "
+                f"(index {index}), since the configuration/device "
+                f"has only {self.ports} networking ports."
+            )
         if self.verbosity == MFVerbosity.HIGH:
             log.info(f"Packaging AuroraFlow core (Device: {device}, Index: {index})")
 

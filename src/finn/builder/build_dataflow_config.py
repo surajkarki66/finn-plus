@@ -232,6 +232,7 @@ class PartitioningConfiguration:
 
     # The number of ports per device - this might change in meaning,
     # depending on the communication kernel used
+    # TODO: Should be moved into platforms.py
     ports_per_device: int = 2
 
     # What strategy to use to partition the dataflow graph

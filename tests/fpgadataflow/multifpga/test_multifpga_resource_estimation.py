@@ -1,50 +1,51 @@
 import pytest
 
-from pathlib import Path
-from qonnx.core.datatype import DataType
+from fpgadataflow.multifpga.utils import get_model
 from typing import TYPE_CHECKING, cast
 
-from finn.builder.build_dataflow import resolve_build_steps
 from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     DataflowOutputType,
-    MFTopology,
-    MFVerbosity,
-    PartitioningStrategy,
+    PartitioningConfiguration,
     ShellFlowType,
 )
-from finn.transformation.fpgadataflow.multifpga.partitioner import (
-    AuroraPartitioner,
-    Partitioner,
-    PartitionForMultiFPGA,
-)
-from finn.transformation.fpgadataflow.multifpga.utils import (
-    available_resources,
-    get_estimated_model_resources,
-)
-from finn.util import platforms
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNMultiFPGANoPartitionerSolutionError
-from tests.fpgadataflow.multifpga.utils import generate_rn18, prepare_resnet_for_multifpga
-from tests.fpgadataflow.test_set_folding import make_multi_fclayer_model
+from finn.util.resources import get_estimated_model_resources
 
 if TYPE_CHECKING:
-    from qonnx.core.modelwrapper import ModelWrapper
+    from numbers import Real
 
 
 @pytest.mark.multifpga
 @pytest.mark.slow
-@pytest.mark.parametrize("model_type", ["rn18", "multi-fclayer"])
 @pytest.mark.parametrize(
     "platform", [("U280", ShellFlowType.VITIS_ALVEO), ("Pynq-Z1", ShellFlowType.VIVADO_ZYNQ)]
 )
-@pytest.mark.parametrize("num_layers", [2, 10])
-@pytest.mark.parametrize("bitwidth", [4, 8, 2, 3])
+@pytest.mark.parametrize(
+    "model_type",
+    [
+        ("CNV", 1, 1, True),
+        ("CNV", 1, 2, True),
+        ("CNV", 2, 2, True),
+        ("LFC", 1, 1, True),
+        ("LFC", 1, 2, True),
+        ("SFC", 1, 1, True),
+        ("SFC", 1, 2, True),
+        ("SFC", 2, 2, True),
+        ("TFC", 1, 1, True),
+        ("TFC", 1, 2, True),
+        ("mobilenetv1", 4, 4, True),
+        ("resnet18", 4, 4, True),
+    ],
+)
 def test_resource_est_for_all_layers(
-    model_type: str, platform: tuple[str, ShellFlowType], num_layers: int, bitwidth: int
+    model_type: tuple[str, int, int, bool],
+    platform: tuple[str, ShellFlowType],
+    pytestconfig: pytest.Config,
 ) -> None:
     """Test that resource estimtates for all layers can be found."""
     board, shell = platform
+    model_name, wbits, abits, pretrained = model_type
 
     # Create a dataflow config
     output_dir = make_build_dir("test_res_estimation_")
@@ -56,56 +57,56 @@ def test_resource_est_for_all_layers(
         steps=[],
         target_fps=3000,
         shell_flow_type=shell,
+        partitioning_configuration=PartitioningConfiguration(),
     )
 
-    match model_type:
-        case "multi-fclayer":
-            dt = DataType["UINT" + str(bitwidth)]
-            model = make_multi_fclayer_model(3, dt, dt, dt, num_layers)
-            steps = [
-                "step_qonnx_to_finn",
-                "step_tidy_up",
-                "step_streamline",
-                "step_convert_to_hw",
-                "step_specialize_layers",
-                "step_target_fps_parallelization",
-                "step_apply_folding_config",
-                "step_minimize_bit_width",
-                "step_generate_estimate_reports",
-                "step_hw_codegen",
-                "step_hw_ipgen",
-                "step_set_fifo_depths",
-            ]
-            # Run the first half of the FINN flow
-            steps_to_execute = resolve_build_steps(cfg)
-            for step in steps_to_execute:
-                model = step(model, cfg)
-            cfg.steps = steps
-
-        case "rn18":
-            model, modelpath = generate_rn18("test_resource_est_all_layers", w=bitwidth, a=bitwidth)
-            assert modelpath.exists()
-            # TODO, DEBUG: Set skip_fifo_sizing to False
-            model, cfg = prepare_resnet_for_multifpga(model, cfg, skip_fifo_sizing=True)
-        case _:
-            raise NotImplementedError(
-                f"Invalid test configuration. " f"Unknown model type: {model_type}"
-            )
+    model, _ = get_model(
+        model_name,
+        wbits,
+        abits,
+        pretrained,
+        "step_set_fifo_depths",
+        skip_fifo_sizing=True,
+        cfg=cfg,
+        pytestconfig=pytestconfig,
+    )
 
     # Run the resource estimation
-    estimates: dict[int, dict[str, int | float]] = get_estimated_model_resources(
-        model, fpga_part=cfg._resolve_fpga_part()  # noqa
+    assert cfg.partitioning_configuration is not None
+    estimates: dict[int, dict[str, Real]] = get_estimated_model_resources(
+        model,
+        fpga_part=cfg._resolve_fpga_part(),  # noqa
+        considered_resources=cfg.partitioning_configuration.considered_resources,
+        add_missing_resources=True,
     )
-    model = cast("ModelWrapper", model)
+
+    # Checks
     for node in model.graph.node:
         index = model.get_node_index(node)
-        assert index in estimates.keys(), (
-            f"No estimate found for layer " f"{node.name} (index: {index})"
-        )
+
+        # Chat every layer has an estimate
+        assert (
+            index in estimates.keys()
+        ), f"No estimate found for layer {node.name} (index: {index})"
+
+        # Assert that every estimate is either an int or a float
         for est in estimates[index].values():
             assert type(est) in [int, float]  # Efficiency measures use floats
 
-        assert any(est > 0 for est in estimates[index].values()), (
+        # Assert that every layer uses any resource at all
+        assert any(est > cast("Real", 0) for est in estimates[index].values()), (
             f"Layer {node.name} (index: {index}) does not use "
             f"any resources at all: {estimates[index]}"
         )
+
+    # Check that resource estimates were added if resource type was not used in a layer
+    if model_name == "CNV" and wbits == 2 and abits == 2:
+        no_ff = [f"ConvolutionInputGenerator_rtl_{i}" for i in range(8)] + ["Tresholding_rtl_0"]
+        layers_seen: dict[str, bool] = dict.fromkeys(no_ff, False)
+        for i, node in enumerate(model.graph.node):
+            if node.name in no_ff:
+                layers_seen[node.name] = True
+                assert estimates[i]["FF"] == 0
+        assert all(
+            list(layers_seen.values())
+        ), "Not all expected layers were seen for this model type!"

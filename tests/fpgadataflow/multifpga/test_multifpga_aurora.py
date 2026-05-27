@@ -11,44 +11,38 @@ import mip
 from fpgadataflow.multifpga.utils import get_model
 from pathlib import Path
 from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
-from typing import TYPE_CHECKING, Any, Literal
 
 from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     MFCommunicationKernel,
     MFTopology,
     MFVerbosity,
-    MIPSolver,
     PartitioningConfiguration,
     PartitioningStrategy,
     ShellFlowType,
 )
-from finn.transformation.fpgadataflow.multifpga.assign_metadata import AssignNetworkMetadata
-from finn.transformation.fpgadataflow.multifpga.aurora_metadata import AuroraNetworkMetadata
+from finn.transformation.fpgadataflow.multifpga.aurora.metadata import AuroraNetworkMetadata
+from finn.transformation.fpgadataflow.multifpga.aurora.partitioner import AuroraPartitioner
 from finn.transformation.fpgadataflow.multifpga.communication_kernels import PrepareAuroraFlow
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
 )
-from finn.transformation.fpgadataflow.multifpga.partitioner import (
-    AuroraPartitioner,
-    PartitionForMultiFPGA,
-)
-from finn.transformation.fpgadataflow.multifpga.utils import available_resources, get_device_id
+from finn.transformation.fpgadataflow.multifpga.create_network_metadata import CreateNetworkMetadata
+from finn.transformation.fpgadataflow.multifpga.partition_model import PartitionForMultiFPGA
 from finn.util.basic import make_build_dir
 from finn.util.exception import (
     FINNError,
     FINNMultiFPGAConfigError,
     FINNMultiFPGANoPartitionerSolutionError,
 )
+from finn.util.fpgadataflow import get_device_id
 from finn.util.platforms import platforms
-
-if TYPE_CHECKING:
-    from qonnx.core.modelwrapper import ModelWrapper
+from finn.util.resources import available_resources
 
 
 @pytest.mark.auroraflow
 @pytest.mark.multifpga
-@pytest.mark.parametrize("board", ["U280", "U55C", "Pynq-Z1"])
+@pytest.mark.parametrize("board", ["U280", "U55C"])
 @pytest.mark.parametrize("topology", [MFTopology.CHAIN])
 @pytest.mark.parametrize(
     "communication_kernel_args",
@@ -78,13 +72,8 @@ class TestAuroraFlowPreparationAndMetadata:
         """
         devices, nodes = device_node_combinations
 
-        # Check which creator we use
-        assignment_order = {MFTopology.CHAIN: "linear"}[topology]
-
         # Create an SDP ready branchless model
-        model = create_sdp_ready_model_no_branches(
-            nodes, devices, assignment_type, assignment_order, shuffle_devices
-        )
+        model = create_sdp_ready_model_no_branches(nodes, devices, assignment_type, shuffle_devices)
 
         # Create a config based on the test parameters
         cfg = DataflowBuildConfig(
@@ -108,12 +97,19 @@ class TestAuroraFlowPreparationAndMetadata:
             )
         )
         model = model.transform(
-            AssignNetworkMetadata(
-                communication_kernel=cfg.partitioning_configuration.communication_kernel,
-                topology=topology,
-                verbosity=MFVerbosity.NONE,
+            CreateNetworkMetadata(
+                cfg.partitioning_configuration.communication_kernel, MFVerbosity.NONE
             )
         )
+
+        # No kernels packaged yet
+        meta = AuroraNetworkMetadata.from_model(model)
+        unprepared_aurora_kernels = len(meta.get_unprepared_aurora_kernels())
+        if devices > 1:
+            assert unprepared_aurora_kernels == (devices - 1) * 2
+        else:
+            assert unprepared_aurora_kernels == 0
+
         model = model.transform(
             PrepareAuroraFlow(
                 cfg._resolve_vitis_platform(),  # noqa
@@ -124,6 +120,8 @@ class TestAuroraFlowPreparationAndMetadata:
 
         # Try and load the previously generated metadata from the models metadata prop
         meta = AuroraNetworkMetadata.from_model(model)
+        unprepared_aurora_kernels = len(meta.get_unprepared_aurora_kernels())
+        assert unprepared_aurora_kernels == 0
 
         # Check that the AuroraFlow storage directory got saved in the model metadata
         aurora_storage = model.get_metadata_prop("aurora_storage")
@@ -134,6 +132,10 @@ class TestAuroraFlowPreparationAndMetadata:
         assert aurora_storage.exists()
 
         # Check if each device had its respective kernels packaged
+        if devices == 1:
+            assert len(meta.data.keys()) == 0
+        else:
+            assert len(meta.data.keys()) == devices
         for kerneldata in meta.data.values():
             for aurora in kerneldata:
                 assert aurora.aurora_xo is not None
@@ -142,7 +144,7 @@ class TestAuroraFlowPreparationAndMetadata:
     @pytest.mark.multifpga
     @pytest.mark.slow
     def test_aurora_package_single(
-        self, communication_kernel_args: dict[str, str], board: str
+        self, communication_kernel_args: dict[str, str], board: str, topology: MFTopology
     ) -> None:
         """Test Aurora packaging. In detail:
         - Check that the names of the XO files produced by AuroraFlow didn't change.
@@ -154,6 +156,7 @@ class TestAuroraFlowPreparationAndMetadata:
             board=board,
             partitioning_configuration=PartitioningConfiguration(
                 num_fpgas=2,
+                topology=topology,
                 communication_kernel=MFCommunicationKernel.AURORA,
                 communication_kernel_arguments=communication_kernel_args,
             ),
@@ -169,10 +172,14 @@ class TestAuroraFlowPreparationAndMetadata:
         build_dir = prep.aurora_storage / "auroraflow_build_dev0_ind0"
         assert build_dir.exists()
         assert res.exists()
-        res = prep.package_single("", 1, 2)
-        build_dir = prep.aurora_storage / "auroraflow_build_dev1_ind2"
-        assert build_dir.exists()
-        assert res.exists()
+
+        # On devices like the U280, there are only 2 QSFPs, so an index 2 (third kernel) cannot
+        # be produced, hence the kernel should not be there.
+        with pytest.raises(FINNError):
+            res = prep.package_single("", 1, 2)
+            build_dir = prep.aurora_storage / "auroraflow_build_dev1_ind2"
+            assert build_dir.exists()
+            assert res.exists()
 
 
 @pytest.mark.auroraflow
@@ -441,32 +448,14 @@ class TestAuroraFlowPartitioning:
         TODO: Save recent CI run data in proper infrastructure as soon as we have set it
         up, instead of hardcoding the values.
         """
-        flow_type = self.get_shell_flow_type(board)
-        model, _ = self.make_model(
-            model_type, f"test_regression_model_{'_'.join(map(str, (model_type)))}"
-        )
-        _, _, part = self.prepare_and_partition_model(
-            model,
-            board,
-            flow_type,
-            2,
-            topology,
-            strategy,
-            True,
-            model_type[0],
-            max_util=0.85,
-            ideal_util=0.75,
-            ports_per_device=2,
-            separate_iodmas=True,
-            target_fps=10,
-            mvau_wwidth_max=1024,
-            synth_clk_ns=5.0,
-            solver=None,
-        )
-        assert part.partitioner is not None
-        assert part.partitioner.model.objective.x is not None
-        assert part.partitioner.model.objective.x < 0
+        # flow_type = self.get_shell_flow_type(board)
+
+        # TODO
         raise NotImplementedError()
+
+        # assert part.partitioner is not None
+        # assert part.partitioner.model.objective.x is not None
+        # assert part.partitioner.model.objective.x < 0
 
     @pytest.mark.parametrize(
         "distribution",

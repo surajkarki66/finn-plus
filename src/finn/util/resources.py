@@ -1,4 +1,6 @@
+from numbers import Real
 from qonnx.core.modelwrapper import ModelWrapper
+from typing import cast
 
 from finn.analysis.fpgadataflow.hls_synth_res_estimation import hls_synth_res_estimation
 from finn.analysis.fpgadataflow.res_estimation import res_estimation
@@ -6,10 +8,10 @@ from finn.util.exception import FINNUserError
 from finn.util.logging import log
 from finn.util.platforms import Platform
 
-ResourceEstimates = dict[str, dict[str, int | float]]
+ResourceEstimates = dict[str, dict[str, Real]]
 """Short alias for a resource dict."""
 
-ResourceEstimatesByIndex = dict[int, dict[str, int | float]]
+ResourceEstimatesByIndex = dict[int, dict[str, Real]]
 """Short alias for a resource dict."""
 
 
@@ -56,25 +58,44 @@ def _merge_resource_estimations(
     return result
 
 
-def get_estimated_model_resources(
-    model: ModelWrapper, fpga_part: str, considered_resources: list[str]
+def get_estimated_model_resources(  # noqa
+    model: ModelWrapper,
+    fpga_part: str,
+    considered_resources: list[str],
+    add_missing_resources: bool,
 ) -> ResourceEstimatesByIndex:
     """Gather resources of all layers based on estimates both from FINNs HWCustomOp implementation,
     as well as the HLS reports. These are then merged to produce
     the worst case resource estimates and returned.
 
-    If there are layers that don't have an estimate
-    for all considered resources, an error is raised.
+    Arguments:
+    ---------
+        `model`: The model to estimate.
+        `fpga_part`: FPGA Part identifier.
+        `considered_resources`: A list of resource types to consider.
+        `add_missing_resources`: Determines behaviour in case a resource type
+            from `considered_resources` is not found: If `True`, then missing
+            resource types are set to 0. If, for example, a layer has no `FF` estimate
+            in either FINN or HLS estimation, FF: 0 is entered for these layers. If set
+            to `False`, an error is raised instead.
     """
     estimates: ResourceEstimates = res_estimation(model, fpga_part)
     hls_estimates: ResourceEstimates = hls_synth_res_estimation(model)
     result: ResourceEstimates = _merge_resource_estimations(estimates, hls_estimates)
     resource_missing = False
+
+    # Check if resource types are missing (and add them)
     for layer in result:
         for restype in considered_resources:
             if restype not in result[layer]:
-                resource_missing = True
-                log.error(f"Node {layer} has no resource estimation for resource {restype}!")
+                if add_missing_resources:
+                    result[layer][restype] = cast("Real", 0)
+                    log.info(f"Added missing resource estimation on layer {layer} ({restype}: 0)")
+                else:
+                    resource_missing = True
+                    log.error(f"Node {layer} has no resource estimation for resource {restype}!")
+
+    # Check that estimates for all layers are available
     layer_missing = False
     est_by_index = {}
     for i, node in enumerate(model.graph.node):
@@ -84,7 +105,9 @@ def get_estimated_model_resources(
             log.error(f"No resource estimations were found for node {node.name}!")
         est_by_index[i] = result[node.name]
     if layer_missing or resource_missing:
-        raise FINNUserError("At least one node is missing one or more resource estimation numbers.")
+        raise FINNUserError(
+            "At least one node is missing one or more resource estimation numbers.\n" + str(result)
+        )
     return est_by_index
 
 

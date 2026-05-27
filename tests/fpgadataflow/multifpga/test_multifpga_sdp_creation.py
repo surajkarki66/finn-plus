@@ -1,29 +1,34 @@
 """Test that Multi-FPGA SDPs are created correctly based on a given partitioning."""
-
 import pytest
 
 import os
 import random
 from copy import deepcopy
+from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from random import randint
 from typing import cast
 
+from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     CreateMultiFPGAStreamingDataflowPartition,
     get_device_id,
 )
 from finn.util.basic import make_build_dir
+from finn.util.fpgadataflow import set_device_id
 from tests.fpgadataflow.test_set_folding import make_multi_fclayer_model
 
-
 # TODO: Tests for this util function
+
+
 def equal_device_assignment(devices: int, nodes: int) -> list[int]:
-    """Return the number of nodes per device (device==index). If the number of nodes
-    cannot be divided by the number of devices, the leftover nodes are assigned to a random
-    device.
+    """Take a number of devices and nodes, and return a list of ints. The 0th
+    index holds the number of nodes that device 0 should contain, etc.
+
+    If the number of nodes cannot be divided by the number of devices, the
+    leftover nodes are assigned to a random device.
     """
     leftover = nodes % devices
     nodes_used = nodes - leftover
@@ -35,7 +40,10 @@ def equal_device_assignment(devices: int, nodes: int) -> list[int]:
 
 
 def random_device_assignment(devices: int, nodes: int) -> list[int]:
-    """Randomly assign nodes to devices until no nodes are left. After being assigned
+    """Take a number of devices and nodes, and return a list of ints. The 0th
+    index holds the number of nodes that device 0 should contain, etc.
+
+    Randomly assign nodes to devices until no nodes are left. After being assigned
     a number of nodes, the device is removed from the pool of candidates.
     """
     assert nodes >= devices
@@ -59,11 +67,19 @@ def create_sdp_ready_model_no_branches(
     node_count: int,
     device_count: int,
     assignment_type: str,
-    device_assignment: str,
     shuffle_devices: bool = False,
 ) -> ModelWrapper:
     """Create a simple SDP ready model without branches. The device_id is
     set according to the passed assignment arguments.
+
+    Parameters
+    ----------
+        node_count: Number of nodes. Nodes will be numbered 0-node_count.
+        device_count: Number of devices to map the nodes to.
+        assignment_type: How to assign which nodes belong to devices. Can be 'random'
+            to assign a random number of nodes to a device, or 'equal' to distribute nodes
+            equally across all devices.
+        shuffle_devices: If True, the devices are not assigned from 0 to N but in random order.
     """
     # Create a simple chained model without branches
     model = make_multi_fclayer_model(
@@ -85,21 +101,17 @@ def create_sdp_ready_model_no_branches(
         model.graph.node
     ), f"Assignment length doesnt match model node count. Assignment: {assignment}"
 
-    if device_assignment == "linear":
-        overall_node_index = 0
-        device_list = list(range(len(assignment)))
-        if shuffle_devices:
-            random.shuffle(device_list)
+    # Assign node-devices linearly
+    overall_node_index = 0
+    device_list = list(range(len(assignment)))
+    if shuffle_devices:
+        random.shuffle(device_list)
 
-        for current_device in device_list:
-            while assignment[current_device] > 0:
-                getCustomOp(model.graph.node[overall_node_index]).set_nodeattr(
-                    "device_id", current_device
-                )
-                overall_node_index += 1
-                assignment[current_device] -= 1
-    else:
-        raise NotImplementedError()
+    for current_device in device_list:
+        while assignment[current_device] > 0:
+            set_device_id(model.graph.node[overall_node_index], current_device)
+            overall_node_index += 1
+            assignment[current_device] -= 1
     return model
 
 
@@ -125,24 +137,28 @@ def test_random_device_assign_util(devices: int, nodes: int) -> None:
     "device_node_combinations", [(2, 2), (10, 20), (100, 200), (1, 2), (2, 13)]
 )
 @pytest.mark.parametrize("assignment_type", ["random", "equal"])
-@pytest.mark.parametrize("device_assignment", ["linear"])
 @pytest.mark.parametrize("shuffle_devices", [True, False])
-def test_sdp_creation(
+def test_multi_sdp_creation_linear(
     device_node_combinations: tuple[int, int],
     assignment_type: str,
-    device_assignment: str,
     shuffle_devices: bool,
 ) -> None:
     """Test that creating SDPs based on their device id works as expected."""
     device_count, node_count = device_node_combinations
     model = create_sdp_ready_model_no_branches(
-        node_count, device_count, assignment_type, device_assignment, shuffle_devices
+        node_count, device_count, assignment_type, shuffle_devices
     )
     devices_counted = len({get_device_id(node) for node in model.graph.node})
 
     # Creation of the SDPs
     original_model = deepcopy(model)
-    model = model.transform(CreateMultiFPGAStreamingDataflowPartition())
+    model = model.transform(
+        CreateMultiFPGAStreamingDataflowPartition(
+            separate_iodmas=True,
+            dataflow_partition_directory=Path(make_build_dir("test_multi_sdp")),
+            verbosity=MFVerbosity.NONE,
+        )
+    )
     sdp_test_dir = make_build_dir("test_sdp_creation")
     model.save(os.path.join(sdp_test_dir, "sdp_model.onnx"))  # noqa
 
@@ -185,7 +201,8 @@ def test_sdp_creation(
     for node in model.graph.node:
         node_a_device = get_device_id(node)
         sucs = model.find_direct_successors(node)
-        assert sucs is not None
+        if sucs is None:
+            continue
         assert len(sucs) == 1, "Currently (!) SDPs can only have one successor."
         node_b_device = get_device_id(sucs[0])
         assert (

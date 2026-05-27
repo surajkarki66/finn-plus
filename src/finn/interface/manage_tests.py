@@ -61,7 +61,10 @@ def run_test(variant: str, num_workers: str, args: str = "", no_cache_clear: boo
                     "given (please additionally pass --args "
                     "<test-name> in pytest syntax)"
                 )
-            subprocess.run(shlex.split(f"{sys.executable} -m pytest {args}", posix=IS_POSIX))
+            workers_arg = f"-n {num_workers}" if num_workers not in ["1", ""] else ""
+            subprocess.run(
+                shlex.split(f"{sys.executable} -m  pytest {workers_arg} {args}", posix=IS_POSIX)
+            )
         case "doctest":
             if args == "":
                 status(
