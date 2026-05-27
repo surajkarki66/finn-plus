@@ -221,7 +221,7 @@ class CheckSum_hls(HWCustomOp, HLSBackend):
             ),
             "std::vector<unsigned int> checksum(1);",
             "checksum[0] = chk;",
-            'cnpy::npy_save("%s/output_1.npy",&checksum[0],{1},"w");' % code_gen_dir,
+            'cnpy::npy_save("%s/output_1.npy",&checksum[0],{1});' % code_gen_dir,
         ]
 
     def blackboxfunction(self):
