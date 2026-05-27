@@ -307,6 +307,8 @@ class DataflowBuildConfig:
     #: Only relevant if auto_fifo_strategy = LARGEFIFO_RTLSIM
     fifosim_save_waveform: Optional[bool] = False
 
+    debug_fifo: Optional[bool] = False
+
     #: Target clock frequency (in nanoseconds) for Vitis HLS synthesis.
     #: e.g. `hls_clk_period_ns=5.0` will target a 200 MHz clock.
     #: If not specified it will default to synth_clk_period_ns

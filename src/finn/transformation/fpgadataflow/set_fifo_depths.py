@@ -275,6 +275,7 @@ class InsertAndSetFIFODepths(Transformation):
         vivado_ram_style="auto",
         fifosim_input_throttle=True,
         cfg_n_inferences=2,
+        debug_log_dir=None,
     ):
         super().__init__()
         self.fpgapart = fpgapart
@@ -287,6 +288,7 @@ class InsertAndSetFIFODepths(Transformation):
         self.cfg_n_inferences = cfg_n_inferences
         self.mlo_max_iter = 0
         self.ind_map = {}
+        self.debug_log_dir = debug_log_dir
 
     def apply(self, model):
         model = model.transform(GiveUniqueNodeNames())
@@ -402,6 +404,16 @@ class InsertAndSetFIFODepths(Transformation):
             # check depths and fix as necessary
             if (self.max_depth is not None) and (node.get_nodeattr("depth") != self.max_depth):
                 node.set_nodeattr("depth", self.max_depth)
+
+        if self.debug_log_dir is not None:
+            import os as _os
+
+            _os.makedirs(_os.path.abspath(self.debug_log_dir), exist_ok=True)
+            for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
+                log_path = _os.path.abspath(
+                    _os.path.join(self.debug_log_dir, node.name + ".log")
+                )
+                getCustomOp(node).set_nodeattr("debug_log_path", log_path)
 
         # insert FIFOs and do all transformations for RTLsim
         model = model.transform(AnnotateCycles())
