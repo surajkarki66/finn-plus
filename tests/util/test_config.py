@@ -217,5 +217,10 @@ def test_apply_config_warns_for_non_custom_op_config():
     def node_filter(node):
         return node.name == if_node.name
 
-    with pytest.warns(UserWarning, match="Configs can only be applied to custom ops"):
+    with pytest.warns(UserWarning) as warn_records:
         model.transform(ApplyConfig(config, node_filter=node_filter))
+
+    warning_messages = [str(record.message) for record in warn_records]
+    assert any("Configs can only be applied to custom ops" in msg for msg in warning_messages)
+    assert any("{} ({})".format(if_node.name, if_node.op_type) in msg for msg in warning_messages)
+    assert not any("Unused HW configurations" in msg for msg in warning_messages)
