@@ -112,6 +112,8 @@ rtlsim_trace = False
 def insert_and_set_fifo_depths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
     """Run FIFO sizing for testing."""
     cfg = DataflowBuildConfig()
+    cfg.fpga_part = fpga_part
+    cfg.synth_clk_period_ns = clk_ns
     model = model.transform(
         BuildSimulation(
             fpga_part,

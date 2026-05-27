@@ -68,6 +68,8 @@ from finn.xsi import SimEngine
 
 def InsertAndSetFIFODepths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
     cfg = DataflowBuildConfig()
+    cfg.fpga_part = fpga_part
+    cfg.synth_clk_period_ns = clk_ns
     model = model.transform(
         BuildSimulation(
             fpga_part,

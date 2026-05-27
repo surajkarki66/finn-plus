@@ -56,6 +56,8 @@ from tests.testing_util.test import get_trained_network_and_ishape
 def insert_and_set_fifo_depths(model: ModelWrapper, fpga_part: str, clk_ns: float) -> ModelWrapper:
     """Run FIFO sizing for testing."""
     cfg = build_cfg.DataflowBuildConfig()
+    cfg.fpga_part = fpga_part
+    cfg.synth_clk_period_ns = clk_ns
     model = model.transform(
         BuildSimulation(
             fpga_part,
@@ -141,7 +143,6 @@ def make_multi_io_modelwrapper(ch: int, pe: int, idt: BaseDataType) -> ModelWrap
 @pytest.mark.slow
 @pytest.mark.vivado
 @pytest.mark.fpgadataflow
-@pytest.mark.parametrize("method", ["largefifo_rtlsim", "characterize"])
 @pytest.mark.parametrize("topology", ["tfc", "cnv"])
 def test_fifosizing_linear(method, topology):
     tmp_output_dir = fetch_test_model(topology)

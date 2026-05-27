@@ -305,19 +305,25 @@ class ApplySimulatedFIFOSizes(Transformation):
         # Remove all in/outFIFODepths in model for clean slate
         graph = model.graph
         for node in graph.node:
+            # Calculate number of real inputs (predecessors + global inputs)
             predecessors = model.find_direct_predecessors(node)
-            successors = model.find_direct_successors(node)
+            num_preds = len(predecessors) if predecessors is not None else 0
+            global_ins = [inp for inp in node.input if model.get_initializer(inp) is None]
+            num_inputs = len(global_ins) + num_preds
+            # Number of outputs is equal to number of elements in node.output,
+            # because no initializers can be used as outputs
+            successors = len(node.output)
             n = getCustomOp(node)
             if n is not None:
-                if predecessors is not None:
+                if num_inputs > 0:
                     n.set_nodeattr(
                         "inFIFODepths",
-                        cast("list[str | int | float]", [0] * len(predecessors)),
+                        cast("list[str | int | float]", [0] * num_inputs),
                     )
-                if successors is not None:
+                if successors > 0:
                     n.set_nodeattr(
                         "outFIFODepths",
-                        cast("list[str | int | float]", [0] * len(successors)),
+                        cast("list[str | int | float]", [0] * successors),
                     )
 
         # Set new outFIFODepths according to config
