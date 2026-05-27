@@ -341,8 +341,10 @@ def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None)
         top_module_name = top_module_file_name.strip(".v")
         single_src_dir = make_build_dir("rtlsim_" + top_module_name + "_")
         debug = not (trace_file is None or trace_file == "")
+        rtlsim_behavioral = model.get_metadata_prop("rtlsim_behavioral")
+        behav = rtlsim_behavioral is not None and rtlsim_behavioral == "1"
         rtlsim_so = finnxsi.compile_sim_obj(
-            top_module_name, all_verilog_srcs, single_src_dir, debug=debug
+            top_module_name, all_verilog_srcs, single_src_dir, debug=debug, behav=behav
         )
         # save generated lib filename in attribute
         model.set_metadata_prop("rtlsim_so", rtlsim_so[0] + "/" + rtlsim_so[1])
