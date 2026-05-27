@@ -204,3 +204,18 @@ def test_apply_config_reports_invalid_custom_op_attr():
 
     with pytest.raises(Exception):
         model.transform(ApplyConfig({im2col_node.name: {"not_an_im2col_attr": 1}}))
+
+
+@pytest.mark.util
+def test_apply_config_warns_for_non_custom_op_config():
+    """Test explicit configs for standard ONNX nodes are reported."""
+
+    model, _ = make_im2col_test_model()
+    if_node = model.graph.node[1]
+    config = {if_node.name: {"kernel_size": [1, 1]}}
+
+    def node_filter(node):
+        return node.name == if_node.name
+
+    with pytest.warns(UserWarning, match="Configs can only be applied to custom ops"):
+        model.transform(ApplyConfig(config, node_filter=node_filter))

@@ -92,6 +92,11 @@ class ApplyConfig(Transformation):
                 # set node attributes from specified configuration
                 for attr_name, value in node_config.items():
                     inst.set_nodeattr(attr_name, value)
+            elif node_config:
+                warnings.warn(
+                    "\nHW configuration for node %s was ignored because %s is not a custom op. "
+                    "Configs can only be applied to custom ops." % (config_key, node.name)
+                )
 
             # Recursively handle nested subgraphs
             for attr in node.attribute:
