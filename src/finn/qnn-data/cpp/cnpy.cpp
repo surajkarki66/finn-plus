@@ -1,16 +1,16 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// Copyright (C) 2011 Carl Rogers
-//
-// Original cnpy library: https://github.com/rogersce/cnpy (MIT License)
-// AMD modifications (half datatype support by Yaman Umuroglu) licensed under BSD-3-Clause
-//
-// See CNPY_LICENSE for the MIT license text, or visit
-// http://www.opensource.org/licenses/mit-license.php
+/****************************************************************************
+ * Copyright (C) 2011 Carl Rogers
+ * Copyright (C) Advanced Micro Devices, Inc.
+ *
+ * Original cnpy library: https://github.com/rogersce/cnpy (MIT License)
+ * AMD modifications licensed under BSD-3-Clause
+ *
+ * See CNPY_LICENSE for the MIT license text.
+ ***************************************************************************/
 
 #include "cnpy.h"
 
 #include <cassert>
-#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -25,11 +25,11 @@ static void read_npy_header(std::istream &is, size_t &word_size, std::vector<siz
 	{ // preamble: 6-byte magic, 2-byte version, 2-byte header length
 		char  preamble[10];
 		if(!is.read(preamble, 10))
-			throw std::runtime_error("read_npy_header: failed to read preamble");
+			throw  std::runtime_error("read_npy_header: failed to read preamble");
 		uint16_t const  header_len = *reinterpret_cast<uint16_t const*>(preamble+8);
 		header.resize(header_len);
 		if(!is.read(&header[0], header_len))
-			throw std::runtime_error("read_npy_header: failed to read header");
+			throw  std::runtime_error("read_npy_header: failed to read header");
 	}
 
 	{ // fortran order
@@ -43,14 +43,14 @@ static void read_npy_header(std::istream &is, size_t &word_size, std::vector<siz
 		auto const  loc1 = header.find("(");
 		auto const  loc2 = header.find(")");
 		if(loc1 == std::string::npos || loc2 == std::string::npos)
-			throw std::runtime_error("read_npy_header: failed to find header keyword: '(' or ')'");
+			throw  std::runtime_error("read_npy_header: failed to find header keyword: '(' or ')'");
 
 		shape.clear();
 		std::string  str_shape = header.substr(loc1+1, loc2-loc1-1);
 		std::regex const  num_regex("[0-9][0-9]*");
 		std::smatch  sm;
 		while(std::regex_search(str_shape, sm, num_regex)) {
-			shape.push_back(std::stoi(sm[0].str()));
+			shape.push_back(std::stoul(sm[0].str()));
 			str_shape = sm.suffix().str();
 		}
 	}
@@ -59,13 +59,13 @@ static void read_npy_header(std::istream &is, size_t &word_size, std::vector<siz
 		// byte order code | stands for not applicable
 		auto const  loc = header.find("descr");
 		if(loc == std::string::npos)
-			throw std::runtime_error("read_npy_header: failed to find header keyword: 'descr'");
+			throw  std::runtime_error("read_npy_header: failed to find header keyword: 'descr'");
 		auto const  descr = loc + 9;
 		bool const  littleEndian = (header[descr] == '<' || header[descr] == '|');
 		assert(littleEndian);
 
 		std::string const  str_ws = header.substr(descr+2);
-		word_size = atoi(str_ws.substr(0, str_ws.find("'")).c_str());
+		word_size = std::stoul(str_ws.substr(0, str_ws.find("'")));
 	}
 }
 
@@ -114,11 +114,11 @@ static std::vector<char> create_npy_header(std::vector<size_t> const &shape, cha
 	dict.back() = '\n';
 
 	std::vector<char> header;
-	header += (char) 0x93;
+	header += char(0x93);
 	header += "NUMPY";
-	header += (char) 0x01; //major version of numpy format
-	header += (char) 0x00; //minor version of numpy format
-	header += (uint16_t) dict.size();
+	header += char(0x01); //major version of numpy format
+	header += char(0x00); //minor version of numpy format
+	header += uint16_t(dict.size());
 	header.insert(header.end(), dict.begin(), dict.end());
 
 	return  header;
@@ -128,11 +128,13 @@ void cnpy::npy_save0(std::string const &fname, void const *data, size_t const  w
 	std::vector<size_t>  true_data_shape; //if appending, the shape of existing + new data
 	std::fstream  fs;
 
+	// Opening with ios::in probes whether the file exists. If it does,
+	// we read the existing header to verify shape/type compatibility and
+	// extend the leading dimension (append mode).
 	if(mode & std::ios::in)
 		fs.open(fname, std::ios::binary | std::ios::in | std::ios::out);
 
 	if(fs.is_open()) {
-		//file exists. we need to append to it. read the header, modify the array size
 		size_t  file_word_size;
 		bool  fortran_order;
 		read_npy_header(fs, file_word_size, true_data_shape, fortran_order);
@@ -178,9 +180,9 @@ cnpy::NpyArray cnpy::npy_load(std::string const &fname) {
 	bool  fortran_order;
 	read_npy_header(fs, word_size, shape, fortran_order);
 
-	NpyArray  arr(shape, word_size, fortran_order);
+	NpyArray  arr(std::move(shape), word_size, fortran_order);
 	if(!fs.read(arr.data<char>(), arr.num_bytes()))
-		throw std::runtime_error("npy_load: failed to read data");
+		throw  std::runtime_error("npy_load: failed to read data");
 
 	return  arr;
 }

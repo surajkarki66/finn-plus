@@ -6,6 +6,7 @@
 #define NPY2VECTORSTREAM_HPP
 
 #include <iostream>
+#include <stdexcept>
 #include <vector>
 
 #include <ap_int.h>
@@ -23,12 +24,12 @@
 #define DEBUG_VECTORSTREAM2NPY(x) ;
 #endif
 
-template <typename ElemT, typename NpyT, unsigned N>
+template<typename ElemT, typename NpyT, unsigned N>
 void npy2vectorstream(char const *npy_path, hls::stream<hls::vector<ElemT,N>> &out_stream, bool reverse_inner = true, size_t numReps = 1) {
 	cnpy::NpyArray const  arr = cnpy::npy_load(npy_path);
 	DEBUG_NPY2VECTORSTREAM("word_size " << arr.word_size() << " num_vals " << arr.num_vals())
 	if(arr.word_size() != sizeof(NpyT)) {
-		throw "Npy array word size and specified NpyT size do not match";
+		throw  std::runtime_error("Npy array word size and specified NpyT size do not match");
 	}
 	NpyT const *const  loaded_data = arr.data<NpyT>();
 	size_t  outer_dim_elems = 1;
@@ -51,7 +52,7 @@ void npy2vectorstream(char const *npy_path, hls::stream<hls::vector<ElemT,N>> &o
 	}
 }
 
-template <typename ElemT, typename NpyT, unsigned N>
+template<typename ElemT, typename NpyT, unsigned N>
 void vectorstream2npy(hls::stream<hls::vector<ElemT,N>> &in_stream, std::vector<size_t> const &shape, char const *npy_path, bool reverse_inner = false, size_t numReps = 1, size_t multi_pixel_out = 1) {
 	for(size_t  rep = 0; rep < numReps; rep++) {
 		std::vector<NpyT>  data_to_save;
@@ -70,7 +71,7 @@ void vectorstream2npy(hls::stream<hls::vector<ElemT,N>> &in_stream, std::vector<
 				for(size_t  ii = 0; ii < inner_dim_elems; ii++) {
 					size_t  i = ii_multi_pixel_out*inner_dim_elems;
 					i += reverse_inner ? inner_dim_elems-ii-1 : ii;
-					NpyT const  npyt = (NpyT) elems[i];
+					NpyT const  npyt = NpyT(elems[i]);
 					DEBUG_VECTORSTREAM2NPY("elems[i] = " << elems[i] << ", NpyT = " << npyt)
 					data_to_save.push_back(npyt);
 				}

@@ -449,15 +449,13 @@ compilation transformations?
             if iwidth == 0:
                 continue
             if cpp_interface == "packed":
-                elem_bits = dtype.bitwidth()
                 packed_bits = iwidth
                 packed_hls_type = "ap_uint<%d>" % packed_bits
                 self.code_gen_dict["$READNPYDATA$"].append(
-                    'npy2apintstream<%s, %s, %d, %s>("%s", in%s_V);'
+                    'npy2apintstream<%s, %s, %s>("%s", in%s_V);'
                     % (
                         packed_hls_type,
                         elem_hls_type,
-                        elem_bits,
                         npy_type,
                         npy_in,
                         i,
@@ -564,16 +562,14 @@ compilation transformations?
             cpp_interface = self.get_nodeattr("cpp_interface")
 
             if cpp_interface == "packed":
-                elem_bits = dtype.bitwidth()
                 packed_bits = self.get_outstream_width(o)
                 packed_hls_type = "ap_uint<%d>" % packed_bits
 
                 self.code_gen_dict["$DATAOUTSTREAM$"].append(
-                    'apintstream2npy<%s, %s, %d, %s>(out%s_V, %s, "%s");'
+                    'apintstream2npy<%s, %s, %s>(out%s_V, %s, "%s");'
                     % (
                         packed_hls_type,
                         elem_hls_type,
-                        elem_bits,
                         npy_type,
                         o,
                         oshape_cpp_str,

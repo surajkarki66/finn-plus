@@ -1,14 +1,14 @@
-// Copyright (C) 2011 Carl Rogers
-// Copyright (c) Advanced Micro Devices, Inc.
-//
-// Original cnpy library: https://github.com/rogersce/cnpy (MIT License)
-// AMD modifications (half datatype support by Yaman Umuroglu) licensed under BSD-3-Clause
-//
-// See CNPY_LICENSE for the MIT license text, or visit
-// http://www.opensource.org/licenses/mit-license.php
-
-#ifndef LIBCNPY_H_
-#define LIBCNPY_H_
+/****************************************************************************
+ * Copyright (C) 2011 Carl Rogers
+ * Copyright (C) Advanced Micro Devices, Inc.
+ *
+ * Original cnpy library: https://github.com/rogersce/cnpy (MIT License)
+ * AMD modifications licensed under BSD-3-Clause
+ *
+ * See CNPY_LICENSE for the MIT license text.
+ ***************************************************************************/
+#ifndef CNPY_H
+#define CNPY_H
 
 #include <string>
 #include <vector>
@@ -17,6 +17,7 @@
 #include <ios>
 #include <memory>
 #include <numeric>
+#include <utility>
 #include "ap_int.h"
 
 
@@ -25,16 +26,16 @@ namespace cnpy {
 	//-----------------------------------------------------------------------
 	// NumPy Array Representative
 	class NpyArray {
-		std::vector<size_t> const  shape_;
-		size_t const  num_vals_;
-		size_t const  word_size_;
-		bool   const  fortran_order_;
-		std::shared_ptr<std::vector<char>> const  data_holder_;
+		std::vector<size_t>  shape_;
+		size_t  num_vals_;
+		size_t  word_size_;
+		bool    fortran_order_;
+		std::shared_ptr<std::vector<char>>  data_holder_;
 
 	public:
-		NpyArray(std::vector<size_t> const &shape, size_t const  word_size, bool const  fortran_order) :
-			shape_(shape),
-			num_vals_(std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<size_t>())),
+		NpyArray(std::vector<size_t> shape, size_t const  word_size, bool const  fortran_order) :
+			shape_(std::move(shape)),
+			num_vals_(std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<size_t>())),
 			word_size_(word_size),
 			fortran_order_(fortran_order),
 			data_holder_(std::make_shared<std::vector<char>>(num_vals_ * word_size)) {}
