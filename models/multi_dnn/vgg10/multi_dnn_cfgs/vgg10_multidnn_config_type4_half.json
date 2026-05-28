@@ -1,12 +1,12 @@
 {
     "Submodels" : {
         "vgg10_A" : {
-                "model_path" : "/home/student/Documents/ma/finn-plus/models/vgg10_multi/vgg10_A/radioml_own_trained.onnx",
-                "specialize_layers_config_file" : "/home/student/Documents/ma/finn-plus/.ma_vgg_fc/new_single_dnn_ref/vgg10_specialize_layers.json"
+                "model_path" : "models/multi_dnn/vgg10/models/radioml_own_trained.onnx",
+                "specialize_layers_config_file" : "models/multi_dnn/vgg10/vgg10_specialize_layers.json"
             },
         "vgg10_B" : {
-                "model_path" : ".../vgg10_B/radioml_finn_trained.onnx",
-                "specialize_layers_config_file" : ".../vgg10_specialize_layers.json"
+                "model_path" : "models/multi_dnn/vgg10/models/radioml_finn_trained.onnx",
+                "specialize_layers_config_file" : "models/multi_dnn/vgg10/vgg10_specialize_layers.json"
             }
     },
     "Steps": [
