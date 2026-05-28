@@ -1,0 +1,33 @@
+{
+    "global": {
+      "driver": "driver/driver.py",
+      "bitfile_name": "bitfile/finn-accel.bit",
+      "report_path": "report",
+
+      "PAF": {
+        "rails": [
+          "0V85",
+          "3V3"
+        ],
+        "sensors": []
+      }
+    },
+    "experiments": [
+      {
+        "name": "multi_dnn_experiment",
+        "warmup": 1,
+        "num_runs": 1,
+        "functions": [
+          {
+            "function_name": "experiment_ma",
+            "kwargs" : {
+                "lead_time": 10000,
+                "reconfiguration_time": 2851326,
+                "num_slots": 8,
+                "test_bs": 30000
+            }
+          }
+        ]
+      }
+    ]
+  }

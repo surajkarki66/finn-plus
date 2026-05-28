@@ -2,6 +2,10 @@
     # VGG-10 (1D CNN) (RadioML)
     {
         "dut": ["vgg10"], # almost all settings of default DUT are overwritten here (or by multi_dnn_config)
+        "board": ["RFSoC4x2"],
+        "instrumentation_avg_n": [16384],
+        "experiments_config": ["ci/experiments/multi_dnn.json"],
+
         "auto_fifo_depths": [false],
         "standalone_thresholds": [true],
         "minimize_bit_width": [false],
@@ -11,6 +15,10 @@
     },
     {
         "dut": ["vgg10"],
+        "board": ["RFSoC4x2"],
+        "instrumentation_avg_n": [16384],
+        "experiments_config": ["ci/experiments/multi_dnn.json"],
+
         "auto_fifo_depths": [false],
         "standalone_thresholds": [true],
         "minimize_bit_width": [false],
@@ -20,6 +28,10 @@
     },
     {
         "dut": ["vgg10"],
+        "board": ["RFSoC4x2"],
+        "instrumentation_avg_n": [16384],
+        "experiments_config": ["ci/experiments/multi_dnn.json"],
+
         "auto_fifo_depths": [false],
         "standalone_thresholds": [true],
         "minimize_bit_width": [false],
