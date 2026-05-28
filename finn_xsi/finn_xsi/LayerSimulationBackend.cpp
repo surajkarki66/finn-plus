@@ -203,6 +203,16 @@ class SimulationController {
                     }
                     status["output_job_size"] = out_job_sizes;
                 }
+                // Add latency data
+                {
+                    json latencies = json::array();
+                    for (size_t i = 0; i < OutstreamCount; ++i) {
+                        latencies.push_back(sim.getLatencyCycles(i));
+                    }
+                    if (!latencies.empty()) {
+                        status["latency_cycles"] = latencies;
+                    }
+                }
                 break;
             case SimulationState::ERROR:
                 status["state"] = "error";
@@ -301,6 +311,9 @@ void process_command(const json& request, json& response, SimulationController& 
             }
             if (final_status.contains("output_job_size")) {
                 response["output_job_size"] = final_status["output_job_size"];
+            }
+            if (final_status.contains("latency_cycles")) {
+                response["latency_cycles"] = final_status["latency_cycles"];
             }
         } else {
             response["status"] = "error";

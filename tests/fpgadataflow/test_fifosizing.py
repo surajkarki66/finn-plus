@@ -25,7 +25,7 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+"""Test FIFO sizing functionality."""
 
 import pytest
 
@@ -42,6 +42,7 @@ from qonnx.transformation.general import GiveUniqueNodeNames
 from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.infer_shapes import InferShapes
 from qonnx.util.basic import qonnx_make_model
+from typing import Literal
 
 import finn.builder.build_dataflow as build
 import finn.builder.build_dataflow_config as build_cfg
@@ -144,42 +145,105 @@ def make_multi_io_modelwrapper(ch: int, pe: int, idt: BaseDataType) -> ModelWrap
 @pytest.mark.vivado
 @pytest.mark.fpgadataflow
 @pytest.mark.parametrize("topology", ["tfc", "cnv"])
-def test_fifosizing_linear(method, topology):
+def test_fifosizing_linear(topology: Literal["tfc", "cnv"]) -> None:
+    """Test FIFO sizing on a simple linear topology, and check that the generated FIFO config."""
     tmp_output_dir = fetch_test_model(topology)
     cfg = build_cfg.DataflowBuildConfig(
         output_dir=tmp_output_dir,
         auto_fifo_depths=True,
-        auto_fifo_strategy=method,
         target_fps=10000 if topology == "tfc" else 1000,
         synth_clk_period_ns=10.0,
         board="Pynq-Z1",
         generate_outputs=[
             build_cfg.DataflowOutputType.ESTIMATE_REPORTS,
-            build_cfg.DataflowOutputType.STITCHED_IP,
             build_cfg.DataflowOutputType.RTLSIM_PERFORMANCE,
         ],
+        steps=[
+            "step_qonnx_to_finn",
+            "step_tidy_up",
+            "step_streamline",
+            "step_convert_to_hw",
+            "step_create_dataflow_partition",
+            "step_specialize_layers",
+            "step_target_fps_parallelization",
+            "step_apply_folding_config",
+            "step_minimize_bit_width",
+            "step_generate_estimate_reports",
+            "step_generate_hardware",
+            "step_measure_rtlsim_performance",
+        ],
     )
-    build.build_dataflow_cfg(tmp_output_dir + "/model.onnx", cfg)
-    with open(tmp_output_dir + "/report/estimate_network_performance.json") as f:
-        est_data = json.load(f)
-    with open(tmp_output_dir + "/report/rtlsim_performance.json") as f:
-        sim_data = json.load(f)
-    assert (
-        float(sim_data["stable_throughput[images/s]"]) / float(est_data["estimated_throughput_fps"])
-        > 0.9
-    )
+    build.build_dataflow_cfg(str(tmp_output_dir / "model.onnx"), cfg)
+
+    expected_fifos = {
+        "fifo_depths": {
+            "StreamingFIFO_rtl_0": 2,
+            "StreamingFIFO_rtl_1": 32,
+            "StreamingFIFO_rtl_2": 32,
+            "StreamingFIFO_rtl_3": 32,
+            "StreamingFIFO_rtl_4": 32,
+            "StreamingFIFO_rtl_5": 32,
+            "StreamingFIFO_rtl_6": 32,
+            "StreamingFIFO_rtl_7": 32,
+            "StreamingFIFO_rtl_8": 32,
+            "StreamingFIFO_rtl_9": 32,
+        },
+        "fifo_sizes": {
+            "StreamingFIFO_rtl_0": 1024,
+            "StreamingFIFO_rtl_1": 1024,
+            "StreamingFIFO_rtl_2": 64,
+            "StreamingFIFO_rtl_3": 448,
+            "StreamingFIFO_rtl_4": 64,
+            "StreamingFIFO_rtl_5": 64,
+            "StreamingFIFO_rtl_6": 64,
+            "StreamingFIFO_rtl_7": 256,
+            "StreamingFIFO_rtl_8": 1024,
+            "StreamingFIFO_rtl_9": 1024,
+        },
+        "impl_style": {
+            "StreamingFIFO_rtl_0": "rtl",
+            "StreamingFIFO_rtl_1": "rtl",
+            "StreamingFIFO_rtl_2": "rtl",
+            "StreamingFIFO_rtl_3": "rtl",
+            "StreamingFIFO_rtl_4": "rtl",
+            "StreamingFIFO_rtl_5": "rtl",
+            "StreamingFIFO_rtl_6": "rtl",
+            "StreamingFIFO_rtl_7": "rtl",
+            "StreamingFIFO_rtl_8": "rtl",
+            "StreamingFIFO_rtl_9": "rtl",
+        },
+        "ram_style": {
+            "StreamingFIFO_rtl_0": "block",
+            "StreamingFIFO_rtl_1": "block",
+            "StreamingFIFO_rtl_2": "block",
+            "StreamingFIFO_rtl_3": "block",
+            "StreamingFIFO_rtl_4": "block",
+            "StreamingFIFO_rtl_5": "block",
+            "StreamingFIFO_rtl_6": "block",
+            "StreamingFIFO_rtl_7": "block",
+            "StreamingFIFO_rtl_8": "block",
+            "StreamingFIFO_rtl_9": "block",
+        },
+        "total_fifo_size_kiB": 0.6171875,
+    }
+
+    with (tmp_output_dir / "report/fifo_sizing.json").open() as f:
+        fifo_sizing_report = json.load(f)
+    assert fifo_sizing_report == expected_fifos
     # now run the same build using the generated folding and FIFO config
     tmp_output_dir_cmp = fetch_test_model(topology)
     cfg_cmp = cfg
     cfg_cmp.output_dir = tmp_output_dir_cmp
     cfg_cmp.auto_fifo_depths = False
     cfg_cmp.target_fps = None
-    cfg_cmp.generate_outputs = [build_cfg.DataflowOutputType.STITCHED_IP]
-    cfg_cmp.folding_config_file = tmp_output_dir + "/report/final_hw_config.json"
-    build.build_dataflow_cfg(tmp_output_dir_cmp + "/model.onnx", cfg_cmp)
+    cfg_cmp.folding_config_file = tmp_output_dir / "report/auto_folding_config.json"
+    cfg_cmp.fifo_config_file = tmp_output_dir / "report/fifo_sizing.json"
+    build.build_dataflow_cfg(str(tmp_output_dir_cmp / "model.onnx"), cfg_cmp)
 
-    model0 = ModelWrapper(tmp_output_dir + "/intermediate_models/step_create_stitched_ip.onnx")
-    model1 = ModelWrapper(tmp_output_dir_cmp + "/intermediate_models/step_create_stitched_ip.onnx")
+    model0 = ModelWrapper(str(tmp_output_dir / "intermediate_models/step_generate_hardware.onnx"))
+    model1 = ModelWrapper(
+        str(tmp_output_dir_cmp / "intermediate_models/step_generate_hardware.onnx")
+    )
 
     assert len(model0.graph.node) == len(model1.graph.node)
     for i in range(len(model0.graph.node)):
@@ -198,9 +262,9 @@ def test_fifosizing_linear(method, topology):
 @pytest.mark.slow
 @pytest.mark.vivado
 @pytest.mark.fpgadataflow
-def test_fifosizing_multi_io():
-    # construct small onnx graph with addstreams, followed by duplicate streams
-    # to have test model with multiple inputs and multiple outputs
+def test_fifosizing_multi_io() -> None:
+    """Construct small onnx graph with addstreams, followed by duplicate streams
+    to have test model with multiple inputs and multiple outputs."""
     model = make_multi_io_modelwrapper(2, 2, DataType["INT4"])
     model = model.transform(SpecializeLayers("xc7z020clg400-1"))
     model = model.transform(GiveUniqueNodeNames())

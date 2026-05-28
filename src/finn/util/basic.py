@@ -42,8 +42,10 @@ basic system operations, hardware abstraction, and build tool integration.
 """
 
 import os
+import stat as statmod
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -112,6 +114,59 @@ part_map: dict[str, str] = {**pynq_part_map, **alveo_part_map}
 part_map["VEK280"] = "xcve2802-vsvh1760-2MP-e-S"
 part_map["VCK190"] = "xcvc1902-vsva2197-2MP-e-S"
 part_map["V80"] = "xcv80-lsva4737-2MHP-e-s"
+
+
+def wait_for_file(
+    path: Path,
+    timeout: float = 30.0,
+    stable_for: float = 0.2,
+    interval: float = 0.05,
+    expect_dir: bool | None = False,
+) -> bool:
+    """Wait until path exists and is stable in size/mtime for stable_for seconds.
+
+    If expect_dir is True, only a directory satisfies the check. If False,
+    only a regular file satisfies it. If None, either file or directory is ok.
+    """
+    deadline = time.time() + timeout
+    last = None
+    last_change = None
+
+    while time.time() < deadline:
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            time.sleep(interval)
+            continue
+
+        if expect_dir is True and not statmod.S_ISDIR(st.st_mode):
+            time.sleep(interval)
+            continue
+        if expect_dir is False and not statmod.S_ISREG(st.st_mode):
+            time.sleep(interval)
+            continue
+
+        cur = (st.st_size, st.st_mtime_ns)
+        now = time.time()
+        if cur == last:
+            if last_change is not None and (now - last_change) >= stable_for:
+                return True
+        else:
+            last = cur
+            last_change = now
+
+        time.sleep(interval)
+
+    return False
+
+
+def wait_for_dir(
+    path: Path, timeout: float = 30.0, stable_for: float = 0.2, interval: float = 0.05
+) -> bool:
+    """Wait until directory exists and is stable in size/mtime for stable_for seconds."""
+    return wait_for_file(
+        path, timeout=timeout, stable_for=stable_for, interval=interval, expect_dir=True
+    )
 
 
 def getHWCustomOp(node: "NodeProto") -> "HWCustomOp":  # noqa: N802

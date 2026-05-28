@@ -93,6 +93,7 @@ class NodeConnectedSimulationController(SimulationController):
         names: list[str],
         binaries: list[Path],
         console: Console,
+        shm_prefix: str,
         poll_interval: float = 1.0,
         with_progressbar: bool = True,
     ) -> None:
@@ -102,6 +103,7 @@ class NodeConnectedSimulationController(SimulationController):
         )
         # Synchronization barrier for configuration phase
         self.sync_barrier: Barrier | None = None
+        self.shm_prefix = shm_prefix
         for binary in binaries:
             if not binary.exists():
                 console.log(f"Binary {binary} does not exist!")
@@ -109,13 +111,17 @@ class NodeConnectedSimulationController(SimulationController):
 
     def _cleanup_shm_resources(self) -> None:
         """Remove any existing shared memory segments and semaphores from /dev/shm."""
+        if self.shm_prefix is None:
+            return
         try:
             removed_count = 0
             for filepath in Path("/dev/shm").glob("*"):
                 try:
+                    if not filepath.name.startswith(self.shm_prefix):
+                        continue
                     filepath.unlink()
                     removed_count += 1
-                except (FileNotFoundError, PermissionError):  # noqa: PERF203
+                except (FileNotFoundError, PermissionError):
                     # File might already be removed or we don't have permission
                     pass
 
@@ -152,6 +158,7 @@ class NodeConnectedSimulationController(SimulationController):
         timeout_result = False
         fifo_depths: dict[str, list[int]] = {}
         fifo_cycles_until_first_valid_results: dict[str, list[int]] = {}
+        latency_cycles_results: dict[str, list[int]] = {}
 
         # Clean up any existing shared memory resources before starting
         self._cleanup_shm_resources()
@@ -203,6 +210,7 @@ class NodeConnectedSimulationController(SimulationController):
                                     timeout,
                                     fifo_depth,
                                     fifo_cycles_until_first_valid,
+                                    latency_cycles,
                                 ) = result
                                 fifo_depths[sim_name] = fifo_depth
                                 fifo_results[sim_name] = fifo_util
@@ -212,6 +220,7 @@ class NodeConnectedSimulationController(SimulationController):
                                 fifo_cycles_until_first_valid_results[
                                     sim_name
                                 ] = fifo_cycles_until_first_valid
+                                latency_cycles_results[sim_name] = latency_cycles
                                 timeout_result = timeout_result or timeout
                         except Exception as e:  # noqa
                             self.console.log(f"Simulation failed: {e}")
@@ -243,6 +252,7 @@ class NodeConnectedSimulationController(SimulationController):
                                 timeout,
                                 fifo_depth,
                                 fifo_cycles_until_first_valid,
+                                latency_cycles,
                             ) = result
                             # Only update if not already collected
                             if sim_name not in fifo_results:
@@ -254,6 +264,7 @@ class NodeConnectedSimulationController(SimulationController):
                                 cycles_results[sim_name] = cycles
                                 samples_results[sim_name] = samps
                                 intervals_results[sim_name] = intervals
+                                latency_cycles_results[sim_name] = latency_cycles
                                 timeout_result = timeout_result or timeout
                     except Exception as e:
                         self.console.log(f"Error collecting result: {e}")
@@ -293,6 +304,7 @@ class NodeConnectedSimulationController(SimulationController):
                         "fifo_cycles_until_first_valid": fifo_cycles_until_first_valid_results.get(
                             name, []
                         ),
+                        "latency_cycles": latency_cycles_results.get(name, []),
                     }
                     for name in self.names
                 ],
@@ -312,7 +324,7 @@ class NodeConnectedSimulationController(SimulationController):
         is_special_for_display: bool = False,
         max_cycles: int | None = None,
         fifo_first_valid_cycles: list[int] | None = None,
-    ) -> tuple[str, list[int], int, int, list[int], bool, list[int], list[int]] | None:
+    ) -> tuple[str, list[int], int, int, list[int], bool, list[int], list[int], list[int]] | None:
         """Run the specified simulation binary in a new subprocess and communicate with it.
 
         Args:
@@ -398,6 +410,7 @@ class NodeConnectedSimulationController(SimulationController):
                 fifo_util: list[int] = []
                 fifo_depth: list[int] = []
                 fifo_cycles_until_first_valid: list[int] = []
+                latency_cycles: list[int] = []
 
                 # Poll for status updates
                 while True:
@@ -419,6 +432,7 @@ class NodeConnectedSimulationController(SimulationController):
                                 fifo_cycles_until_first_valid = stop_response.get(
                                     "fifo_cycles_until_first_valid", []
                                 )
+                                latency_cycles = stop_response.get("latency_cycles", [])
                                 if fifo_util:
                                     logfile.write(f"Final FIFO utilization: {fifo_util}\n")
                             return (
@@ -430,6 +444,7 @@ class NodeConnectedSimulationController(SimulationController):
                                 timeout,
                                 fifo_depth,
                                 fifo_cycles_until_first_valid,
+                                latency_cycles,
                             )
                     time.sleep(self.poll_interval)
 
@@ -453,6 +468,7 @@ class NodeConnectedSimulationController(SimulationController):
                         fifo_cycles_until_first_valid = response.get(
                             "fifo_cycles_until_first_valid", []
                         )
+                        latency_cycles = response.get("latency_cycles", [])
                         with self.stop_lock:
                             self.should_stop = True
                         break
@@ -480,6 +496,7 @@ class NodeConnectedSimulationController(SimulationController):
                     fifo_cycles_until_first_valid = stop_response.get(
                         "fifo_cycles_until_first_valid", []
                     )
+                    latency_cycles = stop_response.get("latency_cycles", [])
                     if fifo_util:
                         logfile.write(f"Final FIFO utilization: {fifo_util}\n")
 
@@ -492,6 +509,7 @@ class NodeConnectedSimulationController(SimulationController):
                     timeout,
                     fifo_depth,
                     fifo_cycles_until_first_valid,
+                    latency_cycles,
                 )
 
             except Exception as e:
@@ -514,6 +532,7 @@ class NodeConnectedSimulation(Simulation):
         fpgapart: str,
         clk_ns: float,
         functional_sim: bool,
+        shm_prefix: str | None,
         workers: int | None = None,
         max_qsrl_depth: int = 256,
         performance_sim: bool = False,
@@ -522,8 +541,11 @@ class NodeConnectedSimulation(Simulation):
         super().__init__(
             model, simulation_type, fpgapart, clk_ns, functional_sim, workers, performance_sim
         )
+        if shm_prefix is None:
+            shm_prefix = model.get_metadata_prop("shm_prefix")
         self.max_qsrl_depth = max_qsrl_depth
         self.performance_sim = performance_sim
+        self.shm_prefix = cast("str", shm_prefix)
 
     def simulate(
         self,
@@ -572,7 +594,13 @@ class NodeConnectedSimulation(Simulation):
         start = time.time()
         output_json = Path(make_build_dir("simulation_results_")) / "simulation_data.json"
         controller = NodeConnectedSimulationController(
-            len(self.binaries), names, list(self.binaries.values()), Console(), 0.1, False
+            len(self.binaries),
+            names,
+            list(self.binaries.values()),
+            Console(),
+            self.shm_prefix,
+            0.1,
+            False,
         )
         controller.run(adjusted_depth, output_json, max_cycles, fifo_first_valid_cycles)
         end = time.time()
@@ -593,6 +621,7 @@ class NodeConnectedSimulation(Simulation):
                     "samples": sim_entry["samples"],
                     "intervals": sim_entry["intervals"],
                     "fifo_cycles_until_first_valid": sim_entry["fifo_cycles_until_first_valid"],
+                    "latency_cycles": sim_entry["latency_cycles"],
                 }
             )
         json.dump(data, output_json.open("w"), indent=4)
@@ -695,12 +724,19 @@ class RunLayerParallelSimulation(Transformation):
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         """Run layer parallel simulations."""
+        shm_prefix = model.get_metadata_prop("shm_prefix")
+        if shm_prefix is None or shm_prefix == "":
+            raise FINNInternalError(
+                "Expected model to have non-empty 'shm_prefix' metadata property "
+                "for node-connected simulation"
+            )
         sim = NodeConnectedSimulation(
             model,
             SimulationType.NODE_BASED_CONNECTED,
             self.fpgapart,
             self.clk_ns,
             self.cfg.functional_simulation,
+            shm_prefix=shm_prefix,
             max_qsrl_depth=self.max_qsrl_depth,
         )
         model = sim.model  # TODO:clean up

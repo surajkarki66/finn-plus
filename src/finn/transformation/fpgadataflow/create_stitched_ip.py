@@ -52,7 +52,7 @@ from finn.custom_op.fpgadataflow.hwcustomop import HWCustomOp
 from finn.custom_op.fpgadataflow.rtlbackend import RTLBackend
 from finn.templates import get_templates_folder
 from finn.transformation.fpgadataflow.replace_verilog_relpaths import ReplaceVerilogRelPaths
-from finn.util.basic import launch_process_helper, make_build_dir
+from finn.util.basic import launch_process_helper, make_build_dir, wait_for_file
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.fpgadataflow import is_hls_node, is_rtl_node
 from finn.util.hbm_mock import HBMDummy
@@ -491,7 +491,21 @@ class CreateStitchedIP(Transformation):
                     f"IP generation directory doesn't exist in node {node.name}."
                 )
             ip_dirs += [ip_dir_value]
-            self.create_cmds += node_inst.code_generation_ipi()
+            filter_str = "add_files -norecurse"
+            ipi_commands = node_inst.code_generation_ipi()
+            for cmd in ipi_commands:
+                if cmd.startswith(filter_str):
+                    split_cmd = cmd.split()
+                    if len(split_cmd) != 3:
+                        raise FINNInternalError(
+                            f"Unexpected command format in node {node.name}: {cmd}"
+                        )
+                    src = split_cmd[2]
+                    if not wait_for_file(Path(src), timeout=5.0):
+                        raise FINNInternalError(
+                            f"Expected file {src} from code generation for {node.name} not found."
+                        )
+            self.create_cmds += ipi_commands
             self.connect_clk_rst(node)
             self.connect_ap_none_external(node)
             self.connect_axi(node, model)
@@ -842,10 +856,10 @@ close $ofile
                 f.write(f"{fifosim_wrapper_filename}\n")
 
         # wrapper may be created in different location depending on Vivado version
-        if not Path(wrapper_filename).is_file():
+        if not wait_for_file(Path(wrapper_filename), timeout=5.0):
             # check in alternative location (.gen instead of .srcs)
             wrapper_filename_alt = wrapper_filename.replace(".srcs", ".gen")
-            if Path(wrapper_filename_alt).is_file():
+            if wait_for_file(Path(wrapper_filename_alt), timeout=5.0):
                 if not self.functional_simulation:
                     model.set_metadata_prop("wrapper_filename", wrapper_filename_alt)
             else:

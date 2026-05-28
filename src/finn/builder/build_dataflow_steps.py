@@ -553,7 +553,7 @@ def step_set_fifo_depths(
             fifo_info["impl_style"][node.name] = node_inst.get_nodeattr("impl_style")
             fifo_info["ram_style"][node.name] = node_inst.get_nodeattr("ram_style")
             total_fifo_size += fifo_info["fifo_sizes"][node.name]
-        fifo_info["total_fifo_size_kiB"] = int(total_fifo_size / 8.0 / 1024.0)
+        fifo_info["total_fifo_size_kiB"] = total_fifo_size / 8.0 / 1024.0
 
         with (Path(cfg.output_dir) / "report" / "fifo_sizing.json").open("w") as f:
             json.dump(fifo_info, f, indent=2)
@@ -1283,13 +1283,17 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
         os.environ["RTLSIM_TRACE_DEPTH"] = "3"
         model.set_metadata_prop("rtlsim_trace", str(report_dir.resolve() / "rtlsim_perf_trace.wdb"))
 
-    # Use critical path estimate to set the timeout limit for FIFO sim
-    model = model.transform(AnnotateCycles())
-    perf = model.analysis(dataflow_performance)
-    latency = cast("int", perf["critical_path_cycles"])
-    max_iters = latency * 10
+    if not cfg.auto_fifo_depths and cfg.fifo_config_file is not None:
+        # Use critical path estimate to set the timeout limit for FIFO sim
+        model = model.transform(AnnotateCycles())
+        perf = model.analysis(dataflow_performance)
+        latency = cast("int", perf["critical_path_cycles"])
+        max_iters = latency * 100
+    else:
+        max_iters = (
+            None  # Auto FIFO depths are garanteed to prevent deadlock, no need for a timeout
+        )
     # prepare simulation
-    # model = step_build_simulation(model, cfg, parent_node = None, performance_sim=True)
     sim = NodeConnectedSimulation(
         model,
         SimulationType.NODE_BASED_CONNECTED,
@@ -1298,6 +1302,7 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
         cfg.functional_simulation,
         max_qsrl_depth=256,
         performance_sim=True,
+        shm_prefix=None,
     )
 
     nodes = [node for node in model.graph.node if "FIFO" not in node.op_type]
@@ -1332,7 +1337,6 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
             del res["fifo_cycles_until_first_valid"]
             cycle_per_sec = 1e9 / cfg.synth_clk_period_ns
             res["throughput_fps"] = cycle_per_sec / res["intervals"][0]  # type: ignore
-            # TODO: Add latency measurement
             # Attach entry to output
             outputs.append(res)
 
@@ -1472,7 +1476,8 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
                     cfg.enable_hw_debug,
                     cfg.enable_instrumentation,
                     cfg.instrumentation_no_dma,
-                    cfg.live_fifo_sizing,
+                    cfg.auto_fifo_depths
+                    and cfg.auto_fifo_strategy == AutoFIFOSizingMethod.LIVE_FIFO,
                     partition_model_dir=partition_model_dir,
                 )
             )

@@ -164,6 +164,9 @@ class SingleNodeSimulation : public Simulation<IStreamsSize, OStreamsSize, Loggi
                     stream.interval = cyclesRun - lastComplete;
                     stream.lastComplete = cyclesRun;
                     stream.job_txns = 0;
+                    if (completedMaps == 0) {
+                        stream.first_complete = cyclesRun;
+                    }
                     ++completedMaps;
                     if (lastComplete != 0) {
                         // Update stable state tracker
@@ -351,6 +354,11 @@ class SingleNodeSimulation : public Simulation<IStreamsSize, OStreamsSize, Loggi
 
     /// Get the job size of the specified input stream
     std::size_t getInputJobSize(std::size_t inputIndex = 0) { return this->istreams[inputIndex].job_size; }
+
+    /// Get the latency in cycles of the specified output stream
+    std::size_t getLatencyCycles(std::size_t outputIndex = 0) {
+        return this->ostreams[outputIndex].first_complete;
+    }
 
     /// Get the number of cycles the simulation has run
     std::size_t getCyclesRun() const noexcept { return cyclesRun; }

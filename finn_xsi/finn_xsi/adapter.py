@@ -159,6 +159,8 @@ def load_sim_obj(
     if simkernel_so is None:
         simkernel_so = get_simkernel_so()
     oldcwd = Path.cwd()
+    if not sim_out_dir.is_dir() or not (sim_out_dir / out_so_relative_path).is_file():
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), sim_out_dir)
     os.chdir(sim_out_dir)
     sim = SimEngine(simkernel_so, str(out_so_relative_path), "finnxsi_rtlsim.log", tracefile)
     if tracefile:

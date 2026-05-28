@@ -5,8 +5,10 @@ import numpy as np
 import onnx
 import os
 import psutil
+import random
 import re
 import shlex
+import string
 import subprocess
 import sys
 import time
@@ -32,7 +34,13 @@ from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
-from finn.util.basic import getHWCustomOp, launch_process_helper, make_build_dir
+from finn.util.basic import (
+    getHWCustomOp,
+    launch_process_helper,
+    make_build_dir,
+    wait_for_dir,
+    wait_for_file,
+)
 from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.logging import log
 from finn.util.settings import get_settings
@@ -55,12 +63,18 @@ class SimulationBuilder:
     """Build simulations in FINN."""
 
     def __init__(
-        self, model: ModelWrapper, fpgapart: str, clk_ns: float, performance_sim: bool = False
+        self,
+        model: ModelWrapper,
+        fpgapart: str,
+        clk_ns: float,
+        shm_prefix: str,
+        performance_sim: bool = False,
     ) -> None:
         """Create a new simulation instance."""
         self.model = model
         self.fpgapart = fpgapart
         self.clk_ns = clk_ns
+        self.shm_prefix = shm_prefix
         self.performance_sim = performance_sim
 
     def _create_existing_initializer_input(
@@ -703,11 +717,13 @@ class SimulationBuilder:
             "SIMKERNEL_SO": finnxsi.get_simkernel_so(),
             # log file for xsi (not the sim driver)
             "XSIM_LOG_FILE": '"xsi.log"',
-            "INPUT_INTERFACE_NAMES": ",".join(['"' + name + '"' for name in input_interface_names])
+            "INPUT_INTERFACE_NAMES": ",".join(
+                ['"' + self.shm_prefix + name + '"' for name in input_interface_names]
+            )
             if input_interface_names is not None
             else "",
             "OUTPUT_INTERFACE_NAMES": ",".join(
-                ['"' + name + '"' for name in output_interface_names]
+                ['"' + self.shm_prefix + name + '"' for name in output_interface_names]
             )
             if output_interface_names is not None
             else "",
@@ -771,7 +787,7 @@ class SimulationBuilder:
         """
         # Check that the relevant data exists
         wrapper_filename = node_model.get_metadata_prop("wrapper_filename")
-        if wrapper_filename is None or not Path(wrapper_filename).exists():
+        if wrapper_filename is None or not wait_for_file(Path(wrapper_filename), timeout=5.0):
             raise FINNUserError(
                 f"Call CreateStitchedIP prior to building "
                 f"the simulation for {self.model.graph.node[node_index].name}. "
@@ -779,7 +795,9 @@ class SimulationBuilder:
             )
 
         vivado_stitched_proj = node_model.get_metadata_prop("vivado_stitch_proj")
-        if vivado_stitched_proj is None or not Path(vivado_stitched_proj).exists():
+        if vivado_stitched_proj is None or not wait_for_dir(
+            Path(vivado_stitched_proj), timeout=5.0
+        ):
             raise FINNUserError(
                 f"Call CreateStitchedIP prior to building "
                 f"the simulation for {self.model.graph.node[node_index].name}."
@@ -1083,8 +1101,16 @@ class BuildSimulation(Transformation):
             # For rtlsim performance, we assume, that we already have a complete model.
             if not self.performance_sim:
                 self._prepare_model()
+
+            # Set shm prefix
+            prefix = f"finn_sim_{os.getpid()}_"
+            self.shm_prefix = (
+                prefix + "".join(random.choices(string.ascii_letters + string.digits, k=12)) + "_"
+            )
+            self.model.set_metadata_prop("shm_prefix", self.shm_prefix)
+
             self.builder = SimulationBuilder(
-                self.model, self.fpgapart, self.clk_ns, self.performance_sim
+                self.model, self.fpgapart, self.clk_ns, self.shm_prefix, self.performance_sim
             )
             with contextlib.suppress(AttributeError):
                 sys.stdout = sys.stdout.console  # type: ignore
