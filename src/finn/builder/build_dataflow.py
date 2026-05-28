@@ -45,7 +45,10 @@ from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     default_build_dataflow_steps,
 )
-from finn.builder.build_dataflow_steps import _maybe_enable_verify_behavioral, build_dataflow_step_lookup
+from finn.builder.build_dataflow_steps import (
+    _maybe_enable_verify_behavioral,
+    build_dataflow_step_lookup,
+)
 
 
 # adapted from https://stackoverflow.com/a/39215961

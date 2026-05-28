@@ -28,6 +28,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import numpy as np
+import os
 import warnings
 from onnx import TensorProto, helper
 from qonnx.core.datatype import DataType
@@ -406,13 +407,9 @@ class InsertAndSetFIFODepths(Transformation):
                 node.set_nodeattr("depth", self.max_depth)
 
         if self.debug_log_dir is not None:
-            import os as _os
-
-            _os.makedirs(_os.path.abspath(self.debug_log_dir), exist_ok=True)
+            os.makedirs(os.path.abspath(self.debug_log_dir), exist_ok=True)
             for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
-                log_path = _os.path.abspath(
-                    _os.path.join(self.debug_log_dir, node.name + ".log")
-                )
+                log_path = os.path.abspath(os.path.join(self.debug_log_dir, node.name + ".log"))
                 getCustomOp(node).set_nodeattr("debug_log_path", log_path)
 
         # insert FIFOs and do all transformations for RTLsim
