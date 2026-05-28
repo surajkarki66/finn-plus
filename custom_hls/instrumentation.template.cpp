@@ -291,6 +291,7 @@
                  ts1 = cnt_clk;	// mark completion ^
 
                  // Sliding-window average update
+                 // TODO: II=1 but depth is ~70 cycles, can we optimize this?
                  ap_uint<32>  win = (avg_n == 0 || avg_n > AVG_N) ? ap_uint<32>(AVG_N) : avg_n;
                  if(prev_avg_n != win) {
                      avg_head = 0;

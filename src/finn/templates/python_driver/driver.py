@@ -601,7 +601,7 @@ class FINNInstrumentationOverlay(Overlay):
             offset=self.ip_dict["axi_gpio_0"]["registers"]["GPIO_DATA"]["address_offset"], value=0
         )
 
-    def start_accelerator(self, throttle_interval=0):
+    def start_accelerator(self, throttle_interval=0, avg_window_size=64):
         """
         Start the accelerator. Input is throttled to the specified interval (in cycles)
         by pausing after each FM transmission. A throttle_interval of 0 means no throttling.
@@ -610,8 +610,9 @@ class FINNInstrumentationOverlay(Overlay):
         lfsr_seed = (self.seed << 16) & 0xFFFF0000  # upper 16 bits
         self.instrumentation_write("seed", lfsr_seed)
 
-        # Set average measurement window size (in frames)
-        self.instrumentation_write("avg_n", 65536)  # max window size
+        # Set average measurement window size (in frames),
+        # maximum is configured in build config, default value = 64
+        self.instrumentation_write("avg_n", avg_window_size)
 
         # Start operation
         self.instrumentation_write("cfg", (throttle_interval << 1) | 1)  # bit 0 = start
