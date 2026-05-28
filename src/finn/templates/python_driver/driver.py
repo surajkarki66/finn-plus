@@ -601,7 +601,7 @@ class FINNInstrumentationOverlay(Overlay):
             offset=self.ip_dict["axi_gpio_0"]["registers"]["GPIO_DATA"]["address_offset"], value=0
         )
 
-    def start_accelerator(self, throttle_interval=0):
+    def start_accelerator(self, throttle_interval=0, avg_window_size=64):
         """
         Start the accelerator. Input is throttled to the specified interval (in cycles)
         by pausing after each FM transmission. A throttle_interval of 0 means no throttling.
@@ -609,6 +609,10 @@ class FINNInstrumentationOverlay(Overlay):
         # Set seed
         lfsr_seed = (self.seed << 16) & 0xFFFF0000  # upper 16 bits
         self.instrumentation_write("seed", lfsr_seed)
+
+        # Set average measurement window size (in frames),
+        # maximum is configured in build config, default value = 64
+        self.instrumentation_write("avg_n", avg_window_size)
 
         # Start operation
         self.instrumentation_write("cfg", (throttle_interval << 1) | 1)  # bit 0 = start
@@ -624,6 +628,8 @@ class FINNInstrumentationOverlay(Overlay):
         min_latency = self.instrumentation_read("min_latency")
         latency = self.instrumentation_read("latency")
         interval = self.instrumentation_read("interval")
+        avg_latency = self.instrumentation_read("avg_latency")
+        avg_interval = self.instrumentation_read("avg_interval")
 
         frame = (chksum_reg >> 24) & 0x000000FF
         checksum = chksum_reg & 0x00FFFFFF
@@ -643,9 +649,21 @@ class FINNInstrumentationOverlay(Overlay):
             print("Min Latency (cycles): %d" % min_latency)
             print("Latency (cycles): %d" % latency)
             print("Interval (cycles): %d" % interval)
+            print("Average Latency (cycles): %d" % avg_latency)
+            print("Average Interval (cycles): %d" % avg_interval)
             print("----------------------------")
 
-        return (overflow_err, underflow_err, frame, checksum, min_latency, latency, interval)
+        return (
+            overflow_err,
+            underflow_err,
+            frame,
+            checksum,
+            min_latency,
+            latency,
+            interval,
+            avg_latency,
+            avg_interval,
+        )
 
     def experiment_instrumentation(self, *args, **kwargs):
         """Run instrumentation experiment and save report."""
@@ -668,6 +686,8 @@ class FINNInstrumentationOverlay(Overlay):
             min_latency,
             latency,
             interval,
+            avg_latency,
+            avg_interval,
         ) = self.observe_instrumentation()
 
         # write report to file
@@ -677,11 +697,19 @@ class FINNInstrumentationOverlay(Overlay):
             "min_latency_cycles": min_latency,
             "latency_cycles": latency,
             "interval_cycles": interval,
+            "avg_latency_cycles": avg_latency,
+            "avg_interval_cycles": avg_interval,
             "frequency_mhz": round(self.fclk_mhz_actual),
             "min_latency_ms": round(min_latency * (1 / (self.fclk_mhz_actual * 1e6)) * 1e3, 6),
             "latency_ms": round(latency * (1 / (self.fclk_mhz_actual * 1e6)) * 1e3, 6),
+            "avg_latency_ms": round(avg_latency * (1 / (self.fclk_mhz_actual * 1e6)) * 1e3, 6),
             "throughput_fps": (
                 round(1 / (interval * (1 / (self.fclk_mhz_actual * 1e6)))) if interval != 0 else 0
+            ),
+            "avg_throughput_fps": (
+                round(1 / (avg_interval * (1 / (self.fclk_mhz_actual * 1e6))))
+                if avg_interval != 0
+                else 0
             ),
             "min_pipeline_depth": round(min_latency / interval, 2) if interval != 0 else 0,
             "pipeline_depth": round(latency / interval, 2) if interval != 0 else 0,
