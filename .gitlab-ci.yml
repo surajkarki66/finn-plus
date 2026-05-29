@@ -33,7 +33,7 @@ variables:
     value: "2-0" # [days-hours]
   SLURM_PARTITION:
     description: "Slurm partition (e.g., normal, largemem, fpga, gpu)"
-    value: "normal"
+    value: "fpga"
   SLURM_QOS:
     description: "Optional --exclusive or QoS option (include --qos, e.g., --qos express)"
     value: ""

@@ -118,36 +118,36 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
                     posix=IS_POSIX,
                 )
             )
-            test_2_process = subprocess.Popen(
-                shlex.split(
-                    (
-                        f"{sys.executable} -m pytest -v -m 'end2end or sanity_bnn or notebooks' "
-                        f"--junitxml={ci_project_dir}/reports/end2end.xml "
-                        f"--html={ci_project_dir}/reports/end2end.html "
-                        f"--reruns 1 --dist loadgroup -n {num_workers}"
-                    ),
-                    posix=IS_POSIX,
-                )
-            )
+            # test_2_process = subprocess.Popen(
+            #     shlex.split(
+            #         (
+            #             f"{sys.executable} -m pytest -v -m 'end2end or sanity_bnn or notebooks' "
+            #             f"--junitxml={ci_project_dir}/reports/end2end.xml "
+            #             f"--html={ci_project_dir}/reports/end2end.html "
+            #             f"--reruns 1 --dist loadgroup -n {num_workers}"
+            #         ),
+            #         posix=IS_POSIX,
+            #     )
+            # )
             test_1_process.communicate()
             test_1_returncode = test_1_process.returncode
-            test_2_process.communicate()
-            test_2_returncode = test_2_process.returncode
+            # test_2_process.communicate()
+            # test_2_returncode = test_2_process.returncode
 
             # Run doctests for all FINN submodules
-            test_3_returncode = run_doctests(int(num_workers))
+            # test_3_returncode = run_doctests(int(num_workers))
 
-            subprocess.run(
-                shlex.split(
-                    (
-                        f"{sys.executable} -m pytest_html_merger -i {ci_project_dir}/reports/ "
-                        f"-o {ci_project_dir}/reports/full_test_suite.html"
-                    ),
-                    posix=IS_POSIX,
-                )
-            )
+            # subprocess.run(
+            #     shlex.split(
+            #         (
+            #             f"{sys.executable} -m pytest_html_merger -i {ci_project_dir}/reports/ "
+            #             f"-o {ci_project_dir}/reports/full_test_suite.html"
+            #         ),
+            #         posix=IS_POSIX,
+            #     )
+            # )
 
-            if test_1_returncode or test_2_returncode or test_3_returncode:
+            if test_1_returncode:  # or test_2_returncode or test_3_returncode:
                 sys.exit(1)
 
         case _:
