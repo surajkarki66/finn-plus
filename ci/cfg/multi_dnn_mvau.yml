@@ -4,7 +4,7 @@
         "dut": ["mvau_multi_dnn"],
         "board": ["RFSoC4x2"],
         "instrumentation_avg_n": [16384],
-        "experiments_config": ["ci/experiments/multi_dnn.json"],
+        "experiments_config": ["../experiments/multi_dnn.json"],
 
         "idt": ["INT7"],
         "wdt": ["INT7"],

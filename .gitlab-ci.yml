@@ -224,7 +224,7 @@ Bench (Basic):
     PARENT_PIPELINE_ID: $CI_PIPELINE_ID
   parallel:
     matrix:
-      - BENCH_CFG: [regression_basic, multi_dnn]
+      - BENCH_CFG: [regression_basic, multi_dnn, multi_dnn_mvau]
 
 Bench (Extended):
   stage: test
