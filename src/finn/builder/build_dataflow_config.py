@@ -252,12 +252,14 @@ class PartitioningConfiguration:
     communication_kernel_arguments: dict[str, str] = field(default_factory=dict)
 
     # How much a FPGA can be utilized at max. The solver will fail if it
-    # cannot comply with this limitation
-    max_utilization: float = 0.85
+    # cannot comply with this limitation. Since platforms.py seems to contain
+    # the numbers for the total resources without shell, the default value is kept
+    # on the lower side on purpose.
+    max_utilization: float = 0.80
 
     # How much resources of a single FPGA should be used ideally. Used in some objective
     # functions.
-    ideal_utilization: float = 0.75
+    ideal_utilization: float = 0.70
 
     # The list of resource types that the partitioner should consider.
     # Only relevant if RESOURCE_UTILIZATION is chosen as a strategy

@@ -15,6 +15,7 @@ from finn.util.exception import (
     FINNMultiFPGAConfigError,
     FINNMultiFPGAError,
     FINNMultiFPGANoPartitionerSolutionError,
+    FINNMultiFPGAUserError,
 )
 from finn.util.logging import log
 
@@ -69,6 +70,17 @@ class AuroraPartitioner(Partitioner):  # noqa
         # the model was solved
         self.status: mip.OptimizationStatus | None = None
 
+        if max_utilization is not None and max_utilization > 1.0:
+            raise FINNMultiFPGAUserError(
+                f"Max utilization was set to {max_utilization:2.2%} > "
+                f"100%. Decrease max_utilization to continue."
+            )
+        if ideal_utilization is not None and ideal_utilization > 1.0:
+            raise FINNMultiFPGAUserError(
+                f"Ideal utilization was set to {ideal_utilization:2.2%} > "
+                f"100%. Decrease ideal_utilization to continue."
+            )
+
         if (
             ideal_utilization is not None
             and max_utilization is not None
@@ -78,6 +90,16 @@ class AuroraPartitioner(Partitioner):  # noqa
                 "Cannot create Multi-FPGA partition if the requested ideal utilization"
                 "is greater than the requested max allowed utilization "
                 f"({ideal_utilization:.2%} > {max_utilization:.2%})"
+            )
+
+        # Warn about shell utilization
+        if max_utilization is not None and max_utilization >= 0.85:
+            log.warning(
+                f"Max utilization per device is set to {max_utilization:2.2%}. "
+                f"Setting the max utilization too high might cause issues during P&R, "
+                f"due to the shell's own resource requirements, as well as difficulties "
+                f"during routing. Consider decreasing max utilization "
+                f"in case implementation fails."
             )
 
         log.debug("Creating partitioning model")
