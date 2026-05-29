@@ -196,12 +196,14 @@ class CapConvolutionFIFODepths(Transformation):
         return (model, False)
 
 
-def xsi_fifosim(model, n_inferences, max_iters=None, throttle_cycles=0):
+def xsi_fifosim(model, n_inferences, max_iters=None, throttle_cycles=0, behav=True):
     """Create a XSI model of stitched IP and use a simple C++
     driver to drive the input stream. Useful for FIFO sizing, latency
     and throughput measurement. If max_iters is None, use the default
     liveness threshold instead. throttle_cycles can be used for throttling
-    the input stream every time a frame is finished."""
+    the input stream every time a frame is finished.
+    If behav=True (default), FINN_SIMULATION is defined and fifo_gauge is used.
+    If behav=False, Q_srl is used instead (no debug logging)."""
 
     iname = model.get_first_global_in()
     first_node = model.find_consumer(iname)
@@ -218,6 +220,7 @@ def xsi_fifosim(model, n_inferences, max_iters=None, throttle_cycles=0):
         dummy_data_mode=True,
         timeout_cycles=max_iters,
         throttle_cycles=throttle_cycles,
+        behav=behav,
     )
 
     return ret_dict

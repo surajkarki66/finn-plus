@@ -1205,7 +1205,10 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
         perf = model.analysis(dataflow_performance)
         latency = perf["critical_path_cycles"]
         max_iters = latency * 1.1 + 50
-        rtlsim_perf_dict = xsi_fifosim(model, rtlsim_bs, max_iters=max_iters)
+        # Use behav=False for performance measurement to use real RTL components
+        # instead of behavioral models (FINN_SIMULATION affects FIFOs, MVU, LayerNorm,
+        # and RTL elementwise ops)
+        rtlsim_perf_dict = xsi_fifosim(model, rtlsim_bs, max_iters=max_iters, behav=False)
         # keep keys consistent between the Python and C++-styles
         cycles = rtlsim_perf_dict["cycles"]
         clk_ns = cfg.synth_clk_period_ns
