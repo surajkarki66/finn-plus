@@ -171,7 +171,8 @@ def snapshot_fifo_logs(cfg, phase_subdir):
         if not os.path.isfile(src) or os.path.getsize(src) == 0:
             continue
         shutil.copyfile(src, os.path.join(dest_dir, fn))
-        open(src, "w").close()
+    # Delete _live folder to ensure clean state for next simulation
+    shutil.rmtree(live_dir)
 
 
 def verify_step(
@@ -1150,6 +1151,9 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig):
             # prepare ip-stitched rtlsim
             verify_model = deepcopy(model)
             verify_model = prepare_for_stitched_ip_rtlsim(verify_model, cfg)
+            # Ensure _live folder exists for debug_fifo logging
+            if cfg.debug_fifo:
+                os.makedirs(_fifo_debug_live_dir(cfg), exist_ok=True)
             # use critical path estimate to set rtlsim liveness threshold
             # (very conservative)
             verify_model = verify_model.transform(AnnotateCycles())
