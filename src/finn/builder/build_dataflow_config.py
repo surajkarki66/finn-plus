@@ -182,9 +182,7 @@ default_build_dataflow_steps = [
     "step_minimize_bit_width",
     "step_transpose_decomposition",
     "step_generate_estimate_reports",
-    "step_set_fifo_depths",
-    "step_hw_codegen",
-    "step_hw_ipgen",
+    "step_generate_hardware",
     "step_create_stitched_ip",
     "step_measure_rtlsim_performance",
     "step_out_of_context_synthesis",
@@ -712,7 +710,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
             return []
         return self.verify_steps
 
-    def _resolve_verification_io_pair(self) -> None | tuple[Any, Any]:
+    def _resolve_verification_io_pair(self) -> None | tuple[np.ndarray, np.ndarray]:
         """Load and validate the input/output numpy arrays for verification.
 
         Loads the verification input and expected output arrays from the files

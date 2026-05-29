@@ -40,11 +40,11 @@ from qonnx.custom_op.registry import getCustomOp
 from finn.core.onnx_exec import execute_onnx
 
 
-def load_model_checkpoint(filename: str) -> ModelWrapper:
+def load_model_checkpoint(filename: str | Path) -> ModelWrapper:
     """Load given .onnx file and return ModelWrapper.
 
     Args:
-        filename (str): Path to the ONNX model file
+        filename (str|Path): Path to the ONNX model file
 
     Returns:
         ModelWrapper: Loaded model
@@ -53,20 +53,23 @@ def load_model_checkpoint(filename: str) -> ModelWrapper:
         FileNotFoundError: If the model file doesn't exist
     """
     if Path(filename).is_file():
-        model = ModelWrapper(filename)
+        model = ModelWrapper(str(filename))
         return model
     raise FileNotFoundError(f"Model file {filename} not found")
 
 
 def execute_parent(
-    parent_path: str, child_path: str, input_tensor_npy: np.ndarray, return_full_ctx: bool = False
+    parent_path: str | Path,
+    child_path: str | Path,
+    input_tensor_npy: np.ndarray,
+    return_full_ctx: bool = False,
 ) -> np.ndarray | dict[str, np.ndarray]:
     """Execute parent model containing a single StreamingDataflowPartition by
     replacing it with the model at child_path and return result.
 
     Args:
-        parent_path (str): Path to the parent ONNX model file
-        child_path (str): Path to the child ONNX model file to replace the partition
+        parent_path (str|Path): Path to the parent ONNX model file
+        child_path (str|Path): Path to the child ONNX model file to replace the partition
         input_tensor_npy (numpy.ndarray): Input tensor data
         return_full_ctx (bool): If True, return full execution context,
                                otherwise return only output tensor
@@ -74,12 +77,12 @@ def execute_parent(
     Returns:
         numpy.ndarray or dict: Output tensor or full execution context
     """
-    parent_model = load_model_checkpoint(parent_path)
+    parent_model = load_model_checkpoint(str(parent_path))
     iname = parent_model.get_first_global_in()
     oname = parent_model.get_first_global_out()
     sdp_node = parent_model.get_nodes_by_op_type("StreamingDataflowPartition")[0]
     sdp_node = getCustomOp(sdp_node)
-    sdp_node.set_nodeattr("model", child_path)
+    sdp_node.set_nodeattr("model", str(child_path))
     sdp_node.set_nodeattr("return_full_exec_context", 1 if return_full_ctx else 0)
     ret = execute_onnx(parent_model, {iname: input_tensor_npy}, True)
     if return_full_ctx:

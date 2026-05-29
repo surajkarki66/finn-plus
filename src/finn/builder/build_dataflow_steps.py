@@ -180,41 +180,62 @@ def verify_step(
         rtlsim_pre_hook: Optional pre-hook function for RTL simulation
     """
     log.info(f"Running verification for {step_name}")
-    verify_out_dir = cfg.output_dir + "/verification_output"
-    intermediate_models_dir = cfg.output_dir + "/intermediate_models"
+    output_dir = Path(cfg.output_dir)
+    verify_out_dir = output_dir / "verification_output"
+    intermediate_models_dir = output_dir / "intermediate_models"
     # Ensure tensor names are sorted and readable for easier debugging
     model = model.transform(SortGraph())
     model = model.transform(GiveUniqueNodeNamesRecursive())
     model = model.transform(GiveReadableTensorNames())
     os.makedirs(verify_out_dir, exist_ok=True)
-    (in_npy_all, exp_out_npy_all) = cfg._resolve_verification_io_pair()
+    if cfg.verify_steps is None:
+        raise FINNUserError("verify_steps is not set in config, but verification step was called")
+    (in_npy_all, exp_out_npy_all) = cast(
+        "tuple[np.ndarray, np.ndarray]", cfg._resolve_verification_io_pair()
+    )
     bsize_in = in_npy_all.shape[0]
     bsize_out = exp_out_npy_all.shape[0]
     assert bsize_in == bsize_out, "Batch sizes don't match for verification IO pair"
     all_res = True
+    out_dict: dict[str, np.ndarray] = {}
+    parent_model = None
+    res_to_str = {True: "SUCCESS", False: "FAIL"}
     for b in range(bsize_in):
         in_npy = np.expand_dims(in_npy_all[b], axis=0)
         exp_out_npy = np.expand_dims(exp_out_npy_all[b], axis=0)
         if need_parent:
             assert cfg.save_intermediate_models, "Enable save_intermediate_models for verification"
-            parent_model_fn = intermediate_models_dir + "/dataflow_parent.onnx"
-            child_model_fn = intermediate_models_dir + "/verify_%s.onnx" % step_name
+            parent_model_fn = intermediate_models_dir / "dataflow_parent.onnx"
+            child_model_fn = intermediate_models_dir / f"verify_{step_name}.onnx"
             model.save(child_model_fn)
-            parent_model = ModelWrapper(parent_model_fn)
+            parent_model = ModelWrapper(str(parent_model_fn))
             out_tensor_name = parent_model.get_first_global_out()
             exp_ishape = parent_model.get_tensor_shape(parent_model.get_first_global_in())
+            if exp_ishape is None:
+                raise FINNUserError(
+                    f"Unable to determine expected input shape for verification. "
+                    f"Shape of tensor {parent_model.get_first_global_in()} is None."
+                )
             if in_npy.shape != exp_ishape:
                 log.warning(
                     f"Verification input has shape {in_npy.shape} while model expects {exp_ishape}"
                 )
                 log.info("Attempting to force model shape on verification input")
                 in_npy = in_npy.reshape(exp_ishape)
-            out_dict = execute_parent(parent_model_fn, child_model_fn, in_npy, return_full_ctx=True)
+            out_dict = cast(
+                "dict[str, np.ndarray]",
+                execute_parent(parent_model_fn, child_model_fn, in_npy, return_full_ctx=True),
+            )
             out_npy = out_dict[out_tensor_name]
         else:
             inp_tensor_name = model.get_first_global_in()
             out_tensor_name = model.get_first_global_out()
             exp_ishape = model.get_tensor_shape(inp_tensor_name)
+            if exp_ishape is None:
+                raise FINNUserError(
+                    f"Unable to determine expected input shape for verification. "
+                    f"Shape of tensor {model.get_first_global_in()} is None."
+                )
             if in_npy.shape != exp_ishape:
                 log.warning(
                     f"Verification input has shape {in_npy.shape} while model expects {exp_ishape}"
@@ -251,8 +272,7 @@ def verify_step(
 
         res = res1 and res2 and res3
         all_res = all_res and res
-        res_to_str = {True: "SUCCESS", False: "FAIL"}
-        res_str = res_to_str[res]
+        res_str = res_to_str[bool(res)]
         if cfg.verify_save_full_context and (rtlsim_pre_hook is None):
             verification_output_fn = os.path.join(
                 verify_out_dir, f"verify_{step_name}_{b}_{res_str}.npz"
@@ -262,6 +282,8 @@ def verify_step(
             # Log tensor statistics for debugging (only output tensors, in topological order)
             tensors_to_log = ["global_in"]
             if need_parent:
+                if parent_model is None:
+                    raise FINNUserError("Parent model is needed for verification but is None")
                 for node in parent_model.graph.node:
                     for output in node.output:
                         tensors_to_log.append(output)
@@ -344,12 +366,12 @@ def verify_step(
             if step_name == "node_by_node_rtlsim":
                 for node in model.graph.node:
                     node_inst = getCustomOp(node)
-                    node_wdb_path = node_inst.get_nodeattr("rtlsim_trace")
+                    node_wdb_path = cast("str", node_inst.get_nodeattr("rtlsim_trace"))
                     if node_wdb_path is not None and os.path.isfile(node_wdb_path):
                         new_node_wdb_path = node_wdb_path.replace(".wdb", "_%d.wdb" % b)
                         shutil.move(node_wdb_path, new_node_wdb_path)
 
-    log.info(f"Verification for {step_name} : {res_to_str[all_res]}")
+    log.info(f"Verification for {step_name} : {res_to_str[bool(all_res)]}")
 
 
 @register_build_dataflow_step()
