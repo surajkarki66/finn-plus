@@ -8,16 +8,23 @@ import numpy as np
 from onnx import GraphProto, NodeProto, TensorProto, ValueInfoProto, helper
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.util.basic import qonnx_make_model
-from typing import Protocol, cast
+from typing import Protocol, TypedDict
 from finn.transformation.fpgadataflow.simulation_build import SimulationBuilder
 from finn.util.exception import FINNInternalError
 
 
 class _SimulationBuilderProtocol(Protocol):
-    def __init__(self, model: ModelWrapper, fpgapart: str, clk_ns: float) -> None:
+    def __init__(
+        self,
+        model: ModelWrapper,
+        fpgapart: str,
+        clk_ns: float,
+        shm_prefix: str,
+        performance_sim: bool = False,
+    ) -> None:
         ...
 
-    def _isolated_node_model(self, by_node: int | str) -> ModelWrapper:
+    def _isolated_node_model(self, by_node: int | str | NodeProto) -> ModelWrapper:
         ...
 
 
@@ -559,6 +566,61 @@ def _build_mvau_target_model(mlo: bool = False) -> ModelWrapper:
     return model
 
 
+class _DuplicateStreamConfig(TypedDict):
+    fifos: bool
+    branch_nodes: bool
+    fifo_pre: bool
+    fifo_between: bool
+    fifo_after: bool
+    fifo_between_depth: int | None
+    expected_input_node: bool
+    expected_output_node: bool
+
+
+_DUPLICATE_STREAM_CONFIGS: list[_DuplicateStreamConfig] = [
+    {
+        "fifos": False,
+        "branch_nodes": False,
+        "fifo_pre": False,
+        "fifo_between": False,
+        "fifo_after": False,
+        "fifo_between_depth": None,
+        "expected_input_node": True,
+        "expected_output_node": True,
+    },
+    {
+        "fifos": False,
+        "branch_nodes": False,
+        "fifo_pre": True,
+        "fifo_between": True,
+        "fifo_after": False,
+        "fifo_between_depth": 2,
+        "expected_input_node": True,
+        "expected_output_node": True,
+    },
+    {
+        "fifos": False,
+        "branch_nodes": True,
+        "fifo_pre": False,
+        "fifo_between": False,
+        "fifo_after": False,
+        "fifo_between_depth": None,
+        "expected_input_node": True,
+        "expected_output_node": False,
+    },
+    {
+        "fifos": False,
+        "branch_nodes": True,
+        "fifo_pre": True,
+        "fifo_between": True,
+        "fifo_after": True,
+        "fifo_between_depth": 2,
+        "expected_input_node": True,
+        "expected_output_node": False,
+    },
+]
+
+
 def _assert_isolated_model(
     isolated_model: ModelWrapper,
     source_model: ModelWrapper | None,
@@ -683,7 +745,7 @@ def test_isolated_node_model_unary_target_with_varied_other_node_inputs(
 ) -> None:
     """Isolate unary target with unary/binary surrounding nodes."""
     model = _build_unary_target_model(pre_binary=pre_binary, succ_binary=succ_binary)
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_1_")
 
     isolated = _isolate_node_model(builder, 1)
 
@@ -703,7 +765,7 @@ def test_isolated_node_model_unary_target_with_varied_other_node_inputs(
 def test_isolated_node_model_select_by_name() -> None:
     """Selecting node by name returns the correct isolated model."""
     model = _build_unary_target_model(pre_binary=False, succ_binary=False)
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_2_")
 
     isolated = _isolate_node_model(builder, "target_dwc")
 
@@ -739,7 +801,7 @@ def test_isolated_node_model_binary_target_with_dynamic_and_fixed_inputs(
 ) -> None:
     """Isolate binary target for dynamic/fixed lhs-rhs and MLO/non-MLO cases."""
     model = _build_binary_target_model(initializer_side=initializer_side, mlo=mlo)
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_3_")
 
     isolated = _isolate_node_model(builder, 0)
 
@@ -768,7 +830,7 @@ def test_isolated_node_model_unary_succ_fifo_chain_transparency(
         fifo_between=True,
         fifo_between_depth=fifo_between_depth,
     )
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_4_")
 
     isolated = _isolate_node_model(builder, "succ_dwc")
 
@@ -798,7 +860,7 @@ def test_isolated_node_model_binary_succ_fifo_chain_transparency(
         fifo_between=True,
         fifo_between_depth=fifo_between_depth,
     )
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_5_")
 
     isolated = _isolate_node_model(builder, "succ_dwc")
 
@@ -838,7 +900,7 @@ def test_isolated_node_model_binary_target_fifo_pre_transparency(
         fifo_between=True,
         fifo_between_depth=2,
     )
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_6_")
 
     model.save("/scratch/pc2-mitarbeiter/linusjun/finn-tmp/source_model.onnx")
 
@@ -873,64 +935,20 @@ def test_isolated_node_model_binary_target_fifo_pre_transparency(
     )
 
 
-@pytest.mark.parametrize(
-    "config",
-    [
-        {
-            "fifos": False,
-            "branch_nodes": False,
-            "fifo_pre": False,
-            "fifo_between": False,
-            "fifo_after": False,
-            "fifo_between_depth": None,
-            "expected_input_node": True,
-            "expected_output_node": True,
-        },
-        {
-            "fifos": False,
-            "branch_nodes": False,
-            "fifo_pre": True,
-            "fifo_between": True,
-            "fifo_after": False,
-            "fifo_between_depth": 2,
-            "expected_input_node": True,
-            "expected_output_node": True,
-        },
-        {
-            "fifos": False,
-            "branch_nodes": True,
-            "fifo_pre": False,
-            "fifo_between": False,
-            "fifo_after": False,
-            "fifo_between_depth": None,
-            "expected_input_node": True,
-            "expected_output_node": False,
-        },
-        {
-            "fifos": False,
-            "branch_nodes": True,
-            "fifo_pre": True,
-            "fifo_between": True,
-            "fifo_after": True,
-            "fifo_between_depth": 2,
-            "expected_input_node": True,
-            "expected_output_node": False,
-        },
-    ],
-)
+@pytest.mark.parametrize("config", _DUPLICATE_STREAM_CONFIGS)
 def test_isolated_node_model_duplicate_stream_fifo_transparency(
-    config: dict[str, object],
+    config: _DuplicateStreamConfig,
 ) -> None:
     """DuplicateStreams models behave identically with FIFO chains present."""
     model = _build_duplicate_target_model(
-        fifos=bool(config["fifos"]),
-        branch_nodes=bool(config["branch_nodes"]),
-        fifo_pre=bool(config["fifo_pre"]),
-        fifo_between=bool(config["fifo_between"]),
-        fifo_after=bool(config["fifo_after"]),
-        fifo_between_depth=cast("int | None", config["fifo_between_depth"]),
+        fifos=config["fifos"],
+        branch_nodes=config["branch_nodes"],
+        fifo_pre=config["fifo_pre"],
+        fifo_between=config["fifo_between"],
+        fifo_after=config["fifo_after"],
+        fifo_between_depth=config["fifo_between_depth"],
     )
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_7_")
 
     isolated = _isolate_node_model(builder, "dup_stream")
 
@@ -941,10 +959,10 @@ def test_isolated_node_model_duplicate_stream_fifo_transparency(
         expected_graph_inputs=["dup_in"],
         expected_graph_outputs=["dup_out0", "dup_out1"],
         expected_initializer_inputs=[],
-        expected_input_node_flag=bool(config["expected_input_node"]),
+        expected_input_node_flag=config["expected_input_node"],
         expected_target_inputs=["dup_in_dummy"],
         expected_target_outputs=["dup_out0_dummy", "dup_out1_dummy"],
-        expected_output_node_flag=bool(config["expected_output_node"]),
+        expected_output_node_flag=config["expected_output_node"],
     )
 
 
@@ -970,8 +988,8 @@ def test_isolated_node_model_fifo_transparency_nodes() -> None:
         fifo_after=True,
     )
 
-    builder_no_fifo = SimulationBuilder(model_no_fifo, "xc7z020clg400-1", 5.0)
-    builder_fifo = SimulationBuilder(model_fifo, "xc7z020clg400-1", 5.0)
+    builder_no_fifo = SimulationBuilder(model_no_fifo, "xc7z020clg400-1", 5.0, "test_isolated_8_")
+    builder_fifo = SimulationBuilder(model_fifo, "xc7z020clg400-1", 5.0, "test_isolated_9_")
 
     node_names = [node.name for node in model_no_fifo.graph.node if node.op_type != "StreamingFIFO"]
 
@@ -990,7 +1008,7 @@ def test_isolated_node_model_fifo_transparency_nodes() -> None:
 def test_isolated_node_model_elementwise_sets_const_style_for_mlo_initializer() -> None:
     """Elementwise ops set lhs_style/rhs_style=const for remapped MLO initializer inputs."""
     model = _build_binary_target_model(initializer_side=None, mlo=True)
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_10_")
 
     isolated = _isolate_node_model(builder, 0)
     target_node = next(n for n in isolated.graph.node if n.name == "target_add")
@@ -1009,7 +1027,7 @@ def test_isolated_node_model_elementwise_sets_const_style_for_mlo_initializer() 
 def test_isolated_node_model_mvau_sets_internal_decoupled_for_initializer_input() -> None:
     """MVAU ops set mem_mode=internal_decoupled when an input is remapped to initializer."""
     model = _build_mvau_target_model(mlo=True)
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_11_")
 
     isolated = _isolate_node_model(builder, 0)
     target_node = next(n for n in isolated.graph.node if n.name == "target_mvau")
@@ -1026,7 +1044,7 @@ def test_isolated_node_model_rejects_bad_mlo_metadata() -> None:
     model = _build_binary_target_model(initializer_side="rhs", mlo=False)
     model.set_metadata_prop("is_mlo", "1")
     model.set_metadata_prop("mlo_input_parameter_names", "42")
-    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0)
+    builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_12_")
 
     with pytest.raises(FINNInternalError, match="mlo_input_parameter_names"):
         _isolate_node_model(builder, 0)

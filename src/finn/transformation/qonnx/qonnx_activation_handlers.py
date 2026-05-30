@@ -182,7 +182,7 @@ class QuantActBaseHandler(ABC):
             # which is the other way around in Brevitas,
             # we thus need to adjust the bias in the MultiThreshold node
             finn_bias = adder_bias[0].item() * mul_scale[0].item()
-            mt_inst.set_nodeattr("out_bias", finn_bias)
+            mt_inst.set_nodeattr("out_bias", float(finn_bias))
 
             # Set the output data type
             mt_inst.set_nodeattr("out_dtype", out_dtype)

@@ -507,7 +507,6 @@ def test_finnloop_end2end_mlo(
         target_fps=1000,
         synth_clk_period_ns=10.0,
         board="V80",
-        rtlsim_batch_size=100,
         standalone_thresholds=True,
         mlo=True,
         loop_body_hierarchy=[["", "layers.0"]],

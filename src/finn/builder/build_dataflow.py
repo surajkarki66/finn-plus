@@ -331,13 +331,13 @@ def exit_buildflow(
     return exit_code
 
 
-def create_model_wrapper(model_filename: str, cfg: DataflowBuildConfig) -> ModelWrapper:
+def create_model_wrapper(model_filename: str | Path, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Create a modelwrapper from the given config and filename. If a start-step
     is given, the ModelWrapper is constructed from a previous intermediate model.
     """
     if cfg.start_step is None:
         print(f"Building dataflow accelerator from {model_filename}")
-        return ModelWrapper(model_filename)
+        return ModelWrapper(str(model_filename))
     if model_filename != "":
         log.warning(
             "When using a start-step, FINN automatically searches "
@@ -354,7 +354,7 @@ def create_model_wrapper(model_filename: str, cfg: DataflowBuildConfig) -> Model
     return ModelWrapper(str(intermediate_model_filename))
 
 
-def build_dataflow_cfg(model_filename: str, cfg: DataflowBuildConfig) -> int:
+def build_dataflow_cfg(model_filename: str | Path, cfg: DataflowBuildConfig) -> int:
     """Build a dataflow accelerator using the given configuration.
 
     Main entry point for building FINN dataflow accelerators. Handles step execution,

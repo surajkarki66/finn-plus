@@ -118,6 +118,8 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
                     posix=IS_POSIX,
                 )
             )
+            test_1_process.communicate()
+            test_1_returncode = test_1_process.returncode
             # test_2_process = subprocess.Popen(
             #     shlex.split(
             #         (
@@ -129,8 +131,6 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
             #         posix=IS_POSIX,
             #     )
             # )
-            test_1_process.communicate()
-            test_1_returncode = test_1_process.returncode
             # test_2_process.communicate()
             # test_2_returncode = test_2_process.returncode
 
