@@ -1763,44 +1763,50 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         num_slots = kwargs.get("num_slots", 2)
         lead_time = kwargs.get("lead_time")
         reconfiguration_time = kwargs.get("reconfiguration_time", 100000000)
-        test_bs = kwargs.get("test_bs", 200)
+        instr_runtime = kwargs.get("instr_runtime", 30)
+        avg_window_size = kwargs.get("avg_window_size", 64)
 
         if self.multidnn_mode != "PartialReconfiguration":
-            if test_bs is not None:
-                if self.multidnn_mode == "Parallel":
-                    self.batch_size = test_bs // 2
-                else:
-                    self.batch_size = test_bs
             if self.multidnn_mode == "SelectableWeights":
-                selector = self.SelectorDriver(
-                    self.ip_dict["StreamingDataflowPartition_1_selector"]
-                )
+                selector = self.Selector(self.ip_dict["StreamingDataflowPartition_1_selector"])
                 selector.set_schedule(schedule=[1, 1])
                 selector.start()
 
-            self.set_current_mode("dma")
-            test_results = {}
-            res = []
-            for _ in range(3):
-                self.throughput_test()["throughput[images/s]"]  # Dry runs
-            for _ in range(20):
-                res.append(self.throughput_test()["throughput[images/s]"])
-
-            if self.fclk_mhz == 200.0:
-                res = [x * (200.0 / 214.28357) for x in res]
-            res_sorted = sorted(res)
-            n = len(res_sorted)
-            q1 = res_sorted[n // 4]
-            q3 = res_sorted[(3 * n) // 4]
+            self.set_current_mode("instr")
+            self.start_accelerator(avg_window_size=avg_window_size)
+            time.sleep(instr_runtime)
+            (
+                overflow_err,
+                underflow_err,
+                frame,
+                checksum,
+                min_latency,
+                latency,
+                interval,
+                avg_latency,
+                avg_interval,
+            ) = self.observe_instrumentation(debug_print=False)
+            self.stop_accelerator()
+            fclk = self.fclk_mhz_actual * 1e6
             report = {
-                "avg_th": sum(res) / len(res),
-                "min": min(res),
-                "q1": q1,
-                "q3": q3,
-                "max": max(res),
+                "error": overflow_err or underflow_err or interval == 0,
+                "checksum": checksum,
+                "min_latency_cycles": min_latency,
+                "latency_cycles": latency,
+                "interval_cycles": interval,
+                "avg_latency_cycles": avg_latency,
+                "avg_interval_cycles": avg_interval,
+                "frequency_mhz": round(self.fclk_mhz_actual),
+                "min_latency_ms": round(min_latency / fclk * 1e3, 6),
+                "latency_ms": round(latency / fclk * 1e3, 6),
+                "avg_latency_ms": round(avg_latency / fclk * 1e3, 6),
+                "throughput_fps": round(fclk / interval) if interval != 0 else 0,
+                "avg_throughput_fps": round(fclk / avg_interval) if avg_interval != 0 else 0,
+                "min_pipeline_depth": round(min_latency / interval, 2) if interval != 0 else 0,
+                "pipeline_depth": round(latency / interval, 2) if interval != 0 else 0,
             }
-            self.batch_size = 1
-            reportfile = os.path.join(report_dir, "report_pr.json")
+            mode_tag = (self.multidnn_mode or "single").lower()
+            reportfile = os.path.join(report_dir, f"report_{mode_tag}.json")
             with open(reportfile, "w") as f:
                 json.dump(report, f, indent=2)
             return 0
@@ -1824,6 +1830,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         for slot in range(num_slots):
             dfx_scheduler.set_slot(slot=slot, rm_id=slot, cycles_wait=reconfiguration_time)
         dfx_scheduler.start()
+        self.set_current_mode("instr")
 
         # Get Min/Max cycles to sweep##
         min_max = {}
@@ -1833,11 +1840,6 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         min_max["max_cycles"] = max_cycles
         min_max["min_cycles"] = min_cycles
         report["min_max_cycles"] = min_max
-
-        # Set Batch Size
-        if test_bs is not None:
-            self.batch_size = test_bs
-        report["batch_size"] = self.batch_size
 
         # Generate Experiments
         overhead_cycles = max_cycles + lead_time
@@ -1859,36 +1861,50 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
 
         test_results = {}
         for inference_cycles in tests:
-            res = []
             for slot in range(num_slots):
                 dfx_scheduler.set_slot(
                     slot=slot, rm_id=slot, cycles_wait=inference_cycles + overhead_cycles
                 )
-            self.throughput_test()["throughput[images/s]"]  # dry run
-            for _ in range(20):
-                res.append(self.throughput_test()["throughput[images/s]"])
-            # if self.fclk_mhz == 200.0:
-            res = [x * (200.0 / 214.28357) for x in res]
-            res_sorted = sorted(res)
-            n = len(res_sorted)
-            q1 = res_sorted[n // 4]
-            q3 = res_sorted[(3 * n) // 4]
+            self.start_accelerator(avg_window_size=avg_window_size)
+            time.sleep(instr_runtime)
+            (
+                overflow_err,
+                underflow_err,
+                frame,
+                checksum,
+                min_latency,
+                latency,
+                interval,
+                avg_latency,
+                avg_interval,
+            ) = self.observe_instrumentation(debug_print=False)
+            self.stop_accelerator()
+            fclk = self.fclk_mhz_actual * 1e6
             test_results[inference_cycles] = {
                 "overhead_cycles": overhead_cycles,
                 "lead_time": lead_time,
                 "inference_cycles": inference_cycles,
-                "avg_th": sum(res) / len(res),
-                "min": min(res),
-                "q1": q1,
-                "q3": q3,
-                "max": max(res),
+                "error": overflow_err or underflow_err or interval == 0,
+                "checksum": checksum,
+                "min_latency_cycles": min_latency,
+                "latency_cycles": latency,
+                "interval_cycles": interval,
+                "avg_latency_cycles": avg_latency,
+                "avg_interval_cycles": avg_interval,
+                "frequency_mhz": round(self.fclk_mhz_actual),
+                "min_latency_ms": round(min_latency / fclk * 1e3, 6),
+                "latency_ms": round(latency / fclk * 1e3, 6),
+                "avg_latency_ms": round(avg_latency / fclk * 1e3, 6),
+                "throughput_fps": round(fclk / interval) if interval != 0 else 0,
+                "avg_throughput_fps": round(fclk / avg_interval) if avg_interval != 0 else 0,
+                "min_pipeline_depth": round(min_latency / interval, 2) if interval != 0 else 0,
+                "pipeline_depth": round(latency / interval, 2) if interval != 0 else 0,
             }
         report["test"] = test_results
         report["Error"] = dfx_scheduler.error
         dfx_scheduler.stop()
         print(dfx_scheduler.status())
 
-        self.batch_size = 1  # Free memory
         del dfx
         # PCAP test - dry run to buffer bitstreams in RAM
         self.enable_pcap()

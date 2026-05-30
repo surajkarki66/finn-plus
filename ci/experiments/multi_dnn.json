@@ -24,7 +24,8 @@
                 "lead_time": 10000,
                 "reconfiguration_time": 2851326,
                 "num_slots": 8,
-                "test_bs": 30000
+                "instr_runtime": 30,
+                "avg_window_size": 16384
             }
           }
         ]
