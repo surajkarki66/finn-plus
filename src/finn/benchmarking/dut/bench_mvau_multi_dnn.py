@@ -259,7 +259,7 @@ class bench_mvau_multi_dnn(bench):
             }
         elif scenario == 4:
             mvau_node_name = f"MVAU_{backend}_0"
-            pblock = self._params.get("pblock", "CLOCKREGION_X1Y1:CLOCKREGION_X3Y5")
+            # pblock = self._params.get("pblock", "CLOCKREGION_X1Y1:CLOCKREGION_X3Y5")
             generation = {
                 "mode": "PartialReconfiguration",
                 "kwargs": {
@@ -268,7 +268,7 @@ class bench_mvau_multi_dnn(bench):
                         "pr_mvau_0": {
                             "mvau_A": [mvau_node_name],
                             "mvau_B": [mvau_node_name],
-                            "pblock": pblock,
+                            # "pblock": pblock,
                         }
                     },
                 },

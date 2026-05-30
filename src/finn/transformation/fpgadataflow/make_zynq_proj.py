@@ -1264,7 +1264,9 @@ class MakeZYNQProject(Transformation):
         pr_config.append("launch_runs synth_1 -jobs 4")
         pr_config.append("wait_on_run synth_1")
 
-        pr_config.append("open_run synth_1 -name synth_1")
+        # Collect pblock info for every PR SDP before choosing the mode.
+        # Each entry is (sdp_name, pblock_string_or_empty, pr_nodecontainer_inst).
+        pr_sdp_pblock_info = []
         for pr_sdp in pr_sdp_nodes:
             pr_sdp_inst = getCustomOp(pr_sdp)
             sdp_name = pr_sdp.name
@@ -1277,15 +1279,57 @@ class MakeZYNQProject(Transformation):
             ][0]
             pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
             pblock = pr_nodecontainer_inst.get_nodeattr("pblock")
-            assert pblock, "NodeContainer %s has no 'pblock' attribute set" % sdp_name
-            pblock_name = "pblock_Hier_%s" % sdp_name
-            cell_path = "top_i/Hier_%s" % sdp_name
-            pr_config.append("create_pblock %s" % pblock_name)
-            pr_config.append(
-                "add_cells_to_pblock [get_pblocks %s] [get_cells %s]" % (pblock_name, cell_path)
+            pr_sdp_pblock_info.append((sdp_name, pblock))
+
+        pblocks_specified = [pblock for _, pblock in pr_sdp_pblock_info]
+        all_empty = all(p == "" for p in pblocks_specified)
+        all_specified = all(p != "" for p in pblocks_specified)
+
+        if not all_empty and not all_specified:
+            raise FINNError(
+                "Mixed pblock specification: either ALL PR regions must have an explicit "
+                "'pblock' string, or ALL must omit it (auto-floorplanning mode). "
+                "Found a mix of specified and empty pblock attributes."
             )
-            pr_config.append("resize_pblock [get_pblocks %s] -add {%s}" % (pblock_name, pblock))
-            pr_config.append("set_property SNAPPING_MODE ON [get_pblocks %s]" % pblock_name)
+
+        pr_config.append("open_run synth_1 -name synth_1")
+
+        if all_empty:
+            # ----------------------------------------------------------------
+            # Auto-floorplanning mode: query per-cell resource usage from the
+            # synthesised netlist and let generate_multi_dfx_pblocks size and
+            # place the pblocks automatically.
+            # ----------------------------------------------------------------
+            dfx_tcl_path = str(
+                Path(__file__).parent.parent.parent
+                / "util"
+                / "vivado_scripts"
+                / "dfx_auto_floorplanning.tcl"
+            )
+            pr_config.append("source {%s}" % dfx_tcl_path)
+
+            cell_names = ["top_i/Hier_%s" % sdp_name for sdp_name, _ in pr_sdp_pblock_info]
+            pblock_names = ["pblock_Hier_%s" % sdp_name for sdp_name, _ in pr_sdp_pblock_info]
+
+            pr_config.append(
+                "auto_floorplan_from_synthesis {%s} {%s}"
+                % (" ".join(cell_names), " ".join(pblock_names))
+            )
+        else:
+            # ----------------------------------------------------------------
+            # Manual mode: use the pblock strings already set on each
+            # NodeContainer (existing behaviour).
+            # ----------------------------------------------------------------
+            for sdp_name, pblock in pr_sdp_pblock_info:
+                pblock_name = "pblock_Hier_%s" % sdp_name
+                cell_path = "top_i/Hier_%s" % sdp_name
+                pr_config.append("create_pblock %s" % pblock_name)
+                pr_config.append(
+                    "add_cells_to_pblock [get_pblocks %s] [get_cells %s]" % (pblock_name, cell_path)
+                )
+                pr_config.append("resize_pblock [get_pblocks %s] -add {%s}" % (pblock_name, pblock))
+                pr_config.append("set_property SNAPPING_MODE ON [get_pblocks %s]" % pblock_name)
+
         pr_config.append("save_constraints -force")
         pr_config.append("close_design")
 
@@ -1297,6 +1341,16 @@ class MakeZYNQProject(Transformation):
 
         pr_config.append("launch_runs impl_1 -to_step write_bitstream -jobs 4")
         pr_config.append("wait_on_run impl_1")
+
+        if all_empty:
+            # Auto mode: query post-implementation utilisation and write the JSON report.
+            pr_config.append("open_run impl_1 -name impl_1")
+            pr_config.append(
+                "write_pr_resource_report {%s} {%s}"
+                % (" ".join(cell_names), " ".join(pblock_names))
+            )
+            pr_config.append("close_design")
+
         for body_id in range(1, num_bodies):
             impl_run = "impl_body_%d" % body_id
             pr_config.append("launch_runs %s -to_step write_bitstream -jobs 4" % impl_run)

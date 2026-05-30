@@ -41,43 +41,35 @@
             "pr_regions" : {
                 "pr_mvau_0" : {
                     "vgg10_A" : ["MVAU_hls_0", "Thresholding_rtl_0"],
-                    "vgg10_B" : ["MVAU_hls_0", "Thresholding_rtl_0"],
-                    "pblock" : "SLICE_X46Y0:SLICE_X60Y59 DSP48E2_X8Y0:DSP48E2_X10Y23 RAMB18_X5Y0:RAMB18_X5Y23 RAMB36_X5Y0:RAMB36_X5Y11"
+                    "vgg10_B" : ["MVAU_hls_0", "Thresholding_rtl_0"]
                 },
                 "pr_mvau_1" : {
                     "vgg10_A" : ["MVAU_hls_1", "Thresholding_hls_0"],
-                    "vgg10_B" : ["MVAU_hls_1", "Thresholding_hls_0"],
-                    "pblock" : "SLICE_X31Y60:SLICE_X60Y179 DSP48E2_X4Y24:DSP48E2_X10Y71 FE_X0Y1:FE_X0Y2 RAMB18_X3Y24:RAMB18_X5Y71 RAMB36_X3Y12:RAMB36_X5Y35"
+                    "vgg10_B" : ["MVAU_hls_1", "Thresholding_hls_0"]
                 },
                 "pr_mvau_2" : {
                     "vgg10_A" : ["MVAU_hls_2", "Thresholding_hls_1"],
-                    "vgg10_B" : ["MVAU_hls_2", "Thresholding_hls_1"],
-                    "pblock" : "SLICE_X46Y180:SLICE_X60Y299 DSP48E2_X8Y72:DSP48E2_X10Y119 RAMB18_X5Y72:RAMB18_X5Y119 RAMB36_X5Y36:RAMB36_X5Y59"
+                    "vgg10_B" : ["MVAU_hls_2", "Thresholding_hls_1"]
                 },
                 "pr_mvau_3" : {
                     "vgg10_A" : ["MVAU_hls_3", "Thresholding_hls_2"],
-                    "vgg10_B" : ["MVAU_hls_3", "Thresholding_hls_2"],
-                    "pblock" : "SLICE_X61Y300:SLICE_X78Y359 DSP48E2_X11Y120:DSP48E2_X13Y143 RAMB18_X6Y120:RAMB18_X7Y143 RAMB36_X6Y60:RAMB36_X7Y71"
+                    "vgg10_B" : ["MVAU_hls_3", "Thresholding_hls_2"]
                 },
                 "pr_mvau_4" : {
                     "vgg10_A" : ["MVAU_hls_4", "Thresholding_hls_3"],
-                    "vgg10_B" : ["MVAU_hls_4", "Thresholding_hls_3"],
-                    "pblock" : "SLICE_X86Y60:SLICE_X96Y119 DSP48E2_X16Y24:DSP48E2_X18Y47 RAMB18_X9Y24:RAMB18_X9Y47 RAMB36_X9Y12:RAMB36_X9Y23"
+                    "vgg10_B" : ["MVAU_hls_4", "Thresholding_hls_3"]
                 },
                 "pr_mvau_5" : {
                     "vgg10_A" : ["MVAU_hls_5", "Thresholding_hls_4"],
-                    "vgg10_B" : ["MVAU_hls_5", "Thresholding_hls_4"],
-                    "pblock" : "SLICE_X86Y120:SLICE_X94Y179 DSP48E2_X16Y48:DSP48E2_X18Y71 RAMB18_X9Y48:RAMB18_X9Y71 RAMB36_X9Y24:RAMB36_X9Y35"
+                    "vgg10_B" : ["MVAU_hls_5", "Thresholding_hls_4"]
                 },
                 "pr_mvau_6" : {
                     "vgg10_A" : ["MVAU_hls_6", "Thresholding_hls_5"],
-                    "vgg10_B" : ["MVAU_hls_6", "Thresholding_hls_5"],
-                    "pblock" : "SLICE_X86Y240:SLICE_X93Y299 DSP48E2_X16Y96:DSP48E2_X17Y119 RAMB18_X9Y96:RAMB18_X9Y119 RAMB36_X9Y48:RAMB36_X9Y59"
+                    "vgg10_B" : ["MVAU_hls_6", "Thresholding_hls_5"]
                 },
                 "pr_mvau_7" : {
                     "vgg10_A" : ["MVAU_hls_7", "Thresholding_hls_6", "MVAU_hls_8", "Thresholding_hls_7", "MVAU_hls_9", "ElementwiseAdd_hls_0"],
-                    "vgg10_B" : ["MVAU_hls_7", "Thresholding_hls_6", "MVAU_hls_8", "Thresholding_hls_7", "MVAU_hls_9", "ElementwiseAdd_hls_0"],
-                    "pblock" : "SLICE_X82Y300:SLICE_X96Y359 DSP48E2_X15Y120:DSP48E2_X19Y143 RAMB18_X8Y120:RAMB18_X9Y143 RAMB36_X8Y60:RAMB36_X9Y71"
+                    "vgg10_B" : ["MVAU_hls_7", "Thresholding_hls_6", "MVAU_hls_8", "Thresholding_hls_7", "MVAU_hls_9", "ElementwiseAdd_hls_0"]
                 }
             }
         }
