@@ -495,9 +495,7 @@ def test_finnloop_end2end_mlo(
         "step_apply_folding_config",
         "step_minimize_bit_width",
         "step_generate_estimate_reports",
-        "step_hw_codegen",
-        "step_hw_ipgen",
-        "step_set_fifo_depths",
+        "step_generate_hardware",
         "step_create_stitched_ip",
     ]
 

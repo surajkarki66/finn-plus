@@ -489,6 +489,8 @@ class SimulationBuilder:
             params_changed = True
         if "runtime_writeable_weights" in params and params["runtime_writeable_weights"] == 1:
             params["runtime_writeable_weights"] = 0
+            if "ram_style" in params and params["ram_style"] == "ultra":
+                params["ram_style"] = "block"
             params_changed = True
         if "dynamic_mode" in params and params["dynamic_mode"] == 1:
             params["dynamic_mode"] = 0
