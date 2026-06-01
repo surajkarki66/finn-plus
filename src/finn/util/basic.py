@@ -41,7 +41,9 @@ The module serves as a foundation for other FINN components that need
 basic system operations, hardware abstraction, and build tool integration.
 """
 
+import contextlib
 import os
+import signal
 import stat as statmod
 import subprocess
 import tempfile
@@ -257,21 +259,61 @@ def launch_process_helper(
     print_stdout: bool = True,
     print_stderr: bool = True,
     timeout: float | None = None,
+    start_new_session: bool = False,
+    kill_process_group: bool = False,
 ) -> tuple[str, str]:
     """Launch a helper process in a way that facilitates logging
     stdout/stderr with Python loggers.
     Returns (cmd_out, cmd_err) if successful, raises CalledProcessError otherwise.
-    If timeout is set, subprocess.run may raise TimeoutExpired."""
-    process = subprocess.run(
-        [str(arg) for arg in args],
-        capture_output=True,
-        env=proc_env,
-        cwd=cwd,
-        text=True,
-        timeout=timeout,
-    )
-    cmd_out = process.stdout.strip()
-    cmd_err = process.stderr.strip()
+    If timeout is set, subprocess.run/communicate may raise TimeoutExpired.
+    When kill_process_group is True, the whole process group is
+    terminated after completion or timeout cleanup."""
+    use_new_session = start_new_session or kill_process_group
+    cmd = [str(arg) for arg in args]
+    if not use_new_session:
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            env=proc_env,
+            cwd=cwd,
+            text=True,
+            timeout=timeout,
+        )
+        cmd_out = process.stdout.strip()
+        cmd_err = process.stderr.strip()
+        returncode = process.returncode
+    else:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=proc_env,
+            cwd=cwd,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            cmd_out, cmd_err = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            if kill_process_group:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    cmd_out, cmd_err = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    cmd_out, cmd_err = process.communicate()
+            else:
+                process.kill()
+                cmd_out, cmd_err = process.communicate()
+            raise
+        if kill_process_group:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
+        cmd_out = "" if cmd_out is None else cmd_out.strip()
+        cmd_err = "" if cmd_err is None else cmd_err.strip()
+        returncode = process.returncode
 
     # Handle stdout
     if cmd_out:
@@ -282,7 +324,7 @@ def launch_process_helper(
             log.debug(cmd_out)
 
     # Handle stderr, depending on return code
-    if process.returncode == 0:
+    if returncode == 0:
         # Process completed successfully, log stderr only as WARNING
         if cmd_err and print_stderr:
             log.warning(cmd_err)
@@ -293,12 +335,15 @@ def launch_process_helper(
 
         # Log additional ERROR message
         cmd = " ".join(str(arg) for arg in args) if isinstance(args, list) else str(args)
-        log.error(f"Launched process returned non-zero exit code ({process.returncode}): {cmd}")
+        log.error(f"Launched process returned non-zero exit code ({returncode}): {cmd}")
 
     # Raise CalledProcessError for non-zero return code, including captured output
-    if process.returncode != 0:
+    if returncode != 0:
         raise VerboseCalledProcessError(
-            process.returncode, args, output=process.stdout, stderr=process.stderr
+            returncode,
+            args,
+            output=cmd_out,
+            stderr=cmd_err,
         )
     return (cmd_out, cmd_err)
 

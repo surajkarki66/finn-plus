@@ -118,12 +118,26 @@ def compile_sim_obj(
 
     cmd_xvlog = ["xvlog", "--incr", "--relax", "-prj", "rtlsim.prj"]
 
-    launch_process_helper(cmd_xvlog, cwd=sim_out_dir, print_stdout=False, timeout=600)
-    launch_process_helper(cmd_xelab, cwd=sim_out_dir, print_stdout=False, timeout=600)
+    launch_process_helper(
+        cmd_xvlog,
+        cwd=sim_out_dir,
+        print_stdout=False,
+        timeout=240,
+        start_new_session=True,
+        kill_process_group=True,
+    )
+    launch_process_helper(
+        cmd_xelab,
+        cwd=sim_out_dir,
+        print_stdout=False,
+        timeout=300,
+        start_new_session=True,
+        kill_process_group=True,
+    )
     out_so_relative_path = Path(f"xsim.dir/{top_module_name}/xsimk.so")
     out_so_full_path = sim_out_dir / out_so_relative_path
 
-    if not wait_for_file(out_so_full_path):
+    if not wait_for_file(out_so_full_path, timeout=5):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), out_so_full_path)
 
     return (sim_out_dir, out_so_relative_path)
