@@ -68,6 +68,9 @@ module dfx_wrapper #(
     // --------------------------------------------------------------------------
     localparam int RM_ID_W     = (NUM_RM > 1) ? $clog2(NUM_RM) : 1;
     localparam int RESET_CNT_W = $clog2(RESET_CYCLES + 1);
+    // Width of the frames-in-flight counter. 8 bits supports up to 255 concurrent
+    // frames inside the BDC pipeline, which is far more than any realistic FINN pipeline.
+    localparam int INFLIGHT_W  = 8;
 
     // --------------------------------------------------------------------------
     // State encoding
@@ -86,9 +89,10 @@ module dfx_wrapper #(
     // --------------------------------------------------------------------------
     // Registers
     // --------------------------------------------------------------------------
-    logic [RM_ID_W-1:0]    current_rm_id;
-    logic [RM_ID_W-1:0]    pending_rm_id;
+    logic [RM_ID_W-1:0]     current_rm_id;
+    logic [RM_ID_W-1:0]     pending_rm_id;
     logic [RESET_CNT_W-1:0] reset_cnt;
+    logic [INFLIGHT_W-1:0]  frames_in_flight;
     logic                   decouple_prev; // for edge detection
 
     // --------------------------------------------------------------------------
@@ -123,6 +127,31 @@ module dfx_wrapper #(
     assign accel_reset_n = (state != S_RESET) & aresetn;
 
     // --------------------------------------------------------------------------
+    // Frames-in-flight tracking
+    //   frame_in : a complete frame boundary (tLast) entered the BDC this cycle.
+    //              Gated by input_active so only counted in S_INFERENCE.
+    //   frame_out: a complete frame boundary exited the BDC this cycle.
+    //              Gated by output_forward (S_INFERENCE | S_WAIT_FLUSH) to avoid
+    //              spurious counts while the AMD dfx_decoupler drives tvalid=0.
+    // --------------------------------------------------------------------------
+    logic frame_in;
+    logic frame_out;
+    assign frame_in  = rp_m_axis_tvalid & rp_m_axis_tready & rp_m_axis_tlast;
+    assign frame_out = output_forward & rp_s_axis_tvalid & rp_s_axis_tready & rp_s_axis_tlast;
+
+    always_ff @(posedge aclk or negedge aresetn) begin
+        if (!aresetn) begin
+            frames_in_flight <= '0;
+        end else begin
+            unique case ({frame_in, frame_out})
+                2'b10: frames_in_flight <= frames_in_flight + 1'b1; // frame entered, none exited
+                2'b01: frames_in_flight <= frames_in_flight - 1'b1; // frame exited, none entered
+                default: ; // 2'b00 or 2'b11 — net change is zero
+            endcase
+        end
+    end
+
+    // --------------------------------------------------------------------------
     // FSM
     // --------------------------------------------------------------------------
     always_ff @(posedge aclk or negedge aresetn) begin
@@ -150,11 +179,12 @@ module dfx_wrapper #(
                 end
 
                 // ------------------------------------------------------------------
-                // Drain the pipeline: wait until the BDC emits the last word of the
-                // current frame before triggering reconfiguration.
+                // Drain the pipeline: wait until ALL in-flight frames have exited.
+                // The pipeline may be multiple frames deep, so we track the count
+                // and only proceed when the last frame (frames_in_flight == 1) exits.
                 // ------------------------------------------------------------------
                 S_WAIT_FLUSH: begin
-                    if (rp_s_axis_tvalid & rp_s_axis_tready & rp_s_axis_tlast) begin
+                    if (frame_out && (frames_in_flight == {{(INFLIGHT_W-1){1'b0}}, 1'b1})) begin
                         state <= S_TRIGGER;
                     end
                 end

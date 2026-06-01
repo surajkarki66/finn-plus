@@ -99,10 +99,13 @@ class GenerateNodeContainerStitched(Transformation):
                         if self.cfg.split_large_fifos:
                             node_model = node_model.transform(SplitLargeFIFOs())
                         node_model = node_model.transform(RemoveShallowFIFOs())
-                        # Insert tLast marker on the output of each PR body so that
-                        # the DFX Wrapper can detect when the pipeline has been flushed
-                        # and the reconfigurable region is safe to reprogram.
-                        node_model = node_model.transform(InsertTLastMarker(both=False))
+                        # Insert tLast markers at both the input and output of each PR body.
+                        # The output marker lets the DFX Wrapper detect when a frame has fully
+                        # exited the pipeline (flush detection). The input marker ensures the
+                        # first FINN op inside the BDC sees proper frame boundaries even if the
+                        # upstream does not generate tLast. It also generates the s_axis_tlast
+                        # signal used by the wrapper's frames-in-flight counter.
+                        node_model = node_model.transform(InsertTLastMarker(both=True))
                         node_model = node_model.transform(
                             PrepareIP(
                                 self.cfg._resolve_fpga_part(), self.cfg._resolve_hls_clk_period()
