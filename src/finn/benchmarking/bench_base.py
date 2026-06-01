@@ -186,13 +186,13 @@ class bench:
         # Use a temporary dir for buildflow-related files (next to FINN_BUILD_DIR)
         # Ensure it exists but is empty (clear potential artifacts from previous runs)
         tmp_buildflow_dir = Path(self._work_dir) / "buildflow"
-        tmp_buildflow_dir.mkdir(exist_ok=True)
+        tmp_buildflow_dir.mkdir(exist_ok=True, parents=True)
         delete_dir_contents(tmp_buildflow_dir)
         self._build_inputs["build_dir"] = tmp_buildflow_dir / "build_output"
         # TODO remove in favor of self.build_dir
         self._build_dir = tmp_buildflow_dir / "build_output"
         self.report_dir = self._build_dir / "report"
-        self.report_dir.mkdir(exist_ok=True)
+        self.report_dir.mkdir(exist_ok=True, parents=True)
 
         # Save full build dir as local artifact
         self._local_artifacts_collection.append(("build_output", self._build_dir, False))
@@ -329,9 +329,9 @@ class bench:
         """
         if (Path(build_dir) / "verification_output").is_dir():
             # Collect all verification output filenames
-            outputs = glob.glob(
+            outputs = glob.glob(  # noqa: PTH207
                 str(Path(build_dir) / "verification_output" / "*.npy")
-            )  # noqa: PTH207
+            )
             # Extract the verification status for each verification output by matching
             # to the SUCCESS string contained in the filename
             status = all(out.split("_")[-1].split(".")[0] == "SUCCESS" for out in outputs)
