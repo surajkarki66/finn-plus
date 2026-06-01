@@ -3,6 +3,7 @@
     {
         "dut": ["mvau_multi_dnn"],
         "board": ["RFSoC4x2"],
+        "synth_clk_period_ns": [5],
         "instrumentation_avg_n": [16384],
         "experiments_config": ["../experiments/multi_dnn.json"],
 
