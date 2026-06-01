@@ -845,20 +845,8 @@ class MakeZYNQProject(Transformation):
         pr_config.append("current_bd_design $curdesign")
         for dfx_file in [
             os.path.join(get_settings().finn_rtllib, "icap", "icape3_wrapper.v"),
-            os.path.join(
-                get_settings().finn_rtllib, "dfx", "dfx_finn_decouple", "dfx_finn_decouple.sv"
-            ),
-            os.path.join(
-                get_settings().finn_rtllib,
-                "dfx",
-                "dfx_finn_decouple",
-                "dfx_finn_decouple_wrapper.v",
-            ),
-            os.path.join(get_settings().finn_rtllib, "dfx", "dfx_schedule", "dfx_schedule.sv"),
-            os.path.join(
-                get_settings().finn_rtllib, "dfx", "dfx_schedule", "dfx_schedule_wrapper.v"
-            ),
-            os.path.join(get_settings().finn_rtllib, "axi", "hdl", "axilite.sv"),
+            os.path.join(get_settings().finn_rtllib, "dfx", "dfx_wrapper", "dfx_wrapper.sv"),
+            os.path.join(get_settings().finn_rtllib, "dfx", "dfx_wrapper", "dfx_wrapper_wrapper.v"),
         ]:
             pr_config.append(
                 "add_files -copy_to [get_property DIRECTORY [current_project]] -norecurse %s"
@@ -997,199 +985,152 @@ class MakeZYNQProject(Transformation):
             "[get_bd_pins smartconnect_0/aclk]"
         )
 
-        pr_config.append("create_bd_cell -type module -reference dfx_schedule_wrapper dfx_schedule")
-
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_schedule/controller_trigger] "
-            "[get_bd_pins dfx_controller_0/vsm_*_hw_triggers]"
-        )
-
-        pr_config.append(
-            "set gpio_mi_idx [get_property CONFIG.NUM_MI [get_bd_cells axi_interconnect_0]]"
-        )
-        pr_config.append(
-            "set_property CONFIG.NUM_MI [expr {$gpio_mi_idx + 1}] [get_bd_cells axi_interconnect_0]"
-        )
-
-        # Dfx Scheule Wrapper
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins dfx_schedule/s_axilite] "
-            "[get_bd_intf_pins axi_interconnect_0/[format M%02d_AXI $gpio_mi_idx]]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_schedule/aclk] " "[get_bd_pins smartconnect_0/aclk]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_schedule/aresetn] "
-            "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
-        )
-
-        pr_config.append(
-            "set_property -dict [list CONFIG.MAX_TRIGGERS {%d} CONFIG.SCHEDULE_SLOTS {%d}] "
-            "[get_bd_cells dfx_schedule]" % (num_bodies, len(pr_sdp_nodes))
-        )
-
-        pr_config.append("assign_bd_address [get_bd_addr_segs {dfx_schedule/S_AXI/Reg}]")
-
-        pr_config.append(
-            "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
-            '"Clk /zynq_ps/$zynq_ps_clkname" '
-            "[get_bd_pins axi_interconnect_0/[format M%02d_ACLK $gpio_mi_idx]]"
-        )
-        pr_config.append("assign_bd_address")
-
-        pr_config.append(
-            "set decouple_pins "
-            "[get_bd_pins -of_objects [get_bd_cells dfx_controller_0]"
-            ' -filter "name =~ *vsm_*_rm_decouple"]'
-        )
-
-        pr_config.append(
-            "create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 xlconcat_decouple"
-        )
-        pr_config.append(
-            "set_property CONFIG.NUM_PORTS "
-            "[llength $decouple_pins] [get_bd_cells xlconcat_decouple]"
-        )
-        pr_config.append(
-            "for {set i 0} {$i < [llength $decouple_pins]} {incr i} {"
-            " connect_bd_net [lindex $decouple_pins $i]"
-            " [get_bd_pins xlconcat_decouple/In$i]"
-            " }"
-        )
-
-        pr_config.append(
-            "create_bd_cell -type ip -vlnv "
-            "xilinx.com:ip:util_reduced_logic:2.0 util_reduced_logic_decouple"
-        )
-        pr_config.append(
-            "set_property -dict [list CONFIG.C_OPERATION {or} "
-            "CONFIG.C_SIZE [llength $decouple_pins]] "
-            "[get_bd_cells util_reduced_logic_decouple]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins xlconcat_decouple/dout] "
-            "[get_bd_pins util_reduced_logic_decouple/Op1]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins util_reduced_logic_decouple/Res] "
-            "[get_bd_pins dfx_schedule/controller_decouple]"
-        )
-
-        # DFX FINN decoupler
-        pr_config.append(
-            "create_bd_cell -type module -reference dfx_finn_decouple_wrapper dfx_finn_decouple"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_finn_decouple/decouple] "
-            "[get_bd_pins dfx_schedule/accel_decouple_input]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_finn_decouple/aclk] "
-            "[get_bd_pins smartconnect_0/aclk]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_finn_decouple/aresetn] "
-            "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
-        )
-
-        idma_node_inst = None
-        for sdp in model.get_nodes_by_op_type("StreamingDataflowPartition"):
-            sdp_model = ModelWrapper(getCustomOp(sdp).get_nodeattr("model"))
-            for n in sdp_model.graph.node:
-                if n.op_type == "IODMA_hls":
-                    inst = getCustomOp(n)
-                    if inst.get_nodeattr("direction") == "in":
-                        idma_node_inst = inst
-                        break
-        decouple_data_width = idma_node_inst.get_nodeattr("streamWidth")
-        decouple_cnt = math.prod(idma_node_inst.get_nodeattr("numInputVectors"))
-        pr_config.append(
-            "set_property -dict [list CONFIG.DATA_WIDTH {%d} CONFIG.DECOUPLE_CNT {%d}] "
-            "[get_bd_cells dfx_finn_decouple]" % (decouple_data_width, decouple_cnt)
-        )
-
-        # DFX decoupler has its own api for setting properties
+        # Source AMD dfx_decoupler API once (needed before per-PR instantiation loop)
         pr_config.append(
             "source [get_property REPOSITORY "
             "[get_ipdefs *dfx_decoupler:1.0]]"
             "/xilinx/dfx_decoupler_v1_0/tcl/api.tcl -notrace"
         )
-        pr_config.append(
-            "create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_decoupler:1.0 dfx_decoupler"
-        )
-        pr_config.append(
-            "dfx_decoupler_v1_0::set_property -dict "
-            "[list CONFIG.INTF.intf_0.VLNV "
-            "xilinx.com:interface:axis_rtl:1.0] "
-            "[get_bd_cells dfx_decoupler]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_decoupler/decouple] "
-            "[get_bd_pins dfx_schedule/accel_decouple_output]"
-        )
 
-        # Reset Block
-        pr_config.append(
-            "create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_accel"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins proc_sys_reset_accel/ext_reset_in] "
-            "[get_bd_pins zynq_ps/pl_resetn0]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins proc_sys_reset_accel/slowest_sync_clk] "
-            "[get_bd_pins zynq_ps/$zynq_ps_clkname]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins proc_sys_reset_accel/aux_reset_in] "
-            "[get_bd_pins dfx_schedule/accel_reset]"
-        )
+        # Per-region DFX Wrapper and AMD DFX Decoupler instantiation.
+        # Each PR SDP gets its own dfx_wrapper (static region controller) and
+        # dfx_decoupler (output-side RP isolation), replacing the previous global
+        # dfx_schedule + dfx_finn_decouple + dfx_decoupler architecture.
+        for pr_sdp in pr_sdp_nodes:
+            pr_sdp_inst = getCustomOp(pr_sdp)
+            pr_sdp_model = ModelWrapper(pr_sdp_inst.get_nodeattr("model"))
+            pr_nodecontainer = [
+                n
+                for n in pr_sdp_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ][0]
+            pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
+            sdp_name = pr_sdp.name
+            num_bodies = pr_nodecontainer_inst.get_nodeattr("bodies")
+            data_width = pr_nodecontainer_inst.get_instream_width()
+            tuser_width_attr = pr_nodecontainer_inst.get_nodeattr("tuser_width")
+            tuser_width = (
+                tuser_width_attr
+                if tuser_width_attr > 0
+                else max(math.ceil(math.log2(max(num_bodies, 2))), 1)
+            )
 
-        pr_config.append(
-            "set finn_switch_A_OUT_slave "
-            "[get_bd_intf_pins -of_objects "
-            "[get_bd_intf_nets -of_objects [get_bd_intf_pins finn_switch/A_OUT]] "
-            "-filter {mode == Slave}]"
-        )
-        pr_config.append(
-            "delete_bd_objs [get_bd_intf_nets -of_objects [get_bd_intf_pins finn_switch/A_OUT]]"
-        )
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins finn_switch/A_OUT] "
-            "[get_bd_intf_pins dfx_finn_decouple/s_axis]"
-        )
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins dfx_finn_decouple/m_axis] "
-            "$finn_switch_A_OUT_slave"
-        )
+            body_0_model = pr_nodecontainer_inst.get_nodeattr("body_0")
+            body_0_ifnames = eval(body_0_model.get_metadata_prop("vivado_stitch_ifnames"))
+            s_axis_name = body_0_ifnames["s_axis"][0][0]
+            m_axis_name = body_0_ifnames["m_axis"][0][0]
 
-        pr_config.append(
-            "set finn_switch_B_IN_master "
-            "[get_bd_intf_pins -of_objects "
-            "[get_bd_intf_nets -of_objects [get_bd_intf_pins finn_switch/B_IN]] "
-            "-filter {mode == Master}]"
-        )
-        pr_config.append(
-            "delete_bd_objs [get_bd_intf_nets -of_objects [get_bd_intf_pins finn_switch/B_IN]]"
-        )
-        pr_config.append(
-            "connect_bd_intf_net $finn_switch_B_IN_master "
-            "[get_bd_intf_pins dfx_decoupler/rp_intf_0]"
-        )
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins dfx_decoupler/s_intf_0] "
-            "[get_bd_intf_pins finn_switch/B_IN]"
-        )
+            # Create per-region DFX Wrapper (replaces global dfx_schedule + dfx_finn_decouple)
+            pr_config.append(
+                "create_bd_cell -type module -reference dfx_wrapper_wrapper dfx_wrapper_%s"
+                % sdp_name
+            )
+            pr_config.append(
+                "set_property -dict [list "
+                "CONFIG.DATA_WIDTH {%d} "
+                "CONFIG.TUSER_WIDTH {%d} "
+                "CONFIG.NUM_RM {%d}] "
+                "[get_bd_cells dfx_wrapper_%s]" % (data_width, tuser_width, num_bodies, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_wrapper_%s/aclk] "
+                "[get_bd_pins smartconnect_0/aclk]" % sdp_name
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_wrapper_%s/aresetn] "
+                "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]" % sdp_name
+            )
 
-        pr_config.append(
-            "foreach rst_pin [get_bd_pins -of_objects "
-            "[get_bd_cells *StreamingDataflowPartition_*] -filter {name == ap_rst_n}] {"
-            " set rst_net [get_bd_nets -of_objects $rst_pin];"
-            " if {$rst_net ne {}} { disconnect_bd_net $rst_net $rst_pin };"
-            " connect_bd_net [get_bd_pins proc_sys_reset_accel/peripheral_aresetn] $rst_pin"
-            " }"
-        )
+            # Create per-region AMD DFX Decoupler on the BDC output side
+            pr_config.append(
+                "create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_decoupler:1.0 dfx_decoupler_%s"
+                % sdp_name
+            )
+            pr_config.append(
+                "dfx_decoupler_v1_0::set_property -dict "
+                "[list CONFIG.INTF.intf_0.VLNV "
+                "xilinx.com:interface:axis_rtl:1.0] "
+                "[get_bd_cells dfx_decoupler_%s]" % sdp_name
+            )
+
+            # Wire DFX controller signals for this virtual socket (VS = sdp_name):
+            #   vsm_<sdp_name>_hw_triggers <- dfx_wrapper controller_trigger (RM select)
+            #   vsm_<sdp_name>_rm_decouple -> dfx_wrapper controller_decouple (decouple status)
+            #   vsm_<sdp_name>_rm_decouple -> dfx_decoupler decouple (isolate BDC output)
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_wrapper_%s/controller_trigger] "
+                "[get_bd_pins dfx_controller_0/vsm_%s_hw_triggers]" % (sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_controller_0/vsm_%s_rm_decouple] "
+                "[get_bd_pins dfx_wrapper_%s/controller_decouple]" % (sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_controller_0/vsm_%s_rm_decouple] "
+                "[get_bd_pins dfx_decoupler_%s/decouple]" % (sdp_name, sdp_name)
+            )
+
+            # Input side: find the upstream master, disconnect from BDC,
+            # route through dfx_wrapper (s_axis -> rp_m_axis -> BDC input)
+            pr_config.append(
+                "set upstream_master_%s [get_bd_intf_pins -of_objects "
+                "[get_bd_intf_nets -of_objects [get_bd_intf_pins Hier_%s/%s]] "
+                "-filter {mode == Master}]" % (sdp_name, sdp_name, s_axis_name)
+            )
+            pr_config.append(
+                "delete_bd_objs [get_bd_intf_nets -of_objects "
+                "[get_bd_intf_pins Hier_%s/%s]]" % (sdp_name, s_axis_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net $upstream_master_%s "
+                "[get_bd_intf_pins dfx_wrapper_%s/s_axis]" % (sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins dfx_wrapper_%s/rp_m_axis] "
+                "[get_bd_intf_pins Hier_%s/%s]" % (sdp_name, sdp_name, s_axis_name)
+            )
+
+            # Output side: find the downstream slave, disconnect from BDC,
+            # route through dfx_decoupler (BDC output -> rp_intf_0 -> s_intf_0 -> rp_s_axis)
+            # then through dfx_wrapper (m_axis -> downstream)
+            pr_config.append(
+                "set downstream_slave_%s [get_bd_intf_pins -of_objects "
+                "[get_bd_intf_nets -of_objects [get_bd_intf_pins Hier_%s/%s]] "
+                "-filter {mode == Slave}]" % (sdp_name, sdp_name, m_axis_name)
+            )
+            pr_config.append(
+                "delete_bd_objs [get_bd_intf_nets -of_objects "
+                "[get_bd_intf_pins Hier_%s/%s]]" % (sdp_name, m_axis_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins Hier_%s/%s] "
+                "[get_bd_intf_pins dfx_decoupler_%s/rp_intf_0]" % (sdp_name, m_axis_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins dfx_decoupler_%s/s_intf_0] "
+                "[get_bd_intf_pins dfx_wrapper_%s/rp_s_axis]" % (sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins dfx_wrapper_%s/m_axis] "
+                "$downstream_slave_%s" % (sdp_name, sdp_name)
+            )
+
+            # Per-region reset: dfx_wrapper/accel_reset_n drives the BDC ap_rst_n directly,
+            # replacing the global proc_sys_reset_accel approach.
+            pr_config.append(
+                "set rst_net_hier_%s "
+                "[get_bd_nets -of_objects [get_bd_pins Hier_%s/ap_rst_n]]" % (sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "if {$rst_net_hier_%s ne {}} "
+                "{ disconnect_bd_net $rst_net_hier_%s [get_bd_pins Hier_%s/ap_rst_n] }"
+                % (sdp_name, sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_wrapper_%s/accel_reset_n] "
+                "[get_bd_pins Hier_%s/ap_rst_n]" % (sdp_name, sdp_name)
+            )
 
         for pr_sdp in pr_sdp_nodes:
             pr_sdp_inst = getCustomOp(pr_sdp)

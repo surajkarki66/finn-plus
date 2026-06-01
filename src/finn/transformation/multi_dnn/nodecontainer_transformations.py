@@ -10,6 +10,7 @@ from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
 from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
+from finn.transformation.fpgadataflow.insert_tlastmarker import InsertTLastMarker
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.set_fifo_depths import (
     InsertAndSetFIFODepths,
@@ -98,6 +99,10 @@ class GenerateNodeContainerStitched(Transformation):
                         if self.cfg.split_large_fifos:
                             node_model = node_model.transform(SplitLargeFIFOs())
                         node_model = node_model.transform(RemoveShallowFIFOs())
+                        # Insert tLast marker on the output of each PR body so that
+                        # the DFX Wrapper can detect when the pipeline has been flushed
+                        # and the reconfigurable region is safe to reprogram.
+                        node_model = node_model.transform(InsertTLastMarker(both=False))
                         node_model = node_model.transform(
                             PrepareIP(
                                 self.cfg._resolve_fpga_part(), self.cfg._resolve_hls_clk_period()
