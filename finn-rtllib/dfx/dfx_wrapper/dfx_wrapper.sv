@@ -10,6 +10,12 @@
 //   rp_m_axis_*: output toward the BDC input (no tUSER -- FINN ops ignore it)
 //   rp_s_axis_*: input from AMD dfx_decoupler/s_intf_0 (no tUSER)
 //
+// tUSER convention:
+//   s_axis_tuser[TUSER_WIDTH-1:0]: full upstream tUSER vector.  The wrapper reads
+//     bits [RM_ID_W-1:0] to determine the desired RM; remaining bits pass through.
+//   m_axis_tuser: the held s_axis_tuser value of the last input frame, forwarded
+//     unchanged so downstream wrappers receive their own RM-selection bits.
+//
 // State machine:
 //   INFERENCE    : pass-through. On s_axis_tlast latch tUSER as pending_rm_id.
 //                  If pending_rm_id != current_rm_id -> WAIT_FLUSH.
@@ -93,6 +99,7 @@ module dfx_wrapper #(
     logic [RM_ID_W-1:0]     pending_rm_id;
     logic [RESET_CNT_W-1:0] reset_cnt;
     logic [INFLIGHT_W-1:0]  frames_in_flight;
+    logic [TUSER_WIDTH-1:0] tuser_reg;   // holds full tUSER of the last input frame
     logic                   decouple_prev; // for edge detection
 
     // --------------------------------------------------------------------------
@@ -118,8 +125,22 @@ module dfx_wrapper #(
     assign m_axis_tdata     = rp_s_axis_tdata;
     assign m_axis_tvalid    = rp_s_axis_tvalid & output_forward;
     assign m_axis_tlast     = rp_s_axis_tlast;
-    assign m_axis_tuser     = {{(TUSER_WIDTH - RM_ID_W){1'b0}}, current_rm_id};
+    // Forward the full upstream tUSER vector so downstream wrappers (dfx or passthrough)
+    // receive the RM-selection bits intended for their own stage. Since the FSM blocks new
+    // input during reconfiguration, all in-flight frames always carry the same tUSER value,
+    // so a single hold register is sufficient.
+    assign m_axis_tuser     = tuser_reg;
     assign rp_s_axis_tready = output_forward ? m_axis_tready : 1'b1;
+
+    // --------------------------------------------------------------------------
+    // tUSER hold register — updated on every accepted input frame boundary.
+    // --------------------------------------------------------------------------
+    always_ff @(posedge aclk or negedge aresetn) begin
+        if (!aresetn)
+            tuser_reg <= '0;
+        else if (s_axis_tvalid & s_axis_tready & s_axis_tlast)
+            tuser_reg <= s_axis_tuser;
+    end
 
     // --------------------------------------------------------------------------
     // Accelerator reset: active-low, de-asserted except in S_RESET

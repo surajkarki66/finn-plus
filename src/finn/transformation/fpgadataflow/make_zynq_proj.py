@@ -847,6 +847,18 @@ class MakeZYNQProject(Transformation):
             os.path.join(get_settings().finn_rtllib, "icap", "icape3_wrapper.v"),
             os.path.join(get_settings().finn_rtllib, "dfx", "dfx_wrapper", "dfx_wrapper.sv"),
             os.path.join(get_settings().finn_rtllib, "dfx", "dfx_wrapper", "dfx_wrapper_wrapper.v"),
+            os.path.join(
+                get_settings().finn_rtllib,
+                "dfx",
+                "dfx_tuser_passthrough",
+                "dfx_tuser_passthrough.sv",
+            ),
+            os.path.join(
+                get_settings().finn_rtllib,
+                "dfx",
+                "dfx_tuser_passthrough",
+                "dfx_tuser_passthrough_wrapper.v",
+            ),
         ]:
             pr_config.append(
                 "add_files -copy_to [get_property DIRECTORY [current_project]] -norecurse %s"
@@ -992,6 +1004,25 @@ class MakeZYNQProject(Transformation):
             "/xilinx/dfx_decoupler_v1_0/tcl/api.tcl -notrace"
         )
 
+        # Compute a single consistent tUSER width for the entire accelerator so that
+        # all dfx_wrapper and dfx_tuser_passthrough modules use the same TUSER_WIDTH
+        # and tUSER bits propagate without truncation end-to-end.
+        def _tuser_width_for_pr(pr_sdp):
+            inst = getCustomOp(pr_sdp)
+            km = ModelWrapper(inst.get_nodeattr("model"))
+            nc = [
+                n
+                for n in km.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+            ][0]
+            nc_inst = getCustomOp(nc)
+            nb = nc_inst.get_nodeattr("bodies")
+            attr = nc_inst.get_nodeattr("tuser_width")
+            return attr if attr > 0 else max(math.ceil(math.log2(max(nb, 2))), 1)
+
+        global_tuser_width = max(_tuser_width_for_pr(p) for p in pr_sdp_nodes)
+
         # Per-region DFX Wrapper and AMD DFX Decoupler instantiation.
         # Each PR SDP gets its own dfx_wrapper (static region controller) and
         # dfx_decoupler (output-side RP isolation), replacing the previous global
@@ -1009,12 +1040,6 @@ class MakeZYNQProject(Transformation):
             sdp_name = pr_sdp.name
             num_bodies = pr_nodecontainer_inst.get_nodeattr("bodies")
             data_width = pr_nodecontainer_inst.get_instream_width()
-            tuser_width_attr = pr_nodecontainer_inst.get_nodeattr("tuser_width")
-            tuser_width = (
-                tuser_width_attr
-                if tuser_width_attr > 0
-                else max(math.ceil(math.log2(max(num_bodies, 2))), 1)
-            )
 
             body_0_model = pr_nodecontainer_inst.get_nodeattr("body_0")
             body_0_ifnames = eval(body_0_model.get_metadata_prop("vivado_stitch_ifnames"))
@@ -1031,7 +1056,8 @@ class MakeZYNQProject(Transformation):
                 "CONFIG.DATA_WIDTH {%d} "
                 "CONFIG.TUSER_WIDTH {%d} "
                 "CONFIG.NUM_RM {%d}] "
-                "[get_bd_cells dfx_wrapper_%s]" % (data_width, tuser_width, num_bodies, sdp_name)
+                "[get_bd_cells dfx_wrapper_%s]"
+                % (data_width, global_tuser_width, num_bodies, sdp_name)
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_wrapper_%s/aclk] "
@@ -1130,6 +1156,98 @@ class MakeZYNQProject(Transformation):
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_wrapper_%s/accel_reset_n] "
                 "[get_bd_pins Hier_%s/ap_rst_n]" % (sdp_name, sdp_name)
+            )
+
+        # Per-segment tUSER Passthrough wrapper instantiation.
+        # Each non-PR SDP (a sequence of static FINN CustomOps) is wrapped in a
+        # dfx_tuser_passthrough to forward the tUSER side-channel and to regenerate
+        # tLast at the output (FINN ops produce neither).  This ensures that the
+        # tUSER set by host software on the primary DMA input propagates unmodified
+        # to every downstream dfx_wrapper so it can read the correct RM selection.
+        non_pr_sdp_nodes = [n for n in sdp_nodes if n not in pr_sdp_nodes]
+        for non_pr_sdp in non_pr_sdp_nodes:
+            non_pr_sdp_inst = getCustomOp(non_pr_sdp)
+            sdp_name = non_pr_sdp.name
+            body_model = ModelWrapper(non_pr_sdp_inst.get_nodeattr("model"))
+
+            body_ifnames = eval(body_model.get_metadata_prop("vivado_stitch_ifnames"))
+            s_axis_name = body_ifnames["s_axis"][0][0]
+            m_axis_name = body_ifnames["m_axis"][0][0]
+
+            # Data width from the last node's output stream width.
+            last_node_inst = getCustomOp(body_model.graph.node[-1])
+            data_width = last_node_inst.get_outstream_width()
+
+            # NUM_OUTPUT_BEATS: number of AXI-Stream beats per output frame.
+            # Derived from the folded output shape: product of all dimensions
+            # except the outermost batch and the innermost element dimension,
+            # matching the same formula used by InsertTLastMarker.
+            out_shape = last_node_inst.get_folded_output_shape()
+            num_output_beats = int(math.prod(out_shape[1:-1]))
+
+            pr_config.append(
+                "create_bd_cell -type module "
+                "-reference dfx_tuser_passthrough_wrapper "
+                "dfx_tuser_passthrough_%s" % sdp_name
+            )
+            pr_config.append(
+                "set_property -dict [list "
+                "CONFIG.DATA_WIDTH {%d} "
+                "CONFIG.TUSER_WIDTH {%d} "
+                "CONFIG.NUM_OUTPUT_BEATS {%d}] "
+                "[get_bd_cells dfx_tuser_passthrough_%s]"
+                % (data_width, global_tuser_width, num_output_beats, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_tuser_passthrough_%s/aclk] "
+                "[get_bd_pins smartconnect_0/aclk]" % sdp_name
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_tuser_passthrough_%s/aresetn] "
+                "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]" % sdp_name
+            )
+
+            # Input side: find the upstream master, disconnect from SDP,
+            # route through passthrough (s_axis -> rp_m_axis -> SDP input)
+            pr_config.append(
+                "set upstream_master_%s [get_bd_intf_pins -of_objects "
+                "[get_bd_intf_nets -of_objects [get_bd_intf_pins %s/%s]] "
+                "-filter {mode == Master}]" % (sdp_name, sdp_name, s_axis_name)
+            )
+            pr_config.append(
+                "delete_bd_objs [get_bd_intf_nets -of_objects "
+                "[get_bd_intf_pins %s/%s]]" % (sdp_name, s_axis_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net $upstream_master_%s "
+                "[get_bd_intf_pins dfx_tuser_passthrough_%s/s_axis]" % (sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net "
+                "[get_bd_intf_pins dfx_tuser_passthrough_%s/rp_m_axis] "
+                "[get_bd_intf_pins %s/%s]" % (sdp_name, sdp_name, s_axis_name)
+            )
+
+            # Output side: find the downstream slave, disconnect from SDP,
+            # route through passthrough (SDP output -> rp_s_axis -> m_axis -> downstream)
+            pr_config.append(
+                "set downstream_slave_%s [get_bd_intf_pins -of_objects "
+                "[get_bd_intf_nets -of_objects [get_bd_intf_pins %s/%s]] "
+                "-filter {mode == Slave}]" % (sdp_name, sdp_name, m_axis_name)
+            )
+            pr_config.append(
+                "delete_bd_objs [get_bd_intf_nets -of_objects "
+                "[get_bd_intf_pins %s/%s]]" % (sdp_name, m_axis_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
+                "[get_bd_intf_pins dfx_tuser_passthrough_%s/rp_s_axis]"
+                % (sdp_name, m_axis_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net "
+                "[get_bd_intf_pins dfx_tuser_passthrough_%s/m_axis] "
+                "$downstream_slave_%s" % (sdp_name, sdp_name)
             )
 
         for pr_sdp in pr_sdp_nodes:
