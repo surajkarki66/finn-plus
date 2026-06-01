@@ -256,12 +256,19 @@ def launch_process_helper(
     cwd: str | Path | None = None,
     print_stdout: bool = True,
     print_stderr: bool = True,
+    timeout: float | None = None,
 ) -> tuple[str, str]:
     """Launch a helper process in a way that facilitates logging
     stdout/stderr with Python loggers.
-    Returns (cmd_out, cmd_err) if successful, raises CalledProcessError otherwise."""
+    Returns (cmd_out, cmd_err) if successful, raises CalledProcessError otherwise.
+    If timeout is set, subprocess.run may raise TimeoutExpired."""
     process = subprocess.run(
-        [str(arg) for arg in args], capture_output=True, env=proc_env, cwd=cwd, text=True
+        [str(arg) for arg in args],
+        capture_output=True,
+        env=proc_env,
+        cwd=cwd,
+        text=True,
+        timeout=timeout,
     )
     cmd_out = process.stdout.strip()
     cmd_err = process.stderr.strip()

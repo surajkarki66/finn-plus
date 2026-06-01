@@ -18,7 +18,7 @@ from finn_xsi.sim_engine import SimEngine
 from pathlib import Path
 from typing import Literal
 
-from finn.util.basic import launch_process_helper
+from finn.util.basic import launch_process_helper, wait_for_file
 from finn.util.exception import FINNInternalError, FINNUserError
 
 
@@ -118,12 +118,12 @@ def compile_sim_obj(
 
     cmd_xvlog = ["xvlog", "--incr", "--relax", "-prj", "rtlsim.prj"]
 
-    launch_process_helper(cmd_xvlog, cwd=sim_out_dir, print_stdout=False)
-    launch_process_helper(cmd_xelab, cwd=sim_out_dir, print_stdout=False)
+    launch_process_helper(cmd_xvlog, cwd=sim_out_dir, print_stdout=False, timeout=600)
+    launch_process_helper(cmd_xelab, cwd=sim_out_dir, print_stdout=False, timeout=600)
     out_so_relative_path = Path(f"xsim.dir/{top_module_name}/xsimk.so")
     out_so_full_path = sim_out_dir / out_so_relative_path
 
-    if not out_so_full_path.is_file():
+    if not wait_for_file(out_so_full_path):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), out_so_full_path)
 
     return (sim_out_dir, out_so_relative_path)
@@ -159,7 +159,7 @@ def load_sim_obj(
     if simkernel_so is None:
         simkernel_so = get_simkernel_so()
     oldcwd = Path.cwd()
-    if not sim_out_dir.is_dir() or not (sim_out_dir / out_so_relative_path).is_file():
+    if not sim_out_dir.is_dir() or not wait_for_file(sim_out_dir / out_so_relative_path):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), sim_out_dir)
     os.chdir(sim_out_dir)
     sim = SimEngine(simkernel_so, str(out_so_relative_path), "finnxsi_rtlsim.log", tracefile)
