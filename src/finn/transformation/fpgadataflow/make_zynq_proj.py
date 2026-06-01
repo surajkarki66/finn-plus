@@ -1344,10 +1344,14 @@ class MakeZYNQProject(Transformation):
 
         if all_empty:
             # Auto mode: query post-implementation utilisation and write the JSON report.
+            _pr_report_path = str(
+                Path(model.get_metadata_prop("vivado_pynq_proj")) / "pr_region_resources.json"
+            )
+            model.set_metadata_prop("pr_region_resources_json", _pr_report_path)
             pr_config.append("open_run impl_1 -name impl_1")
             pr_config.append(
-                "write_pr_resource_report {%s} {%s}"
-                % (" ".join(cell_names), " ".join(pblock_names))
+                "write_pr_resource_report {%s} {%s} {%s}"
+                % (" ".join(cell_names), " ".join(pblock_names), _pr_report_path)
             )
             pr_config.append("close_design")
 

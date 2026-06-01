@@ -1565,6 +1565,10 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
                 shutil.copytree(partial_bitfiles_dir, partial_bitfile_out_dir, dirs_exist_ok=True)
                 log.info(f"Partial bitstreams copied into {partial_bitfile_out_dir}")
 
+            pr_resources_json = model.get_metadata_prop("pr_region_resources_json")
+            if pr_resources_json is not None and os.path.isfile(pr_resources_json):
+                copy(pr_resources_json, report_dir + "/pr_region_resources.json")
+
             model.set_metadata_prop("bitfile_output", os.path.abspath(bitfile_path))
 
             post_synth_resources = model.analysis(post_synth_res)
