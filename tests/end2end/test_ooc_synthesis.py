@@ -26,7 +26,7 @@ from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
 from finn.transformation.fpgadataflow.set_fifo_depths import InsertAndSetFIFODepths
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
-from finn.transformation.fpgadataflow.synth_ooc import SynthOutOfContext
+from finn.util.vivado import parse_ooc_synth_results
 
 fpga_part = "xczu7ev-ffvc1156-2-e"
 clk_ns = 10
@@ -145,8 +145,8 @@ def test_ooc_synthesis():
 
     # generate reference output
     x = gen_finn_dt_tensor(DataType["FLOAT32"], (1, 4, 16))
-    y_dict = oxe.execute_onnx(model, {model.graph.input[0].name: x})
-    y_ref = y_dict[model.graph.output[0].name]
+    y_dict = oxe.execute_onnx(model, {model.get_first_global_in(): x})
+    y_ref = y_dict[model.get_first_global_out()]
 
     # infer and specialize layers
     model = model.transform(to_hw.InferThresholdingLayer())
@@ -161,8 +161,8 @@ def test_ooc_synthesis():
     model = model.transform(HLSSynthIP())
     model = model.transform(PrepareRTLSim())
 
-    y_dict = oxe.execute_onnx(model, {model.graph.input[0].name: x})
-    y_prod = y_dict[model.graph.output[0].name]
+    y_dict = oxe.execute_onnx(model, {model.get_first_global_in(): x})
+    y_prod = y_dict[model.get_first_global_out()]
     assert (y_prod == y_ref).all()
 
     # FIFO sizing
@@ -171,17 +171,18 @@ def test_ooc_synthesis():
     # stitched IP rtlsim
     model = model.transform(PrepareIP(fpga_part, clk_ns))
     model = model.transform(HLSSynthIP())
-    model = model.transform(CreateStitchedIP(fpga_part, clk_ns))
-    model = model.transform(SynthOutOfContext(fpga_part, clk_ns))
-    ret = model.get_metadata_prop("res_total_ooc_synth")
-    assert ret is not None
-    # example expected output: (details may differ based on Vivado version etc)
-    # "{'vivado_proj_folder': ...,
-    # 'LUT': 708.0, 'FF': 1516.0, 'DSP': 0.0, 'BRAM': 0.0, 'WNS': 0.152, '': 0,
-    # 'fmax_mhz': 206.27062706270627}"
-    ret = eval(ret)
-    assert ret["LUT"] > 0
-    assert ret["FF"] > 0
-    assert ret["DSP"] > 0
-    assert ret["BRAM"] > 0
-    assert ret["fmax_mhz"] > 100
+
+    # Test NEW flow: CreateStitchedIP with run_pnr=True
+    model = model.transform(CreateStitchedIP(fpga_part, clk_ns, run_pnr=True))
+
+    # Parse results from new flow (pass directory, not file)
+    vivado_stitch_proj = model.get_metadata_prop("vivado_stitch_proj")
+    new_results = parse_ooc_synth_results(vivado_stitch_proj)
+    assert new_results is not None, "New OOC flow did not produce results"
+
+    # Verify new flow results
+    assert new_results["LUT"] > 0
+    assert new_results["FF"] > 0
+    assert new_results["DSP"] > 0
+    assert new_results["BRAM_18K"] > 0 or new_results["BRAM_36K"] > 0
+    assert new_results["fmax_mhz"] > 100

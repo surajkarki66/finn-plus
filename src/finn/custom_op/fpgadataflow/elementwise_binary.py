@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import math
 import numpy as np
 import warnings
 from onnx import helper as oh
@@ -288,7 +289,7 @@ class ElementwiseBinaryOperation(HWCustomOp):
         # folded input
         *_, elems = self.get_folded_input_shape(ind)
         # apply parallelism if broadcast
-        if self.broadcast_last_axis:
+        if self.broadcast_last_axis and elems == 1:
             elems = elems * self.pe
         # Width of a stream receiving input elements in parallel
         return elems * i_bits
@@ -347,9 +348,11 @@ class ElementwiseBinaryOperation(HWCustomOp):
             # generation
             self.set_nodeattr("lhs_style", "const")
             lhs_dtype = self.get_input_datatype(0)
-            # ignore minimization for floats
-            if not lhs_dtype.get_canonical_name().startswith("FLOAT"):
-                if lhs_dtype.is_integer():
+            # Check if values are integer-valued (even if stored as FLOAT)
+            lhs_is_integer = lhs_dtype.is_integer() or (lhs.astype(np.int32) == lhs).all()
+            # ignore minimization for floats (unless they contain integer values)
+            if not lhs_dtype.get_canonical_name().startswith("FLOAT") or lhs_is_integer:
+                if lhs_is_integer:
                     # Minimum and maximum "weight" on the left hand side, determining
                     # the range of values which needs to be represented
                     _min = lhs.min()
@@ -385,9 +388,11 @@ class ElementwiseBinaryOperation(HWCustomOp):
             # generation
             self.set_nodeattr("rhs_style", "const")
             rhs_dtype = self.get_input_datatype(1)
-            # ignore minimization for floats
-            if not rhs_dtype.get_canonical_name().startswith("FLOAT"):
-                if rhs_dtype.is_integer():
+            # Check if values are integer-valued (even if stored as FLOAT)
+            rhs_is_integer = rhs_dtype.is_integer() or (rhs.astype(np.int32) == rhs).all()
+            # ignore minimization for floats (unless they contain integer values)
+            if not rhs_dtype.get_canonical_name().startswith("FLOAT") or rhs_is_integer:
+                if rhs_is_integer:
                     # Minimum and maximum "weight" on the left hand side, determining
                     # the range of values which needs to be represented
                     _min = rhs.min()
@@ -425,6 +430,91 @@ class ElementwiseBinaryOperation(HWCustomOp):
         # Number of iterations required to process the whole folded input stream
         #   Note: This is all but the PE (last, parallelized) dimension
         return np.prod(self.get_folded_output_shape()[:-1])
+
+    def _parameter_memory_specs(self):
+        """Return (width, depth) specs for constant/loop parameter memories."""
+        mem_mode = self.get_nodeattr("mem_mode")
+        mlo = self.get_nodeattr("mlo_max_iter")
+        specs = []
+
+        if mem_mode == "internal_embedded" and not mlo:
+            for ind, style in enumerate([self.lhs_style, self.rhs_style]):
+                if style == "const":
+                    width = self.get_instream_width(ind=ind)
+                    depth = int(np.prod(self.get_folded_input_shape(ind=ind)[:-1]))
+                    specs.append((width, depth))
+        elif mem_mode == "internal_decoupled" or mlo:
+            rhs_uses_memstream = self.rhs_style == "const" or (self.rhs_style == "input" and mlo)
+            if rhs_uses_memstream:
+                width = self.get_instream_width(ind=1)
+                depth = int(self.calc_wmem()) * max(1, mlo)
+                specs.append((width, depth))
+
+        return [(width, depth) for width, depth in specs if width > 0 and depth > 0]
+
+    @staticmethod
+    def _bram18_estimation(width, depth):
+        if width == 1:
+            return math.ceil(depth / 16384)
+        elif width == 2:
+            return math.ceil(depth / 8192)
+        elif width <= 4:
+            return math.ceil(depth / 4096) * math.ceil(width / 4)
+        elif width <= 9:
+            return math.ceil(depth / 2048) * math.ceil(width / 9)
+        elif width <= 18 or depth > 512:
+            return math.ceil(depth / 1024) * math.ceil(width / 18)
+        else:
+            return math.ceil(depth / 512) * math.ceil(width / 36)
+
+    def bram_estimation(self):
+        ram_style = self.get_nodeattr("ram_style")
+        if ram_style not in ["auto", "block"]:
+            return 0
+        return int(
+            sum(
+                self._bram18_estimation(width, depth)
+                for width, depth in self._parameter_memory_specs()
+            )
+        )
+
+    def uram_estimation(self):
+        ram_style = self.get_nodeattr("ram_style")
+        if ram_style != "ultra":
+            return 0
+        return int(
+            sum(
+                math.ceil(width / 72) * math.ceil(depth / 4096)
+                for width, depth in self._parameter_memory_specs()
+            )
+        )
+
+    def bram_efficiency_estimation(self):
+        bram18_est = self.bram_estimation()
+        if bram18_est == 0:
+            return 1
+        used_bits = sum(width * depth for width, depth in self._parameter_memory_specs())
+        bram18_est_capacity = bram18_est * 36 * 512
+        return used_bits / bram18_est_capacity
+
+    def uram_efficiency_estimation(self):
+        # TODO: Versal URAM supports flexible bit widths (9/18/36/72) unlike
+        # UltraScale+ which only supports 72-bit. This could improve efficiency
+        # for narrow data types on Versal devices.
+        uram_est = self.uram_estimation()
+        if uram_est == 0:
+            return 1
+        used_bits = sum(width * depth for width, depth in self._parameter_memory_specs())
+        uram_est_capacity = uram_est * 72 * 4096
+        return used_bits / uram_est_capacity
+
+    def lut_estimation(self):
+        ram_style = self.get_nodeattr("ram_style")
+        if ram_style != "distributed":
+            return 0
+        return int(
+            sum(width * math.ceil(depth / 64) for width, depth in self._parameter_memory_specs())
+        )
 
 
 # Derive a specialization to implement elementwise addition of two inputs
@@ -501,6 +591,44 @@ class ElementwiseSub(ElementwiseBinaryOperation):
                 out_width = max_width + 2
         # For subtraction, the output data type is always signed
         return DataType[f"INT{out_width}"]
+
+
+# Derive a specialization to implement elementwise absolute difference of two inputs
+@register_custom_op
+class ElementwiseAbsDiff(ElementwiseBinaryOperation):
+    # Specialize to implement the absolute difference operation of left hand side
+    # and right hand side input
+    @property
+    def npy_op(self):
+        # NumPy doesn't have a built-in absdiff, so we use a lambda
+        return lambda a, b: np.abs(a - b)
+
+    # C++ operation template available as property
+    @property
+    def cpp_op(self) -> str:
+        return "({0} > {1} ? {0} - {1} : {1} - {0})"
+
+    # RTL operation template available as property
+    @property
+    def rtl_op(self) -> str:
+        return None
+
+    # Derives the output data type - AbsDiff result is always unsigned for integers
+    def _derive_out_dtype(self, model: ModelWrapper):
+        # If either input is floating-point, output is the same float type
+        if self.lhs_dtype in [DataType["FLOAT32"], DataType["FLOAT16"]]:
+            return self.lhs_dtype
+        if self.rhs_dtype in [DataType["FLOAT32"], DataType["FLOAT16"]]:
+            return self.rhs_dtype
+        # For integers: get the width of the data types of the inputs
+        lhs_width = self.lhs_dtype.bitwidth()
+        rhs_width = self.rhs_dtype.bitwidth()
+        max_width = max(lhs_width, rhs_width)
+        # The absolute difference needs one extra bit to hold the difference
+        # before taking the absolute value, but the result is always unsigned
+        out_width = max_width + 1
+        # AbsDiff result is always unsigned for integer types
+        return DataType[f"UINT{out_width}"]
 
 
 # Derive a specialization to implement elementwise multiplication of two inputs
@@ -774,3 +902,76 @@ class ElementwiseBitShift(ElementwiseBinaryOperation):
 #     # Specialize to implement the power operation of left hand side and
 #     # right hand side input
 #     _operation = "Pow", np.power, "(std::pow({0}, {1}))", None
+
+
+# Derive a specialization to implement elementwise maximum of two inputs
+@register_custom_op
+class ElementwiseMax(ElementwiseBinaryOperation):
+    @property
+    def npy_op(self) -> np.ufunc:
+        return np.maximum
+
+    # C++ operation template available as property
+    @property
+    def cpp_op(self) -> str:
+        odt_hls_name = self.out_dtype.get_hls_datatype_str()
+        return "({0} >= {1} ? (%s){0} : (%s){1})" % (odt_hls_name, odt_hls_name)
+
+    # RTL operation template available as property
+    @property
+    def rtl_op(self) -> str:
+        return None
+
+    # Override minimize_weight_bit_width to prevent type incompatibility
+    def minimize_weight_bit_width(self, model: ModelWrapper):
+        # For comparison operations like max/min, both operands must have
+        # compatible types. Don't minimize if one side is float and the
+        # minimized constant would become integer.
+        lhs_dtype = self.get_input_datatype(0)
+        rhs_dtype = self.get_input_datatype(1)
+
+        # If either side is float16/float32, keep both sides as-is
+        # to avoid comparison incompatibility (half vs ap_int)
+        if lhs_dtype.get_canonical_name() in [
+            "FLOAT16",
+            "FLOAT32",
+        ] or rhs_dtype.get_canonical_name() in ["FLOAT16", "FLOAT32"]:
+            # Skip minimization, keep datatypes as set by InferReLUAsElementwiseMax
+            return
+        # Otherwise, use the parent class minimization
+        super().minimize_weight_bit_width(model)
+
+    def _derive_out_dtype(self, model: ModelWrapper):
+        if self.lhs_dtype.get_canonical_name().startswith(
+            "FLOAT"
+        ) or self.rhs_dtype.get_canonical_name().startswith("FLOAT"):
+            # if any of the inputs are float, make the output float as well
+            max_bitwidth = max(self.lhs_dtype.bitwidth(), self.rhs_dtype.bitwidth())
+            return DataType[f"FLOAT{max_bitwidth}"]
+        else:
+            all_ints = all([self.lhs_dtype.is_integer(), self.rhs_dtype.is_integer()])
+            # Get the width of the data types of the inputs
+            lhs_width = self.lhs_dtype.bitwidth()
+            rhs_width = self.rhs_dtype.bitwidth()
+            if all_ints:
+                # output will be signed if both inputs are signed
+                signed = all([self.lhs_dtype.signed(), self.rhs_dtype.signed()])
+                # use the greater of the two input bitwidths for the output
+                out_width = max(lhs_width, rhs_width)
+                return DataType[f"INT{out_width}" if signed else f"UINT{out_width}"]
+            else:
+                # use fixed point with max of intbits and fracbits from both sides
+                # to make sure an output coming from either input is representable
+                lhs_fracbits = self.lhs_dtype.frac_bits() if self.lhs_dtype.is_fixed_point() else 0
+                rhs_fracbits = self.rhs_dtype.frac_bits() if self.rhs_dtype.is_fixed_point() else 0
+                out_fracbits = max(lhs_fracbits, rhs_fracbits)
+                if self.lhs_dtype.is_fixed_point():
+                    lhs_intbits = self.lhs_dtype.int_bits()
+                else:
+                    lhs_intbits = self.lhs_dtype.bitwidth()
+                if self.rhs_dtype.is_fixed_point():
+                    rhs_intbits = self.rhs_dtype.int_bits()
+                else:
+                    rhs_intbits = self.rhs_dtype.bitwidth()
+                out_intbits = max(lhs_intbits, rhs_intbits)
+                return DataType[f"FIXED<{out_fracbits+out_intbits},{out_intbits}>"]

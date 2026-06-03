@@ -213,10 +213,10 @@ def rtlsim_exec_cppxsi(
         outstream_iters.append(np.prod(oshape_folded[:-1]))
 
     # retrieve the number of inputs from execution_context
-    n_inferences = execution_context[model.graph.input[0].name]
+    n_inferences = execution_context[model.get_first_global_in()]
     ifnames = model.get_metadata_prop("vivado_stitch_ifnames")
-    assert not (
-        ifnames is None
+    assert (
+        ifnames is not None
     ), "Couldn't find stitched-IP interface names, did you run IP stitching first?"
     ifnames = eval(ifnames)
     if "aximm" in ifnames.keys() and ifnames["aximm"] != []:
@@ -360,7 +360,6 @@ def rtlsim_exec_finnxsi(model, execution_context, pre_hook=None, post_hook=None)
     finnxsi.reset_rtlsim(sim)
     if pre_hook is not None:
         pre_hook(sim)
-        finnxsi.reset_rtlsim(sim)
     n_cycles = finnxsi.rtlsim_multi_io(
         sim,
         io_dict,

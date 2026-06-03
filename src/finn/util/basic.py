@@ -27,10 +27,16 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
-from qonnx.util.basic import roundup_to_integer_multiple
+from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.custom_op.registry import getCustomOp
+from qonnx.util.basic import gen_finn_dt_tensor, roundup_to_integer_multiple
+from typing import Dict, Optional, Tuple
+
+from finn.util.data_packing import finnpy_to_packed_bytearray
 
 # test boards used for bnn pynq tests
 test_board_map = ["Pynq-Z1", "KV260_SOM", "ZCU104", "U250"]
@@ -64,26 +70,29 @@ pynq_native_port_width["RFSoC4x2"] = 128
 pynq_native_port_width["KV260_SOM"] = 128
 pynq_native_port_width["AUP-ZU3_8GB"] = 128
 
-# Alveo device and platform mappings
-alveo_part_map = dict()
-alveo_part_map["U50"] = "xcu50-fsvh2104-2L-e"
-alveo_part_map["U200"] = "xcu200-fsgd2104-2-e"
-alveo_part_map["U250"] = "xcu250-figd2104-2L-e"
-alveo_part_map["U280"] = "xcu280-fsvh2892-2L-e"
-alveo_part_map["U55C"] = "xcu55c-fsvh2892-2L-e"
+# Vitis device and platform mappings
+vitis_part_map = dict()
+vitis_part_map["U50"] = "xcu50-fsvh2104-2L-e"
+vitis_part_map["U200"] = "xcu200-fsgd2104-2-e"
+vitis_part_map["U250"] = "xcu250-figd2104-2L-e"
+vitis_part_map["U280"] = "xcu280-fsvh2892-2L-e"
+vitis_part_map["U55C"] = "xcu55c-fsvh2892-2L-e"
 
-alveo_default_platform = dict()
-alveo_default_platform["U50"] = "xilinx_u50_gen3x16_xdma_5_202210_1"
-alveo_default_platform["U200"] = "xilinx_u200_gen3x16_xdma_2_202110_1"
-alveo_default_platform["U250"] = "xilinx_u250_gen3x16_xdma_2_1_202010_1"
-alveo_default_platform["U280"] = "xilinx_u280_gen3x16_xdma_1_202211_1"
-alveo_default_platform["U55C"] = "xilinx_u55c_gen3x16_xdma_3_202210_1"
+vitis_default_platform = dict()
+vitis_default_platform["U50"] = "xilinx_u50_gen3x16_xdma_5_202210_1"
+vitis_default_platform["U200"] = "xilinx_u200_gen3x16_xdma_2_202110_1"
+vitis_default_platform["U250"] = "xilinx_u250_gen3x16_xdma_2_1_202010_1"
+vitis_default_platform["U280"] = "xilinx_u280_gen3x16_xdma_1_202211_1"
+vitis_default_platform["U55C"] = "xilinx_u55c_gen3x16_xdma_3_202210_1"
+
+# Slash device mappings
+slash_part_map = dict()
+slash_part_map["V80"] = "xcv80-lsva4737-2MHP-e-s"
 
 # Create a joint part map, encompassing other boards too
-part_map = {**pynq_part_map, **alveo_part_map}
+part_map = {**pynq_part_map, **vitis_part_map, **slash_part_map}
 part_map["VEK280"] = "xcve2802-vsvh1760-2MP-e-S"
 part_map["VCK190"] = "xcvc1902-vsva2197-2MP-e-S"
-part_map["V80"] = "xcv80-lsva4737-2MHP-e-s"
 
 
 def get_rtlsim_trace_depth():
@@ -129,6 +138,13 @@ def get_vivado_root():
         correctly. Please ensure you have launched the Docker contaier correctly.
         """
         )
+
+
+def get_vivado_version() -> Optional[Tuple[int, int]]:
+    """Extract Vivado version as (year, minor) tuple from XILINX_VIVADO."""
+    path = os.environ.get("XILINX_VIVADO", "")
+    match = re.search(r"\b(20\d{2})\.(1|2)\b", path)
+    return (int(match.group(1)), int(match.group(2))) if match else None
 
 
 def get_liveness_threshold_cycles():
@@ -311,3 +327,95 @@ def get_dsp_block(fpgapart):
         return "DSP48E1"
     else:
         return "DSP48E2"
+
+
+def get_driver_shapes(model: ModelWrapper) -> Dict:
+    idt = []
+    idma_names = []
+    ishape_normal = []
+    ishape_folded = []
+    ishape_packed = []
+    for idma_ind, graph_in in enumerate(model.graph.input):
+        i_tensor_name = graph_in.name
+        # get inp tensor properties
+        i_tensor_dt = model.get_tensor_datatype(i_tensor_name)
+        i_tensor_shape_normal = tuple(model.get_tensor_shape(i_tensor_name))
+        # go down into dataflow partition to get folded shape info etc
+        # TODO consider setting these as attributes during dataflow partitioning
+        i_consumer = model.find_consumer(i_tensor_name)
+        assert (
+            i_consumer.op_type == "StreamingDataflowPartition"
+        ), """
+            Ensure CreateDataflowPartition called before driver creation."""
+        first_df_model = ModelWrapper(getCustomOp(i_consumer).get_nodeattr("model"))
+        assert (
+            first_df_model.graph.node[0].op_type == "IODMA_hls"
+        ), "First partition must hold input IODMA"
+        successors = model.find_direct_successors(i_consumer)
+        successor_input_num = list(successors[0].input).index(i_consumer.output[0])
+        successor_sdp = getCustomOp(successors[0])
+        successor_df_model = ModelWrapper(successor_sdp.get_nodeattr("model"))
+        first_node = successor_df_model.find_consumer(
+            successor_df_model.graph.input[successor_input_num].name
+        )
+        i_tensor_shape_folded = tuple(getCustomOp(first_node).get_folded_input_shape())
+        # generate dummy folded i/o tensors and their packed versions
+        i_tensor_dummy_folded = gen_finn_dt_tensor(i_tensor_dt, i_tensor_shape_folded)
+        i_tensor_dummy_packed = finnpy_to_packed_bytearray(i_tensor_dummy_folded, i_tensor_dt)
+        i_tensor_shape_packed = i_tensor_dummy_packed.shape
+        # append all input tensor info to relevant lists
+        idt.append("DataType['%s']" % i_tensor_dt.name)
+        ishape_normal.append(i_tensor_shape_normal)
+        ishape_folded.append(i_tensor_shape_folded)
+        ishape_packed.append(i_tensor_shape_packed)
+        idma_names.append(getCustomOp(i_consumer).get_nodeattr("instance_name"))
+
+    odt = []
+    odma_names = []
+    oshape_normal = []
+    oshape_folded = []
+    oshape_packed = []
+    for odma_ind, graph_out in enumerate(model.graph.output):
+        o_tensor_name = graph_out.name
+        # get inp tensor properties
+        o_tensor_dt = model.get_tensor_datatype(o_tensor_name)
+        o_tensor_shape_normal = tuple(model.get_tensor_shape(o_tensor_name))
+        # go down into IODMA partition to get folded shape info etc
+        # TODO consider setting these as attributes during dataflow partitioning
+        o_producer = model.find_producer(o_tensor_name)
+        assert (
+            o_producer.op_type == "StreamingDataflowPartition"
+        ), """
+            Ensure CreateDataflowPartition called before driver creation."""
+        df_model = ModelWrapper(getCustomOp(o_producer).get_nodeattr("model"))
+        assert df_model.graph.node[-1].op_type == "IODMA_hls", "Partition must hold output IODMA"
+        predecessors = model.find_direct_predecessors(o_producer)
+        predecessor_output_num = list(predecessors[0].output).index(o_producer.input[0])
+        predecessor_sdp = getCustomOp(predecessors[0])
+        predecessor_df_model = ModelWrapper(predecessor_sdp.get_nodeattr("model"))
+        last_node = predecessor_df_model.find_producer(
+            predecessor_df_model.graph.output[predecessor_output_num].name
+        )
+        o_tensor_shape_folded = tuple(getCustomOp(last_node).get_folded_output_shape())
+        o_tensor_dummy_folded = gen_finn_dt_tensor(o_tensor_dt, o_tensor_shape_folded)
+        o_tensor_dummy_packed = finnpy_to_packed_bytearray(o_tensor_dummy_folded, o_tensor_dt)
+        o_tensor_shape_packed = o_tensor_dummy_packed.shape
+        # append all output tensor info to relevant lists
+        odt.append("DataType['%s']" % o_tensor_dt.name)
+        oshape_normal.append(o_tensor_shape_normal)
+        oshape_folded.append(o_tensor_shape_folded)
+        oshape_packed.append(o_tensor_shape_packed)
+        odma_names.append(getCustomOp(o_producer).get_nodeattr("instance_name"))
+
+    return {
+        "idt": idt,
+        "idma_names": idma_names,
+        "ishape_normal": ishape_normal,
+        "ishape_folded": ishape_folded,
+        "ishape_packed": ishape_packed,
+        "odt": odt,
+        "odma_names": odma_names,
+        "oshape_normal": oshape_normal,
+        "oshape_folded": oshape_folded,
+        "oshape_packed": oshape_packed,
+    }

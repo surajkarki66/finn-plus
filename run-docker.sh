@@ -53,7 +53,12 @@ fi
 
 if [ -z "$PLATFORM_REPO_PATHS" ];then
   recho "Please set PLATFORM_REPO_PATHS pointing to Vitis platform files (DSAs)."
-  recho "This is required to be able to use Alveo PCIe cards."
+  recho "This is required to be able to use Vitis-based Alveo PCIe cards."
+fi
+
+if [ -z "$V80PP_DEB_PACKAGE" ];then
+  recho "Please set V80PP_DEB_PACKAGE pointing to the SLASH v80++ .deb package."
+  recho "This is required to be able to use the Alveo V80 card."
 fi
 
 DOCKER_GID=$(id -g)
@@ -79,6 +84,7 @@ SCRIPTPATH=$(dirname "$SCRIPT")
 : ${FINN_SSH_KEY_DIR="$SCRIPTPATH/ssh_keys"}
 : ${PLATFORM_REPO_PATHS="/opt/xilinx/platforms"}
 : ${XRT_DEB_VERSION="xrt_202220.2.14.354_22.04-amd64-xrt"}
+: ${V80PP_DEB_PACKAGE=""}
 : ${FINN_HOST_BUILD_DIR="/tmp/$DOCKER_INST_NAME"}
 : ${FINN_DOCKER_TAG="xilinx/finn:$(OLD_PWD=$(pwd); cd $SCRIPTPATH; git describe --always --tags --dirty; cd $OLD_PWD).$XRT_DEB_VERSION"}
 : ${FINN_DOCKER_PREBUILT="0"}
@@ -87,7 +93,6 @@ SCRIPTPATH=$(dirname "$SCRIPT")
 : ${FINN_DOCKER_BUILD_EXTRA=""}
 : ${FINN_SKIP_DEP_REPOS="0"}
 : ${FINN_SKIP_BOARD_FILES="0"}
-: ${OHMYXILINX="${SCRIPTPATH}/deps/oh-my-xilinx"}
 : ${NVIDIA_VISIBLE_DEVICES=""}
 : ${DOCKER_BUILDKIT="1"}
 : ${FINN_SINGULARITY=""}
@@ -167,8 +172,41 @@ if [ -d "$FINN_XRT_PATH" ];then
   export LOCAL_XRT=1
 fi
 
+# If v80++ deb package given, copy it to repo root for docker build
+if [ -n "$V80PP_DEB_PACKAGE" ] && [ -f "$V80PP_DEB_PACKAGE" ]; then
+  cp "$V80PP_DEB_PACKAGE" ./v80pp.deb
+fi
+
 if [ "$FINN_DOCKER_NO_CACHE" = "1" ]; then
   FINN_DOCKER_BUILD_EXTRA+="--no-cache "
+fi
+
+# If the image isn't available locally, try loading from shared storage.
+# This is independent of FINN_DOCKER_PREBUILT: loading is an image
+# acquisition step, not a build step. With PREBUILT=1 it provides the
+# image so the build below is skipped; with PREBUILT=0 it warms the
+# layer cache so the build below runs faster.
+if [ ! -z "$FINN_DOCKER_SHARED_DIR" ] && \
+   ! docker image inspect "$FINN_DOCKER_TAG" > /dev/null 2>&1; then
+  SHARED_IMG="$FINN_DOCKER_SHARED_DIR/finn-docker-image.tar.gz"
+  SHARED_TAG_FILE="$FINN_DOCKER_SHARED_DIR/finn-docker-tag.txt"
+  if [ -f "$SHARED_IMG" ] && [ -f "$SHARED_TAG_FILE" ]; then
+    gecho "Loading Docker image from shared storage ($FINN_DOCKER_SHARED_DIR)..."
+    SHARED_TAG=$(cat "$SHARED_TAG_FILE")
+    # Lock is local (/tmp) to serialize loads on the same host. Do not move to NFS.
+    if flock /tmp/finn-docker-load.lock bash -c "set -o pipefail; gunzip -c '$SHARED_IMG' | docker load"; then
+      if [ "$SHARED_TAG" != "$FINN_DOCKER_TAG" ]; then
+        gecho "Tagging $SHARED_TAG as $FINN_DOCKER_TAG"
+        docker tag "$SHARED_TAG" "$FINN_DOCKER_TAG"
+      fi
+    else
+      gecho "WARNING: Failed to load Docker image from shared storage"
+      if [ "$FINN_DOCKER_PREBUILT" = "1" ]; then
+        gecho "Falling back to local Docker build"
+        FINN_DOCKER_PREBUILT="0"
+      fi
+    fi
+  fi
 fi
 
 # Build the FINN Docker image
@@ -176,13 +214,31 @@ if [ "$FINN_DOCKER_PREBUILT" = "0" ] && [ -z "$FINN_SINGULARITY" ]; then
   # Need to ensure this is done within the finn/ root folder:
   OLD_PWD=$(pwd)
   cd $SCRIPTPATH
-  docker build -f docker/Dockerfile.finn --build-arg XRT_DEB_VERSION=$XRT_DEB_VERSION --build-arg SKIP_XRT=$FINN_SKIP_XRT_DOWNLOAD --build-arg LOCAL_XRT=$LOCAL_XRT --tag=$FINN_DOCKER_TAG $FINN_DOCKER_BUILD_EXTRA .
+  # Export DOCKER_BUILDKIT to enable BuildKit features
+  export DOCKER_BUILDKIT
+  docker build \
+    -f docker/Dockerfile.finn \
+    --build-arg XRT_DEB_VERSION=$XRT_DEB_VERSION \
+    --build-arg SKIP_XRT=$FINN_SKIP_XRT_DOWNLOAD \
+    --build-arg LOCAL_XRT=$LOCAL_XRT \
+    --build-arg V80PP_DEB_PACKAGE=$V80PP_DEB_PACKAGE \
+    --tag=$FINN_DOCKER_TAG $FINN_DOCKER_BUILD_EXTRA \
+    --build-arg GROUP_ID=$DOCKER_GID \
+    --build-arg GROUPNAME=$DOCKER_GNAME \
+    --build-arg USERNAME=$DOCKER_UNAME \
+    --build-arg USER_UID=$DOCKER_UID \
+    .
   cd $OLD_PWD
 fi
 
 # Remove local xrt.deb file from repo
 if [ ! -z "$LOCAL_XRT" ];then
   rm $XRT_DEB_VERSION.deb
+fi
+
+# Remove local v80pp.deb file from repo
+if [ -f "./v80pp.deb" ]; then
+  rm ./v80pp.deb
 fi
 
 # Launch container with current directory mounted
@@ -196,7 +252,6 @@ DOCKER_EXEC+="-v $FINN_HOST_BUILD_DIR:$FINN_HOST_BUILD_DIR "
 DOCKER_EXEC+="-e FINN_BUILD_DIR=$FINN_HOST_BUILD_DIR "
 DOCKER_EXEC+="-e FINN_ROOT="$SCRIPTPATH" "
 DOCKER_EXEC+="-e LOCALHOST_URL=$LOCALHOST_URL "
-DOCKER_EXEC+="-e OHMYXILINX=$OHMYXILINX "
 DOCKER_EXEC+="-e NUM_DEFAULT_WORKERS=$NUM_DEFAULT_WORKERS "
 # Workaround for FlexLM issue, see:
 # https://community.flexera.com/t5/InstallAnywhere-Forum/Issues-when-running-Xilinx-tools-or-Other-vendor-tools-in-docker/m-p/245820#M10647
@@ -205,10 +260,6 @@ DOCKER_EXEC+="-e LD_PRELOAD=/lib/x86_64-linux-gnu/libudev.so.1 "
 # https://adaptivesupport.amd.com/s/article/63253?language=en_US
 DOCKER_EXEC+="-e XILINX_LOCAL_USER_DATA=no "
 if [ "$FINN_DOCKER_RUN_AS_ROOT" = "0" ] && [ -z "$FINN_SINGULARITY" ];then
-  DOCKER_EXEC+="-v /etc/group:/etc/group:ro "
-  DOCKER_EXEC+="-v /etc/passwd:/etc/passwd:ro "
-  DOCKER_EXEC+="-v /etc/shadow:/etc/shadow:ro "
-  DOCKER_EXEC+="-v /etc/sudoers.d:/etc/sudoers.d:ro "
   DOCKER_EXEC+="-v $FINN_SSH_KEY_DIR:$HOME/.ssh "
   DOCKER_EXEC+="--user $DOCKER_UID:$DOCKER_GID "
 else
