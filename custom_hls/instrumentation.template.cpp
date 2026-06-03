@@ -42,6 +42,14 @@
  *	be instantiated and integrated with the rest of the system in a manual
  *	process.
  *
+ *	In addition to the sliding-window averages, a simple long-running
+ *	throughput measurement is provided via run_cycles_lo/hi and run_frames.
+ *	Both counters reset on the rising edge of cfg[0] (i.e. when LFSR
+ *	generation is enabled). run_cycles counts every clock cycle elapsed since
+ *	that edge; run_frames counts every completed output frame. Dividing
+ *	run_cycles by run_frames in software gives the average initiation interval
+ *	over an arbitrarily large window without any on-chip buffer.
+ *
  * @param PENDING	maximum number of feature maps in the FINN dataflow pipeline
  * @param ILEN		number of input transactions per IFM
  * @param OLEN		number of output transactions per OFM
@@ -150,7 +158,10 @@
      ap_uint<32> &checksum,
      ap_uint<32> &min_latency,
      ap_uint<32> &avg_latency,
-     ap_uint<32> &avg_interval
+     ap_uint<32> &avg_interval,
+     ap_uint<32> &run_cycles_lo,	// lower 32 bits of cycle count since cfg[0] rising edge
+     ap_uint<32> &run_cycles_hi,	// upper 32 bits of cycle count since cfg[0] rising edge
+     ap_uint<32> &run_frames		// completed output frames since cfg[0] rising edge
  ) {
  #pragma HLS pipeline II=1 style=flp
 
@@ -244,6 +255,16 @@
  #pragma HLS reset variable=last_avg_interval
  #pragma HLS reset variable=prev_avg_n
 
+     // Running Throughput Measurement State (resets on rising edge of cfg[0])
+     static bool  prev_cfg0  = false;
+     static bool  run_active = false;  // true after the first cfg[0] rising edge
+     static ap_uint<64>  run_total_cycles = 0;
+     static ap_uint<32>  run_frame_count  = 0;
+ #pragma HLS reset variable=prev_cfg0
+ #pragma HLS reset variable=run_active
+ #pragma HLS reset variable=run_total_cycles
+ #pragma HLS reset variable=run_frame_count
+
      static ap_uint<8>  pkts = 0;
  #pragma HLS reset variable=pkts
      static ap_uint< 2>  coeff[3];
@@ -252,6 +273,14 @@
  #pragma HLS reset variable=coeff off
  #pragma HLS reset variable=psum off
  #pragma HLS reset variable=last_checksum
+
+     // Detect rising edge of cfg[0]: reset running throughput counters
+     bool const  cur_cfg0    = cfg[0];
+     if(cur_cfg0 && !prev_cfg0) {
+         run_active       = true;
+         run_total_cycles = 0;
+         run_frame_count  = 0;
+     }
 
      TO  oval;
      if(finnox.read_nb(oval)) {
@@ -318,6 +347,7 @@
                  last_avg_interval = int_sum / avg_fill;
              }
              ocnt = 0;
+             if(run_active)  run_frame_count++;
 
              last_checksum = (pkts++, psum);
          }
@@ -325,6 +355,10 @@
 
      // Advance Timestamp Counter
      cnt_clk++;
+
+     // Advance Running Throughput Counters
+     if(run_active)  run_total_cycles++;
+     prev_cfg0 = cur_cfg0;
 
      // Copy Status Outputs
      status = timestamp_ovf | (timestamp_unf << 1);
@@ -334,6 +368,9 @@
      min_latency  = cur_min_latency;
      avg_latency  = last_avg_latency;
      avg_interval = last_avg_interval;
+     run_cycles_lo = run_total_cycles(31,  0);
+     run_cycles_hi = run_total_cycles(63, 32);
+     run_frames    = run_frame_count;
 
  } // instrument()
 
@@ -349,7 +386,10 @@
      ap_uint<32> &checksum,
      ap_uint<32> &min_latency,
      ap_uint<32> &avg_latency,
-     ap_uint<32> &avg_interval
+     ap_uint<32> &avg_interval,
+     ap_uint<32> &run_cycles_lo,
+     ap_uint<32> &run_cycles_hi,
+     ap_uint<32> &run_frames
  ) {
  #pragma HLS interface axis port=finnix
  #pragma HLS interface axis port=finnox
@@ -363,6 +403,9 @@
  #pragma HLS interface s_axilite bundle=ctrl port=min_latency
  #pragma HLS interface s_axilite bundle=ctrl port=avg_latency
  #pragma HLS interface s_axilite bundle=ctrl port=avg_interval
+ #pragma HLS interface s_axilite bundle=ctrl port=run_cycles_lo
+ #pragma HLS interface s_axilite bundle=ctrl port=run_cycles_hi
+ #pragma HLS interface s_axilite bundle=ctrl port=run_frames
  #pragma HLS interface ap_ctrl_none port=return
 
  #pragma HLS dataflow disable_start_propagation
@@ -375,7 +418,7 @@
      move(finnox, finnox0);
 
      // Main
-     instrument<PENDING, ILEN, OLEN, KO, AVG_N>(finnix0, finnox0, cfg, seed, avg_n, status, latency, interval, checksum, min_latency, avg_latency, avg_interval);
+     instrument<PENDING, ILEN, OLEN, KO, AVG_N>(finnix0, finnox0, cfg, seed, avg_n, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
 
      // FIFO -> AXI-Stream
      move(finnix0, finnix);

@@ -632,11 +632,15 @@ class FINNInstrumentationOverlay(Overlay):
         interval = self.instrumentation_read("interval")
         avg_latency = self.instrumentation_read("avg_latency")
         avg_interval = self.instrumentation_read("avg_interval")
+        run_cycles_lo = self.instrumentation_read("run_cycles_lo")
+        run_cycles_hi = self.instrumentation_read("run_cycles_hi")
+        run_frames = self.instrumentation_read("run_frames")
 
         frame = (chksum_reg >> 24) & 0x000000FF
         checksum = chksum_reg & 0x00FFFFFF
         overflow_err = (status_reg & 0x00000001) != 0
         underflow_err = (status_reg & 0x00000002) != 0
+        run_cycles = (run_cycles_hi << 32) | run_cycles_lo
 
         if debug_print:
             print("---INSTRUMENTATION_REPORT---")
@@ -653,6 +657,10 @@ class FINNInstrumentationOverlay(Overlay):
             print("Interval (cycles): %d" % interval)
             print("Average Latency (cycles): %d" % avg_latency)
             print("Average Interval (cycles): %d" % avg_interval)
+            print("Run Cycles: %d" % run_cycles)
+            print("Run Frames: %d" % run_frames)
+            if run_frames > 0:
+                print("Run Average Interval (cycles): %.1f" % (run_cycles / run_frames))
             print("----------------------------")
 
         return (
@@ -665,6 +673,8 @@ class FINNInstrumentationOverlay(Overlay):
             interval,
             avg_latency,
             avg_interval,
+            run_cycles,
+            run_frames,
         )
 
     def experiment_instrumentation(self, *args, **kwargs):
@@ -690,9 +700,12 @@ class FINNInstrumentationOverlay(Overlay):
             interval,
             avg_latency,
             avg_interval,
+            run_cycles,
+            run_frames,
         ) = self.observe_instrumentation()
 
         # write report to file
+        fclk = self.fclk_mhz_actual * 1e6
         report = {
             "error": overflow_err or underflow_err or interval == 0,
             "checksum": checksum,
@@ -701,18 +714,17 @@ class FINNInstrumentationOverlay(Overlay):
             "interval_cycles": interval,
             "avg_latency_cycles": avg_latency,
             "avg_interval_cycles": avg_interval,
+            "run_cycles": run_cycles,
+            "run_frames": run_frames,
             "frequency_mhz": round(self.fclk_mhz_actual),
-            "min_latency_ms": round(min_latency * (1 / (self.fclk_mhz_actual * 1e6)) * 1e3, 6),
-            "latency_ms": round(latency * (1 / (self.fclk_mhz_actual * 1e6)) * 1e3, 6),
-            "avg_latency_ms": round(avg_latency * (1 / (self.fclk_mhz_actual * 1e6)) * 1e3, 6),
-            "throughput_fps": (
-                round(1 / (interval * (1 / (self.fclk_mhz_actual * 1e6)))) if interval != 0 else 0
-            ),
-            "avg_throughput_fps": (
-                round(1 / (avg_interval * (1 / (self.fclk_mhz_actual * 1e6))))
-                if avg_interval != 0
-                else 0
-            ),
+            "min_latency_ms": round(min_latency * (1 / fclk) * 1e3, 6),
+            "latency_ms": round(latency * (1 / fclk) * 1e3, 6),
+            "avg_latency_ms": round(avg_latency * (1 / fclk) * 1e3, 6),
+            "throughput_fps": round(fclk / interval) if interval != 0 else 0,
+            "avg_throughput_fps": round(fclk / avg_interval) if avg_interval != 0 else 0,
+            "run_avg_throughput_fps": round(run_frames / (run_cycles / fclk))
+            if run_cycles > 0
+            else 0,
             "min_pipeline_depth": round(min_latency / interval, 2) if interval != 0 else 0,
             "pipeline_depth": round(latency / interval, 2) if interval != 0 else 0,
         }
@@ -863,6 +875,7 @@ class FINNLiveFIFOOverlay(FINNInstrumentationOverlay):
             min_latency,
             latency,
             interval,
+            *_,
         ) = self.observe_instrumentation(debug_print=True)
         self.stop_accelerator()
 
@@ -942,6 +955,7 @@ class FINNLiveFIFOOverlay(FINNInstrumentationOverlay):
             min_latency,
             latency,
             interval,
+            *_,
         ) = self.observe_instrumentation(False)
         log_total_fifo_size = [self.total_fifo_size(fifo_depths)]
         log_interval = [interval]
@@ -1030,6 +1044,7 @@ class FINNLiveFIFOOverlay(FINNInstrumentationOverlay):
                     min_latency,
                     latency,
                     interval,
+                    *_,
                 ) = self.observe_instrumentation(False)
 
                 # Determine if this depth causes degradation based on stop_condition
@@ -1786,6 +1801,8 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                 interval,
                 avg_latency,
                 avg_interval,
+                run_cycles,
+                run_frames,
             ) = self.observe_instrumentation(debug_print=False)
             self.stop_accelerator()
             fclk = self.fclk_mhz_actual * 1e6
@@ -1797,12 +1814,17 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                 "interval_cycles": interval,
                 "avg_latency_cycles": avg_latency,
                 "avg_interval_cycles": avg_interval,
+                "run_cycles": run_cycles,
+                "run_frames": run_frames,
                 "frequency_mhz": round(self.fclk_mhz_actual),
                 "min_latency_ms": round(min_latency / fclk * 1e3, 6),
                 "latency_ms": round(latency / fclk * 1e3, 6),
                 "avg_latency_ms": round(avg_latency / fclk * 1e3, 6),
                 "throughput_fps": round(fclk / interval) if interval != 0 else 0,
                 "avg_throughput_fps": round(fclk / avg_interval) if avg_interval != 0 else 0,
+                "run_avg_throughput_fps": round(run_frames / (run_cycles / fclk))
+                if run_cycles > 0
+                else 0,
                 "min_pipeline_depth": round(min_latency / interval, 2) if interval != 0 else 0,
                 "pipeline_depth": round(latency / interval, 2) if interval != 0 else 0,
             }
@@ -1882,10 +1904,21 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                     interval,
                     avg_latency,
                     avg_interval,
+                    run_cycles,
+                    run_frames,
                 ) = self.observe_instrumentation(debug_print=False)
                 any_error = any_error or overflow_err or underflow_err or interval == 0
                 samples.append(
-                    (min_latency, latency, interval, avg_latency, avg_interval, checksum)
+                    (
+                        min_latency,
+                        latency,
+                        interval,
+                        avg_latency,
+                        avg_interval,
+                        checksum,
+                        run_cycles,
+                        run_frames,
+                    )
                 )
             self.stop_accelerator()
             fclk = self.fclk_mhz_actual * 1e6
@@ -1897,6 +1930,9 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             avg_avg_interval = sum(s[4] for s in samples) / n
             # Use last checksum (frame counter) as reference
             last_checksum = samples[-1][5]
+            # run_cycles/run_frames are cumulative since start; use last sample
+            last_run_cycles = samples[-1][6]
+            last_run_frames = samples[-1][7]
             test_results[inference_cycles] = {
                 "overhead_cycles": overhead_cycles,
                 "lead_time": lead_time,
@@ -1909,6 +1945,8 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                 "interval_cycles": avg_interval_mean,
                 "avg_latency_cycles": avg_avg_latency,
                 "avg_interval_cycles": avg_avg_interval,
+                "run_cycles": last_run_cycles,
+                "run_frames": last_run_frames,
                 "frequency_mhz": round(self.fclk_mhz_actual),
                 "min_latency_ms": round(avg_min_latency / fclk * 1e3, 6),
                 "latency_ms": round(avg_latency_mean / fclk * 1e3, 6),
@@ -1916,6 +1954,9 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                 "throughput_fps": round(fclk / avg_interval_mean) if avg_interval_mean != 0 else 0,
                 "avg_throughput_fps": round(fclk / avg_avg_interval)
                 if avg_avg_interval != 0
+                else 0,
+                "run_avg_throughput_fps": round(last_run_frames / (last_run_cycles / fclk))
+                if last_run_cycles > 0
                 else 0,
                 "min_pipeline_depth": round(avg_min_latency / avg_interval_mean, 2)
                 if avg_interval_mean != 0
