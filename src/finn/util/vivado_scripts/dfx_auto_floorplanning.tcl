@@ -133,9 +133,15 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
             if {[regexp {DSP48E2_X\d+Y(\d+)} $s -> y] && $y > $max_y0_d} { set max_y0_d $y }
         }
     }
-    # SEARCH HEIGHT STEP = CR ROW HEIGHT / 2 (e.g. 60/2=30 slice rows)
-    set height_step [expr {($max_y0_s + 1) / 2}]
-    puts "  CR row height: [expr {$max_y0_s + 1}] SLICE rows | step: ${height_step} SLICE rows"
+    # SEARCH HEIGHT STEP = full CR row height.
+    # Using half a CR row caused SNAPPING_MODE to see a partial-CR trial and expand
+    # the pblock in *both* directions to reach legal CR boundaries, snapping the floor
+    # downward into the previous pblock's clock region and triggering DRC HDPR-25.
+    # With a full CR step every trial boundary already lies on a CR row edge so
+    # SNAPPING_MODE accepts it without any downward expansion.
+    set cr_height   [expr {$max_y0_s + 1}]
+    set height_step $cr_height
+    puts "  CR row height: ${cr_height} SLICE rows | step: ${height_step} SLICE rows"
 
     # Start floors at bottom of CR row Y1 if a suitable reference was found, else Y=0
     set slice_y_floor 0
