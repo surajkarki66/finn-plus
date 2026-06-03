@@ -2,7 +2,7 @@
 //
 // Sits in the static region around one Block Design Container (BDC/RP).
 // Uses AXI-Stream tLast to detect frame boundaries and tUSER to select which
-// Reconfigurable Module (RM) should be active for the next frame.
+// Reconfigurable Module (RM) should process each frame.
 //
 // Port naming convention:
 //   s_axis_*   : input from upstream (host / static network)
@@ -11,19 +11,24 @@
 //   rp_s_axis_*: input from AMD dfx_decoupler/s_intf_0 (no tUSER)
 //
 // tUSER convention:
-//   s_axis_tuser[TUSER_WIDTH-1:0]: full upstream tUSER vector.  The wrapper reads
-//     bits [RM_ID_W-1:0] to determine the desired RM; remaining bits pass through.
-//   m_axis_tuser: the held s_axis_tuser value of the last input frame, forwarded
-//     unchanged so downstream wrappers receive their own RM-selection bits.
+//   s_axis_tuser[RM_ID_W-1:0]: desired RM for THIS frame. The host sets this
+//     to the same value on every beat of a frame. The wrapper peeks at it on the
+//     first beat of each frame (before accepting the beat, i.e. tready=0) to
+//     decide whether reconfiguration is needed before processing the frame.
+//   m_axis_tuser: the full tUSER vector of the current frame, forwarded unchanged
+//     so downstream wrappers receive their own RM-selection bits.
 //
 // State machine:
-//   INFERENCE    : pass-through. On s_axis_tlast latch tUSER as pending_rm_id.
-//                  If pending_rm_id != current_rm_id -> WAIT_FLUSH.
-//   WAIT_FLUSH   : block new input. Forward rp_s_axis->m_axis until rp_s_axis_tlast.
+//   CHECK_TUSER  : peek at first beat of the next frame (tready=0). When tvalid
+//                  goes high, latch tUSER and pending_rm_id. If pending_rm_id ==
+//                  current_rm_id -> INFERENCE; else -> WAIT_FLUSH.
+//   INFERENCE    : pass-through. On consumed tLast -> CHECK_TUSER.
+//   WAIT_FLUSH   : block new input. Forward rp_s_axis->m_axis until the BDC
+//                  pipeline is empty (frames_in_flight==0 OR last frame exits).
 //   TRIGGER      : assert controller_trigger[pending_rm_id] for one cycle -> WAIT_DECOUPLE.
 //   WAIT_DECOUPLE: wait for controller_decouple to go high -> RECONFIGURING.
 //   RECONFIGURING: wait for controller_decouple to fall -> RESET. Update current_rm_id.
-//   RESET        : hold accel_reset_n low for RESET_CYCLES cycles -> INFERENCE.
+//   RESET        : hold accel_reset_n low for RESET_CYCLES cycles -> CHECK_TUSER.
 
 `timescale 1ns/1ps
 module dfx_wrapper #(
@@ -87,7 +92,8 @@ module dfx_wrapper #(
         S_TRIGGER       = 3'd2,
         S_WAIT_DECOUPLE = 3'd3,
         S_RECONFIGURING = 3'd4,
-        S_RESET         = 3'd5
+        S_RESET         = 3'd5,
+        S_CHECK_TUSER   = 3'd6  // peek at first beat of next frame before accepting it
     } state_t;
 
     state_t state;
@@ -99,7 +105,7 @@ module dfx_wrapper #(
     logic [RM_ID_W-1:0]     pending_rm_id;
     logic [RESET_CNT_W-1:0] reset_cnt;
     logic [INFLIGHT_W-1:0]  frames_in_flight;
-    logic [TUSER_WIDTH-1:0] tuser_reg;   // holds full tUSER of the last input frame
+    logic [TUSER_WIDTH-1:0] tuser_reg;   // holds full tUSER of the current/most-recent frame
     logic                   decouple_prev; // for edge detection
 
     // --------------------------------------------------------------------------
@@ -108,7 +114,6 @@ module dfx_wrapper #(
     // --------------------------------------------------------------------------
     logic input_active;
     assign input_active = (state == S_INFERENCE);
-
     assign rp_m_axis_tdata  = s_axis_tdata;
     assign rp_m_axis_tvalid = s_axis_tvalid & input_active;
     assign rp_m_axis_tlast  = s_axis_tlast;
@@ -126,21 +131,12 @@ module dfx_wrapper #(
     assign m_axis_tvalid    = rp_s_axis_tvalid & output_forward;
     assign m_axis_tlast     = rp_s_axis_tlast;
     // Forward the full upstream tUSER vector so downstream wrappers (dfx or passthrough)
-    // receive the RM-selection bits intended for their own stage. Since the FSM blocks new
-    // input during reconfiguration, all in-flight frames always carry the same tUSER value,
+    // receive the RM-selection bits intended for their own stage. tuser_reg is latched
+    // in S_CHECK_TUSER from the first beat of each frame; since the FSM blocks new
+    // input during reconfiguration all in-flight frames share the same tUSER value,
     // so a single hold register is sufficient.
     assign m_axis_tuser     = tuser_reg;
     assign rp_s_axis_tready = output_forward ? m_axis_tready : 1'b1;
-
-    // --------------------------------------------------------------------------
-    // tUSER hold register — updated on every accepted input frame boundary.
-    // --------------------------------------------------------------------------
-    always_ff @(posedge aclk or negedge aresetn) begin
-        if (!aresetn)
-            tuser_reg <= '0;
-        else if (s_axis_tvalid & s_axis_tready & s_axis_tlast)
-            tuser_reg <= s_axis_tuser;
-    end
 
     // --------------------------------------------------------------------------
     // Accelerator reset: active-low, de-asserted except in S_RESET
@@ -177,10 +173,11 @@ module dfx_wrapper #(
     // --------------------------------------------------------------------------
     always_ff @(posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
-            state          <= S_INFERENCE;
+            state          <= S_CHECK_TUSER;
             current_rm_id  <= '0;
             pending_rm_id  <= '0;
             reset_cnt      <= '0;
+            tuser_reg      <= '0;
             decouple_prev  <= 1'b0;
             controller_trigger <= '0;
         end else begin
@@ -189,23 +186,40 @@ module dfx_wrapper #(
 
             case (state)
                 // ------------------------------------------------------------------
-                S_INFERENCE: begin
-                    // Latch desired RM id on the last word of each input frame.
-                    if (s_axis_tvalid & s_axis_tready & s_axis_tlast) begin
+                // Peek at the first beat of the next frame without consuming it
+                // (tready=0 because input_active=0 here). When the upstream master
+                // presents tvalid, sample tUSER to decide whether reconfiguration
+                // is needed before this frame enters the BDC.
+                // ------------------------------------------------------------------
+                S_CHECK_TUSER: begin
+                    if (s_axis_tvalid) begin
                         pending_rm_id <= s_axis_tuser[RM_ID_W-1:0];
-                        if (s_axis_tuser[RM_ID_W-1:0] != current_rm_id) begin
+                        tuser_reg     <= s_axis_tuser;
+                        if (s_axis_tuser[RM_ID_W-1:0] == current_rm_id)
+                            state <= S_INFERENCE;
+                        else
                             state <= S_WAIT_FLUSH;
-                        end
                     end
                 end
 
                 // ------------------------------------------------------------------
+                S_INFERENCE: begin
+                    // After every frame boundary, re-check tUSER for the next frame.
+                    if (s_axis_tvalid & s_axis_tready & s_axis_tlast)
+                        state <= S_CHECK_TUSER;
+                end
+
+                // ------------------------------------------------------------------
                 // Drain the pipeline: wait until ALL in-flight frames have exited.
-                // The pipeline may be multiple frames deep, so we track the count
-                // and only proceed when the last frame (frames_in_flight == 1) exits.
+                // The pipeline may be multiple frames deep, so we track the count.
+                // Also exits immediately if the pipeline was already empty when we
+                // entered (frames_in_flight == 0), which happens when the BDC has
+                // already drained all frames by the time the reconfiguration decision
+                // is made in S_CHECK_TUSER.
                 // ------------------------------------------------------------------
                 S_WAIT_FLUSH: begin
-                    if (frame_out && (frames_in_flight == {{(INFLIGHT_W-1){1'b0}}, 1'b1})) begin
+                    if ((frames_in_flight == '0) ||
+                        (frame_out && (frames_in_flight == {{(INFLIGHT_W-1){1'b0}}, 1'b1}))) begin
                         state <= S_TRIGGER;
                     end
                 end
@@ -241,13 +255,13 @@ module dfx_wrapper #(
                 // ------------------------------------------------------------------
                 S_RESET: begin
                     if (reset_cnt == '0) begin
-                        state <= S_INFERENCE;
+                        state <= S_CHECK_TUSER;
                     end else begin
                         reset_cnt <= reset_cnt - 1'b1;
                     end
                 end
 
-                default: state <= S_INFERENCE;
+                default: state <= S_CHECK_TUSER;
             endcase
         end
     end
