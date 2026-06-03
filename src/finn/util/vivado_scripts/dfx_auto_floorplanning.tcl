@@ -162,9 +162,11 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
         set req_luts    [dict get $config luts]
         set req_brams   [dict get $config brams]
         set req_dsps    [dict get $config dsps]
+        set req_carries [dict get $config carries]
+        set req_ffs     [dict get $config ffs]
 
         puts "\n--> Processing: $pblock_name for cell $cell_name"
-        puts "    Demands -> LUTs: $req_luts | BRAMs: $req_brams | DSPs: $req_dsps"
+        puts "    Demands -> LUTs: $req_luts | BRAMs: $req_brams | DSPs: $req_dsps | CARRY8: $req_carries | FFs: $req_ffs"
 
         # Clean up any pre-existing pblock with this name
         if {[get_pblocks -quiet $pblock_name] ne ""} { delete_pblocks $pblock_name }
@@ -176,9 +178,11 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
         set passed 0
         set slice_y_ceil [expr {$slice_y_floor + $height_step - 1}]
         # Track the best available resources seen across all trials for failure diagnostics.
-        set best_avail_luts  0
-        set best_avail_brams 0
-        set best_avail_dsps  0
+        set best_avail_luts    0
+        set best_avail_brams   0
+        set best_avail_dsps    0
+        set best_avail_carries 0
+        set best_avail_ffs     0
 
         while {$slice_y_ceil <= $max_device_y && !$passed} {
             # Scale the pblock height as a fraction of each resource type's *remaining* space,
@@ -282,7 +286,7 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
             global finn_pr_report
             if {![info exists finn_pr_report]} { set finn_pr_report [dict create] }
             dict set finn_pr_report $pblock_name pblock_capacity \
-                [dict create luts $avail_luts brams $avail_brams dsps $avail_dsps]
+                [dict create luts $avail_luts brams $avail_brams dsps $avail_dsps carries $avail_carries ffs $avail_ffs]
 
             set snapped_grid [get_property GRID_RANGES [get_pblocks $pblock_name]]
             highlight_objects -color green [get_pblocks $pblock_name]
@@ -314,12 +318,14 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
             puts "    ERROR: Cannot fulfill resource demands for $pblock_name on remaining fabric!"
             puts "    ----------------------------------------------------------------"
             puts "    Resource shortage summary for $pblock_name:"
-            puts "    DEMANDED  -> LUTs: $req_luts | BRAMs: $req_brams | DSPs: $req_dsps"
-            puts "    BEST SEEN -> LUTs: $best_avail_luts | BRAMs: $best_avail_brams | DSPs: $best_avail_dsps"
+            puts "    DEMANDED  -> LUTs: $req_luts | BRAMs: $req_brams | DSPs: $req_dsps | CARRY8: $req_carries | FFs: $req_ffs"
+            puts "    BEST SEEN -> LUTs: $best_avail_luts | BRAMs: $best_avail_brams | DSPs: $best_avail_dsps | CARRY8: $best_avail_carries | FFs: $best_avail_ffs"
             set shortage_detail ""
-            if {$best_avail_luts  < $req_luts}  { append shortage_detail "  LUTs:  need $req_luts, best seen $best_avail_luts (deficit [expr {$req_luts  - $best_avail_luts}])\n" }
-            if {$best_avail_brams < $req_brams} { append shortage_detail "  BRAMs: need $req_brams, best seen $best_avail_brams (deficit [expr {$req_brams - $best_avail_brams}])\n" }
-            if {$best_avail_dsps  < $req_dsps}  { append shortage_detail "  DSPs:  need $req_dsps, best seen $best_avail_dsps (deficit [expr {$req_dsps  - $best_avail_dsps}])\n" }
+            if {$best_avail_luts    < $req_luts}    { append shortage_detail "  LUTs:   need $req_luts, best seen $best_avail_luts (deficit [expr {$req_luts    - $best_avail_luts}])\n"    }
+            if {$best_avail_brams   < $req_brams}   { append shortage_detail "  BRAMs:  need $req_brams, best seen $best_avail_brams (deficit [expr {$req_brams   - $best_avail_brams}])\n"   }
+            if {$best_avail_dsps    < $req_dsps}    { append shortage_detail "  DSPs:   need $req_dsps, best seen $best_avail_dsps (deficit [expr {$req_dsps    - $best_avail_dsps}])\n"    }
+            if {$best_avail_carries < $req_carries} { append shortage_detail "  CARRY8: need $req_carries, best seen $best_avail_carries (deficit [expr {$req_carries - $best_avail_carries}])\n" }
+            if {$best_avail_ffs     < $req_ffs}     { append shortage_detail "  FFs:    need $req_ffs, best seen $best_avail_ffs (deficit [expr {$req_ffs     - $best_avail_ffs}])\n"     }
             if {$shortage_detail ne ""} {
                 puts "    SHORTFALLS:"
                 puts $shortage_detail
@@ -346,21 +352,24 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
 ################################################################################
 
 proc query_cell_resources {cell_path} {
-    # Returns a dict {luts N brams M dsps D} for the given hierarchical cell.
+    # Returns a dict {luts N brams M dsps D carries C ffs F} for the given hierarchical cell.
     # Must be called after "open_run synth_1" so a synthesised netlist is loaded.
     # BRAM count is expressed in RAMB36 equivalents (2 x RAMB18 = 1 RAMB36).
+    # carries = CARRY8 cell count; ffs = total Slice Register (FF + latch) count.
 
     if {[get_cells -quiet $cell_path] eq ""} {
         puts "WARNING: query_cell_resources: cell '$cell_path' not found — returning zeros."
-        return [dict create luts 0 brams 0 dsps 0]
+        return [dict create luts 0 brams 0 dsps 0 carries 0 ffs 0]
     }
 
     set report [report_utilization -cells [get_cells $cell_path] -return_string]
 
-    set luts   0
-    set ramb36 0
-    set ramb18 0
-    set dsps   0
+    set luts    0
+    set ramb36  0
+    set ramb18  0
+    set dsps    0
+    set carries 0
+    set ffs     0
 
     foreach line [split $report "\n"] {
         set line [string trim $line]
@@ -387,13 +396,27 @@ proc query_cell_resources {cell_path} {
             ([regexp {^\|\s+DSP Blocks\s*\|\s+(\d+)\s*\|} $line -> val] && $dsps == 0)} {
             set dsps $val
         }
+        # CARRY8 (1 per SLICE in UltraScale+)
+        if {[regexp {^\|\s+CARRY8\s*\|\s+(\d+)\s*\|} $line -> val]} {
+            set carries $val
+        }
+        # Slice Registers (FFs + latches, up to 16 per SLICE in UltraScale+).
+        # Prefer the aggregate "Slice Registers" row; fall back to finer-grained
+        # alternatives that appear in some Vivado versions or report styles.
+        if {[regexp {^\|\s+Slice Registers\s*\|\s+(\d+)\s*\|} $line -> val]} {
+            set ffs $val
+        } elseif {$ffs == 0 && [regexp {^\|\s+Register as Flip Flop\s*\|\s+(\d+)\s*\|} $line -> val]} {
+            set ffs $val
+        } elseif {$ffs == 0 && [regexp {^\|\s+Registers\s*\|\s+(\d+)\s*\|} $line -> val]} {
+            set ffs $val
+        }
     }
 
     # Convert RAMB18 to RAMB36 equivalents (ceil)
     set brams [expr {$ramb36 + int(ceil(double($ramb18) / 2.0))}]
 
-    puts "  query_cell_resources $cell_path -> LUTs=$luts BRAMs=$brams DSPs=$dsps"
-    return [dict create luts $luts brams $brams dsps $dsps]
+    puts "  query_cell_resources $cell_path -> LUTs=$luts BRAMs=$brams DSPs=$dsps CARRY8=$carries FFs=$ffs"
+    return [dict create luts $luts brams $brams dsps $dsps carries $carries ffs $ffs]
 }
 
 ################################################################################
@@ -407,9 +430,11 @@ proc query_cell_resources {cell_path} {
 #   lut_margin    – multiplicative overhead factor applied to LUT counts (default 1.2)
 #   bram_margin   – multiplicative overhead factor applied to BRAM counts (default 1.2)
 #   dsp_margin    – multiplicative overhead factor applied to DSP counts  (default 1.2)
+#   carry_margin  – multiplicative overhead factor applied to CARRY8 counts (default 1.2)
+#   ff_margin     – multiplicative overhead factor applied to FF counts    (default 1.2)
 ################################################################################
 
-proc auto_floorplan_from_synthesis {cell_names pblock_names {lut_margin 1.2} {bram_margin 1.2} {dsp_margin 1.2}} {
+proc auto_floorplan_from_synthesis {cell_names pblock_names {lut_margin 1.2} {bram_margin 1.2} {dsp_margin 1.2} {carry_margin 1.2} {ff_margin 1.2}} {
     if {[llength $cell_names] != [llength $pblock_names]} {
         error "auto_floorplan_from_synthesis: cell_names and pblock_names must have the same length"
     }
@@ -422,9 +447,11 @@ proc auto_floorplan_from_synthesis {cell_names pblock_names {lut_margin 1.2} {br
     foreach cell_name $cell_names pblock_name $pblock_names {
         set res [query_cell_resources $cell_name]
 
-        set luts  [expr {int(ceil([dict get $res luts]  * $lut_margin))}]
-        set brams [expr {int(ceil([dict get $res brams] * $bram_margin))}]
-        set dsps  [expr {int(ceil([dict get $res dsps]  * $dsp_margin))}]
+        set luts    [expr {int(ceil([dict get $res luts]    * $lut_margin))}]
+        set brams   [expr {int(ceil([dict get $res brams]   * $bram_margin))}]
+        set dsps    [expr {int(ceil([dict get $res dsps]    * $dsp_margin))}]
+        set carries [expr {int(ceil([dict get $res carries] * $carry_margin))}]
+        set ffs     [expr {int(ceil([dict get $res ffs]     * $ff_margin))}]
 
         # Ensure at least 1 LUT so the search loop does not trivially succeed
         if {$luts  == 0} { set luts  1 }
@@ -435,11 +462,11 @@ proc auto_floorplan_from_synthesis {cell_names pblock_names {lut_margin 1.2} {br
         dict set finn_pr_report $pblock_name cell $cell_name
         dict set finn_pr_report $pblock_name post_synth $res
         dict set finn_pr_report $pblock_name floorplan_input \
-            [dict create luts $luts brams $brams dsps $dsps]
+            [dict create luts $luts brams $brams dsps $dsps carries $carries ffs $ffs]
 
-        puts "  $pblock_name <- $cell_name : LUTs=$luts BRAMs=$brams DSPs=$dsps (margin applied)"
+        puts "  $pblock_name <- $cell_name : LUTs=$luts BRAMs=$brams DSPs=$dsps CARRY8=$carries FFs=$ffs (margin applied)"
         lappend pblock_configs \
-            [dict create name $pblock_name cell $cell_name luts $luts brams $brams dsps $dsps]
+            [dict create name $pblock_name cell $cell_name luts $luts brams $brams dsps $dsps carries $carries ffs $ffs]
     }
 
     generate_multi_dfx_pblocks $pblock_configs
@@ -502,7 +529,7 @@ proc write_pr_resource_report {cell_names pblock_names {report_file "pr_resource
         set grid_ranges_str  [join $grid_ranges_list " "]
 
         # 5) Overhead % = (capacity - actual) / actual * 100 per resource type
-        foreach resource {luts brams dsps} {
+        foreach resource {luts brams dsps carries ffs} {
             set cap  [dict get $pblock_capacity $resource]
             set impl [dict get $post_impl $resource]
             if {$impl > 0} {
@@ -519,29 +546,39 @@ proc write_pr_resource_report {cell_names pblock_names {report_file "pr_resource
         append rj "\n      \"post_synth\": {"
         append rj "\"luts\": [dict get $post_synth luts], "
         append rj "\"brams\": [dict get $post_synth brams], "
-        append rj "\"dsps\": [dict get $post_synth dsps]},"
+        append rj "\"dsps\": [dict get $post_synth dsps], "
+        append rj "\"carries\": [dict get $post_synth carries], "
+        append rj "\"ffs\": [dict get $post_synth ffs]},"
         append rj "\n      \"floorplan_input\": {"
         append rj "\"luts\": [dict get $fp_input luts], "
         append rj "\"brams\": [dict get $fp_input brams], "
-        append rj "\"dsps\": [dict get $fp_input dsps]},"
+        append rj "\"dsps\": [dict get $fp_input dsps], "
+        append rj "\"carries\": [dict get $fp_input carries], "
+        append rj "\"ffs\": [dict get $fp_input ffs]},"
         append rj "\n      \"pblock_capacity\": {"
         append rj "\"luts\": [dict get $pblock_capacity luts], "
         append rj "\"brams\": [dict get $pblock_capacity brams], "
-        append rj "\"dsps\": [dict get $pblock_capacity dsps]},"
+        append rj "\"dsps\": [dict get $pblock_capacity dsps], "
+        append rj "\"carries\": [dict get $pblock_capacity carries], "
+        append rj "\"ffs\": [dict get $pblock_capacity ffs]},"
         append rj "\n      \"post_impl\": {"
         append rj "\"luts\": [dict get $post_impl luts], "
         append rj "\"brams\": [dict get $post_impl brams], "
-        append rj "\"dsps\": [dict get $post_impl dsps]},"
+        append rj "\"dsps\": [dict get $post_impl dsps], "
+        append rj "\"carries\": [dict get $post_impl carries], "
+        append rj "\"ffs\": [dict get $post_impl ffs]},"
         append rj "\n      \"overhead_pct\": {"
         append rj "\"luts\": $ovh(luts), "
         append rj "\"brams\": $ovh(brams), "
-        append rj "\"dsps\": $ovh(dsps)}"
+        append rj "\"dsps\": $ovh(dsps), "
+        append rj "\"carries\": $ovh(carries), "
+        append rj "\"ffs\": $ovh(ffs)}"
         append rj "\n    }"
 
         lappend regions_json $rj
 
-        puts "  $pblock_name post_impl: LUTs=[dict get $post_impl luts] BRAMs=[dict get $post_impl brams] DSPs=[dict get $post_impl dsps]"
-        puts "    overhead: LUTs=$ovh(luts)% BRAMs=$ovh(brams)% DSPs=$ovh(dsps)%"
+        puts "  $pblock_name post_impl: LUTs=[dict get $post_impl luts] BRAMs=[dict get $post_impl brams] DSPs=[dict get $post_impl dsps] CARRY8=[dict get $post_impl carries] FFs=[dict get $post_impl ffs]"
+        puts "    overhead: LUTs=$ovh(luts)% BRAMs=$ovh(brams)% DSPs=$ovh(dsps)% CARRY8=$ovh(carries)% FFs=$ovh(ffs)%"
         puts "    grid_ranges: $grid_ranges_str"
     }
 
