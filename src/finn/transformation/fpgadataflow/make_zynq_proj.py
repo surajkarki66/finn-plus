@@ -131,7 +131,6 @@ class MakeZYNQProject(Transformation):
         self.live_fifo_sizing = live_fifo_sizing
         self.enable_debug = 1 if enable_debug else 0
         self.enable_gpio_reset = 0
-        self.enable_selectable = 0
 
     def apply(self, model):
         """Apply the transformation to create a Zynq project."""
@@ -164,16 +163,19 @@ class MakeZYNQProject(Transformation):
                 pr_node_inst = getCustomOp(pr_node)
                 body_model = pr_node_inst.get_nodeattr("body_0")
                 kernel_model.set_metadata_prop(
-                    "vivado_stitch_proj", body_model.get_metadata_prop("vivado_stitch_proj")
+                    "vivado_stitch_proj",
+                    body_model.get_metadata_prop("vivado_stitch_proj"),
                 )
                 kernel_model.set_metadata_prop(
                     "wrapper_filename", body_model.get_metadata_prop("wrapper_filename")
                 )
                 kernel_model.set_metadata_prop(
-                    "vivado_stitch_vlnv", body_model.get_metadata_prop("vivado_stitch_vlnv")
+                    "vivado_stitch_vlnv",
+                    body_model.get_metadata_prop("vivado_stitch_vlnv"),
                 )
                 kernel_model.set_metadata_prop(
-                    "vivado_stitch_ifnames", body_model.get_metadata_prop("vivado_stitch_ifnames")
+                    "vivado_stitch_ifnames",
+                    body_model.get_metadata_prop("vivado_stitch_ifnames"),
                 )
                 kernel_model.save(dataflow_model_filename)
 
@@ -184,24 +186,9 @@ class MakeZYNQProject(Transformation):
             if n.op_type == "NodeContainer"
             and getCustomOp(n).get_nodeattr("multi_dnn_type") == "selectable_weights"
         ]
-        if sw_nodes:
-            self.enable_selectable = True
-        max_bodies = max((n.get_nodeattr("bodies") for n in sw_nodes), default=0)
 
         # instantiate instrumentation IP if it was generated
         instr_ip_dir = model.get_metadata_prop("instrumentation_ipgen")
-
-        if self.enable_selectable:
-            for import_name in [
-                "/selector/selector_verilog.v",
-                "/selector/selector.sv",
-                "/axi/hdl/axilite.sv",
-            ]:
-                module_dir = os.environ["FINN_RTLLIB"] + import_name
-                config.append(
-                    "add_files -copy_to [get_property DIRECTORY [current_project]] -norecurse %s"
-                    % module_dir
-                )
 
         if self.enable_finn_switch:
             # TODO: Add ‑copy_to
@@ -229,7 +216,10 @@ class MakeZYNQProject(Transformation):
             # create instance
             config.append(
                 "create_bd_cell -type ip -vlnv %s %s"
-                % ("xilinx.com:hls:instrumentation_wrapper:1.0", "instrumentation_wrap_0")
+                % (
+                    "xilinx.com:hls:instrumentation_wrapper:1.0",
+                    "instrumentation_wrap_0",
+                )
             )
             # connect clock % reset
             config.append(
@@ -426,29 +416,6 @@ class MakeZYNQProject(Transformation):
                     % (vivado_stitch_vlnv, instance_names[node.name])
                 )
 
-                if self.enable_selectable:
-                    config.append(templates.selector_zynq_shell_template_procs)
-                    config.append(
-                        templates.selector_zynq_shell_template
-                        % (instance_names[node.name], max_bodies)
-                    )
-                    config.append(
-                        "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
-                        "[get_bd_intf_pins axi_interconnect_%d/M%02d_AXI]"
-                        % (
-                            f"{instance_names[node.name]}_selector",
-                            "s_axilite",
-                            axilite_interconnect_idx,
-                            axilite_idx,
-                        )
-                    )
-                    axilite_idx += 1
-                    if axilite_idx == 64:
-                        axilite_interconnect_idx += 1
-                        axilite_idx = 0
-                    if axilite_interconnect_idx == 0:
-                        master_axilite_idx += 1
-
                 for axilite_intf_name in ifnames["axilite"]:
                     config.append(
                         "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
@@ -637,7 +604,7 @@ class MakeZYNQProject(Transformation):
 
         fclk_mhz = int(1 / (self.period_ns * 0.001))
 
-        pr_config = self._generate_pr_flow(model) if partial_reconfiguration else ""
+        pr_config = self._generate_pr_flow(model) if (partial_reconfiguration or sw_nodes) else ""
 
         # create a TCL recipe for the project
         ipcfg = vivado_pynq_proj_dir + "/ip_config.tcl"
@@ -721,17 +688,27 @@ class MakeZYNQProject(Transformation):
         pr_config = []
         sdp_nodes = model.get_nodes_by_op_type("StreamingDataflowPartition")
         pr_sdp_nodes = []
+        sw_sdp_nodes = []
         for sdp_node in sdp_nodes:
             sdp_node_inst = getCustomOp(sdp_node)
             dataflow_model_filename = sdp_node_inst.get_nodeattr("model")
             kernel_model = ModelWrapper(dataflow_model_filename)
-            if [
-                n
-                for n in kernel_model.graph.node
-                if n.op_type == "NodeContainer"
+            if any(
+                n.op_type == "NodeContainer"
                 and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
-            ]:
+                for n in kernel_model.graph.node
+            ):
                 pr_sdp_nodes.append(sdp_node)
+            elif any(
+                n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "selectable_weights"
+                for n in kernel_model.graph.node
+            ):
+                sw_sdp_nodes.append(sdp_node)
+
+        # Capture the current top-level BD design before any sub-design switches.
+        # This is needed even when there are no PR SDPs (SW-only case).
+        pr_config.append("set curdesign [current_bd_design]")
 
         for pr_sdp_node in pr_sdp_nodes:
             pr_sdp_node_inst = getCustomOp(pr_sdp_node)
@@ -840,13 +817,16 @@ class MakeZYNQProject(Transformation):
                     pr_config.append("validate_bd_design")
                     pr_config.append("current_bd_design $curdesign")
 
-        # DFX Controller & ICAP
-
+        # Switch back to top-level design and add all multi-DNN wrapper RTL files
         pr_config.append("current_bd_design $curdesign")
-        for dfx_file in [
-            os.path.join(get_settings().finn_rtllib, "icap", "icape3_wrapper.v"),
+        for wrapper_file in [
             os.path.join(get_settings().finn_rtllib, "dfx", "dfx_wrapper", "dfx_wrapper.sv"),
-            os.path.join(get_settings().finn_rtllib, "dfx", "dfx_wrapper", "dfx_wrapper_wrapper.v"),
+            os.path.join(
+                get_settings().finn_rtllib,
+                "dfx",
+                "dfx_wrapper",
+                "dfx_wrapper_wrapper.v",
+            ),
             os.path.join(
                 get_settings().finn_rtllib,
                 "dfx",
@@ -859,154 +839,186 @@ class MakeZYNQProject(Transformation):
                 "dfx_tuser_passthrough",
                 "dfx_tuser_passthrough_wrapper.v",
             ),
+            os.path.join(get_settings().finn_rtllib, "dfx", "sw_wrapper", "sw_wrapper.sv"),
+            os.path.join(get_settings().finn_rtllib, "dfx", "sw_wrapper", "sw_wrapper_wrapper.v"),
         ]:
             pr_config.append(
                 "add_files -copy_to [get_property DIRECTORY [current_project]] -norecurse %s"
-                % dfx_file
+                % wrapper_file
             )
-        pr_config.append("create_bd_cell -type module -reference icape3_wrapper icape3_wrapper")
-        pr_config.append(
-            "create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_controller:1.0 dfx_controller_0"
-        )
-        pr_config.append(
-            "source [get_property REPOSITORY "
-            "[get_ipdefs *dfx_controller:1.0]]"
-            "/xilinx/dfx_controller_v1_0/tcl/api.tcl -notrace"
-        )
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/ICAP] "
-            "[get_bd_intf_pins icape3_wrapper/ICAP]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins icape3_wrapper/clk] [get_bd_pins zynq_ps/$zynq_ps_clkname]"
-        )
-        for pr_sdp in pr_sdp_nodes:
-            pr_sdp_inst = getCustomOp(pr_sdp)
-            pr_sdp_model = ModelWrapper(pr_sdp_inst.get_nodeattr("model"))
-            pr_nodecontainer = [
-                n
-                for n in pr_sdp_model.graph.node
-                if n.op_type == "NodeContainer"
-                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
-            ][0]
-            pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
-            num_bodies = pr_nodecontainer_inst.get_nodeattr("bodies")
-            dfx_cont_vs_config = []
 
-            vs_name = pr_sdp.name
-            dfx_cont_vs_config.append("CONFIG.VS.%s.NUM_RMS_ALLOCATED %d" % (vs_name, num_bodies))
-            for rm_idx in range(num_bodies):
-                dfx_cont_vs_config.append("CONFIG.VS.%s.RM.%d.BS.0.ADDRESS 0x0" % (vs_name, rm_idx))
-            dfx_cont_vs_config.append(
-                "CONFIG.VS.%s.NUM_TRIGGERS_ALLOCATED %d" % (vs_name, num_bodies)
-            )
-            dfx_cont_vs_config.append("CONFIG.VS.%s.NUM_HW_TRIGGERS %d" % (vs_name, num_bodies))
-            for rm_idx in range(num_bodies):
-                dfx_cont_vs_config.append(
-                    "CONFIG.VS.%s.TRIGGER%d_TO_RM %d" % (vs_name, rm_idx, rm_idx)
+        if pr_sdp_nodes:
+            # DFX Controller & ICAP (only needed for partial reconfiguration)
+            for pr_file in [
+                os.path.join(get_settings().finn_rtllib, "icap", "icape3_wrapper.v"),
+            ]:
+                pr_config.append(
+                    "add_files -copy_to [get_property DIRECTORY [current_project]] -norecurse %s"
+                    % pr_file
                 )
+            pr_config.append("create_bd_cell -type module -reference icape3_wrapper icape3_wrapper")
             pr_config.append(
-                "dfx_controller_v1_0::set_property -dict [list %s] [get_bd_cells dfx_controller_0]"
-                % " ".join(dfx_cont_vs_config)
+                "create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_controller:1.0 dfx_controller_0"
+            )
+            pr_config.append(
+                "source [get_property REPOSITORY "
+                "[get_ipdefs *dfx_controller:1.0]]"
+                "/xilinx/dfx_controller_v1_0/tcl/api.tcl -notrace"
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/ICAP] "
+                "[get_bd_intf_pins icape3_wrapper/ICAP]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins icape3_wrapper/clk] "
+                "[get_bd_pins zynq_ps/$zynq_ps_clkname]"
+            )
+            for pr_sdp in pr_sdp_nodes:
+                pr_sdp_inst = getCustomOp(pr_sdp)
+                pr_sdp_model = ModelWrapper(pr_sdp_inst.get_nodeattr("model"))
+                pr_nodecontainer = [
+                    n
+                    for n in pr_sdp_model.graph.node
+                    if n.op_type == "NodeContainer"
+                    and getCustomOp(n).get_nodeattr("multi_dnn_type") == "partial_reconfiguration"
+                ][0]
+                pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
+                num_bodies = pr_nodecontainer_inst.get_nodeattr("bodies")
+                dfx_cont_vs_config = []
+
+                vs_name = pr_sdp.name
+                dfx_cont_vs_config.append(
+                    "CONFIG.VS.%s.NUM_RMS_ALLOCATED %d" % (vs_name, num_bodies)
+                )
+                for rm_idx in range(num_bodies):
+                    dfx_cont_vs_config.append(
+                        "CONFIG.VS.%s.RM.%d.BS.0.ADDRESS 0x0" % (vs_name, rm_idx)
+                    )
+                dfx_cont_vs_config.append(
+                    "CONFIG.VS.%s.NUM_TRIGGERS_ALLOCATED %d" % (vs_name, num_bodies)
+                )
+                dfx_cont_vs_config.append("CONFIG.VS.%s.NUM_HW_TRIGGERS %d" % (vs_name, num_bodies))
+                for rm_idx in range(num_bodies):
+                    dfx_cont_vs_config.append(
+                        "CONFIG.VS.%s.TRIGGER%d_TO_RM %d" % (vs_name, rm_idx, rm_idx)
+                    )
+                pr_config.append(
+                    "dfx_controller_v1_0::set_property -dict [list %s] "
+                    "[get_bd_cells dfx_controller_0]" % " ".join(dfx_cont_vs_config)
+                )
+
+            pr_config.append("set_property CONFIG.PSU__USE__S_AXI_GP3 {1} [get_bd_cells zynq_ps]")
+
+            # Create dedicated reset controller for DFX controller
+            # (reset 1, independent of main system reset 0)
+            pr_config.append(
+                "create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 "
+                "proc_sys_reset_dfx"
+            )
+            pr_config.append(
+                "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
+                '"Clk /zynq_ps/$zynq_ps_clkname" '
+                "[get_bd_pins proc_sys_reset_dfx/slowest_sync_clk]"
             )
 
-        pr_config.append("set_property CONFIG.PSU__USE__S_AXI_GP3 {1} [get_bd_cells zynq_ps]")
+            pr_config.append(
+                "set_property CONFIG.PSU__NUM_FABRIC_RESETS {2} [get_bd_cells zynq_ps]"
+            )
 
-        # Create dedicated reset controller for DFX controller
-        # (reset 1, independent of main system reset 0)
-        pr_config.append(
-            "create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_dfx"
-        )
-        pr_config.append(
-            "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
-            '"Clk /zynq_ps/$zynq_ps_clkname" '
-            "[get_bd_pins proc_sys_reset_dfx/slowest_sync_clk]"
-        )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins zynq_ps/pl_resetn1] "
+                "[get_bd_pins proc_sys_reset_dfx/ext_reset_in]"
+            )
 
-        pr_config.append("set_property CONFIG.PSU__NUM_FABRIC_RESETS {2} [get_bd_cells zynq_ps]")
+            # Connect DFX controller clock and reset
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_controller_0/clk] "
+                "[get_bd_pins smartconnect_0/aclk]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_controller_0/clk] "
+                "[get_bd_pins dfx_controller_0/icap_clk]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_controller_0/reset] "
+                "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins dfx_controller_0/icap_reset] "
+                "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
+            )
 
-        pr_config.append(
-            "connect_bd_net [get_bd_pins zynq_ps/pl_resetn1] "
-            "[get_bd_pins proc_sys_reset_dfx/ext_reset_in]"
-        )
+            # Connect DFX controller s_axi_reg to PS master via axi_interconnect_0
+            # (extend axi_interconnect_0 with one extra master port)
+            pr_config.append(
+                "set dfx_mi_idx [get_property CONFIG.NUM_MI [get_bd_cells axi_interconnect_0]]"
+            )
+            pr_config.append(
+                "set_property CONFIG.NUM_MI [expr {$dfx_mi_idx + 1}] "
+                "[get_bd_cells axi_interconnect_0]"
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/s_axi_reg] "
+                "[get_bd_intf_pins axi_interconnect_0/[format M%02d_AXI $dfx_mi_idx]]"
+            )
+            pr_config.append(
+                "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
+                '"Clk /zynq_ps/$zynq_ps_clkname" '
+                "[get_bd_pins axi_interconnect_0/[format M%02d_ACLK $dfx_mi_idx]]"
+            )
+            pr_config.append(
+                "assign_bd_address [get_bd_addr_segs {dfx_controller_0/s_axi_reg/Reg}]"
+            )
 
-        # Connect DFX controller clock and reset
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_controller_0/clk] " "[get_bd_pins smartconnect_0/aclk]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_controller_0/clk] "
-            "[get_bd_pins dfx_controller_0/icap_clk]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_controller_0/reset] "
-            "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins dfx_controller_0/icap_reset] "
-            "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]"
-        )
+            pr_config.append("save_bd_design")
 
-        # Connect DFX controller s_axi_reg to PS master via axi_interconnect_0
-        # (extend axi_interconnect_0 with one extra master port)
-        pr_config.append(
-            "set dfx_mi_idx [get_property CONFIG.NUM_MI [get_bd_cells axi_interconnect_0]]"
-        )
-        pr_config.append(
-            "set_property CONFIG.NUM_MI [expr {$dfx_mi_idx + 1}] [get_bd_cells axi_interconnect_0]"
-        )
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/s_axi_reg] "
-            "[get_bd_intf_pins axi_interconnect_0/[format M%02d_AXI $dfx_mi_idx]]"
-        )
-        pr_config.append(
-            "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
-            '"Clk /zynq_ps/$zynq_ps_clkname" '
-            "[get_bd_pins axi_interconnect_0/[format M%02d_ACLK $dfx_mi_idx]]"
-        )
-        pr_config.append("assign_bd_address [get_bd_addr_segs {dfx_controller_0/s_axi_reg/Reg}]")
+            # SmartConnect to route dfx_controller AXI master → zynq_ps/S_AXI_HP1_FPD
+            pr_config.append(
+                "set smartconnect_dfx_vlnv "
+                "[get_property VLNV [get_ipdefs xilinx.com:ip:smartconnect:*]]"
+            )
+            pr_config.append(
+                "create_bd_cell -type ip -vlnv $smartconnect_dfx_vlnv smartconnect_dfx"
+            )
+            pr_config.append(
+                "set_property -dict [list CONFIG.NUM_SI {1}] [get_bd_cells smartconnect_dfx]"
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/M_AXI_MEM] "
+                "[get_bd_intf_pins smartconnect_dfx/S00_AXI]"
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins smartconnect_dfx/M00_AXI] "
+                "[get_bd_intf_pins zynq_ps/S_AXI_HP1_FPD]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins smartconnect_dfx/aclk] "
+                "[get_bd_pins smartconnect_0/aclk]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins smartconnect_dfx/aresetn] "
+                "[get_bd_pins smartconnect_0/aresetn]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins zynq_ps/saxihp1_fpd_aclk] "
+                "[get_bd_pins smartconnect_0/aclk]"
+            )
 
-        pr_config.append("save_bd_design")
+            # Source AMD dfx_decoupler API once (needed before per-PR instantiation loop)
+            pr_config.append(
+                "source [get_property REPOSITORY "
+                "[get_ipdefs *dfx_decoupler:1.0]]"
+                "/xilinx/dfx_decoupler_v1_0/tcl/api.tcl -notrace"
+            )
 
-        # Create a new SmartConnect to route dfx_controller AXI master zynq_ps/S_AXI_HP1_FPD
-        pr_config.append(
-            "set smartconnect_dfx_vlnv "
-            "[get_property VLNV [get_ipdefs xilinx.com:ip:smartconnect:*]]"
-        )
-        pr_config.append("create_bd_cell -type ip -vlnv $smartconnect_dfx_vlnv smartconnect_dfx")
-        pr_config.append(
-            "set_property -dict [list CONFIG.NUM_SI {1}] [get_bd_cells smartconnect_dfx]"
-        )
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins dfx_controller_0/M_AXI_MEM] "
-            "[get_bd_intf_pins smartconnect_dfx/S00_AXI]"
-        )
-        pr_config.append(
-            "connect_bd_intf_net [get_bd_intf_pins smartconnect_dfx/M00_AXI] "
-            "[get_bd_intf_pins zynq_ps/S_AXI_HP1_FPD]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins smartconnect_dfx/aclk] [get_bd_pins smartconnect_0/aclk]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins smartconnect_dfx/aresetn] "
-            "[get_bd_pins smartconnect_0/aresetn]"
-        )
-        pr_config.append(
-            "connect_bd_net [get_bd_pins zynq_ps/saxihp1_fpd_aclk] "
-            "[get_bd_pins smartconnect_0/aclk]"
-        )
-
-        # Source AMD dfx_decoupler API once (needed before per-PR instantiation loop)
-        pr_config.append(
-            "source [get_property REPOSITORY "
-            "[get_ipdefs *dfx_decoupler:1.0]]"
-            "/xilinx/dfx_decoupler_v1_0/tcl/api.tcl -notrace"
-        )
+            reset_net_name = "proc_sys_reset_dfx"
+        else:
+            # SW-only: use the main system reset (proc_sys_reset_0 always exists)
+            reset_net_name = "proc_sys_reset_0"
 
         # Compute a single consistent tUSER width for the entire accelerator so that
-        # all dfx_wrapper and dfx_tuser_passthrough modules use the same TUSER_WIDTH
-        # and tUSER bits propagate without truncation end-to-end.
+        # all wrapper modules use the same TUSER_WIDTH and tUSER bits propagate
+        # without truncation end-to-end.
         def _tuser_width_for_pr(pr_sdp):
             inst = getCustomOp(pr_sdp)
             km = ModelWrapper(inst.get_nodeattr("model"))
@@ -1021,7 +1033,22 @@ class MakeZYNQProject(Transformation):
             attr = nc_inst.get_nodeattr("tuser_width")
             return attr if attr > 0 else max(math.ceil(math.log2(max(nb, 2))), 1)
 
-        global_tuser_width = max(_tuser_width_for_pr(p) for p in pr_sdp_nodes)
+        def _tuser_width_for_sw(sw_sdp):
+            inst = getCustomOp(sw_sdp)
+            km = ModelWrapper(inst.get_nodeattr("model"))
+            nc = [
+                n
+                for n in km.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "selectable_weights"
+            ][0]
+            nb = getCustomOp(nc).get_nodeattr("bodies")
+            return max(math.ceil(math.log2(max(nb, 2))), 1)
+
+        all_tuser_widths = [_tuser_width_for_pr(p) for p in pr_sdp_nodes] + [
+            _tuser_width_for_sw(s) for s in sw_sdp_nodes
+        ]
+        global_tuser_width = max(all_tuser_widths) if all_tuser_widths else 1
 
         # Per-region DFX Wrapper and AMD DFX Decoupler instantiation.
         # Each PR SDP gets its own dfx_wrapper (static region controller) and
@@ -1065,7 +1092,7 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_wrapper_%s/aresetn] "
-                "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]" % sdp_name
+                "[get_bd_pins %s/peripheral_aresetn]" % (sdp_name, reset_net_name)
             )
 
             # Create per-region AMD DFX Decoupler on the BDC output side
@@ -1159,13 +1186,10 @@ class MakeZYNQProject(Transformation):
             )
 
         # Per-segment tUSER Passthrough wrapper instantiation.
-        # Each non-PR SDP (a sequence of static FINN CustomOps) is wrapped in a
-        # dfx_tuser_passthrough to forward the tUSER side-channel and to regenerate
-        # tLast at the output (FINN ops produce neither).  This ensures that the
-        # tUSER set by host software on the primary DMA input propagates unmodified
-        # to every downstream dfx_wrapper so it can read the correct RM selection.
-        non_pr_sdp_nodes = [n for n in sdp_nodes if n not in pr_sdp_nodes]
-        for non_pr_sdp in non_pr_sdp_nodes:
+        # Each static SDP (not PR, not SW) is wrapped in dfx_tuser_passthrough to
+        # forward the tUSER side-channel and regenerate tLast at the output.
+        static_sdp_nodes = [n for n in sdp_nodes if n not in pr_sdp_nodes and n not in sw_sdp_nodes]
+        for non_pr_sdp in static_sdp_nodes:
             non_pr_sdp_inst = getCustomOp(non_pr_sdp)
             sdp_name = non_pr_sdp.name
             body_model = ModelWrapper(non_pr_sdp_inst.get_nodeattr("model"))
@@ -1204,7 +1228,7 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_tuser_passthrough_%s/aresetn] "
-                "[get_bd_pins proc_sys_reset_dfx/peripheral_aresetn]" % sdp_name
+                "[get_bd_pins %s/peripheral_aresetn]" % (sdp_name, reset_net_name)
             )
 
             # Input side: find the upstream master, disconnect from SDP,
@@ -1248,6 +1272,108 @@ class MakeZYNQProject(Transformation):
                 "connect_bd_intf_net "
                 "[get_bd_intf_pins dfx_tuser_passthrough_%s/m_axis] "
                 "$downstream_slave_%s" % (sdp_name, sdp_name)
+            )
+
+        # Per-SW-region SW Wrapper instantiation.
+        # Each selectable_weights SDP is wrapped in sw_wrapper to send a set-selection
+        # token (derived from the incoming tUSER) before each frame, then forward data.
+        for sw_sdp in sw_sdp_nodes:
+            sw_sdp_inst = getCustomOp(sw_sdp)
+            sdp_name = sw_sdp.name
+            body_model = ModelWrapper(sw_sdp_inst.get_nodeattr("model"))
+            body_ifnames = eval(body_model.get_metadata_prop("vivado_stitch_ifnames"))
+
+            s_axis_name, data_in_width = body_ifnames["s_axis"][0]
+            m_axis_name, data_out_width = body_ifnames["m_axis"][0]
+
+            # Locate the selectable_weights NC to get num_sets and output beat count.
+            sw_nc = [
+                n
+                for n in body_model.graph.node
+                if n.op_type == "NodeContainer"
+                and getCustomOp(n).get_nodeattr("multi_dnn_type") == "selectable_weights"
+            ][0]
+            sw_nc_inst = getCustomOp(sw_nc)
+            num_sets = sw_nc_inst.get_nodeattr("bodies")
+
+            last_node_inst = getCustomOp(body_model.graph.node[-1])
+            out_shape = last_node_inst.get_folded_output_shape()
+            num_output_beats = int(math.prod(out_shape[1:-1]))
+
+            pr_config.append(
+                "create_bd_cell -type module -reference sw_wrapper_wrapper sw_wrapper_%s" % sdp_name
+            )
+            pr_config.append(
+                "set_property -dict [list "
+                "CONFIG.DATA_IN_WIDTH {%d} "
+                "CONFIG.DATA_OUT_WIDTH {%d} "
+                "CONFIG.TUSER_WIDTH {%d} "
+                "CONFIG.NUM_SETS {%d} "
+                "CONFIG.NUM_OUTPUT_BEATS {%d}] "
+                "[get_bd_cells sw_wrapper_%s]"
+                % (
+                    data_in_width,
+                    data_out_width,
+                    global_tuser_width,
+                    num_sets,
+                    num_output_beats,
+                    sdp_name,
+                )
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins sw_wrapper_%s/aclk] "
+                "[get_bd_pins smartconnect_0/aclk]" % sdp_name
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins sw_wrapper_%s/aresetn] "
+                "[get_bd_pins %s/peripheral_aresetn]" % (sdp_name, reset_net_name)
+            )
+
+            # Input side: redirect upstream → sw_wrapper/s_axis → SDP/s_axis_name
+            pr_config.append(
+                "set upstream_master_%s [get_bd_intf_pins -of_objects "
+                "[get_bd_intf_nets -of_objects [get_bd_intf_pins %s/%s]] "
+                "-filter {mode == Master}]" % (sdp_name, sdp_name, s_axis_name)
+            )
+            pr_config.append(
+                "delete_bd_objs [get_bd_intf_nets -of_objects "
+                "[get_bd_intf_pins %s/%s]]" % (sdp_name, s_axis_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net $upstream_master_%s "
+                "[get_bd_intf_pins sw_wrapper_%s/s_axis]" % (sdp_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net "
+                "[get_bd_intf_pins sw_wrapper_%s/rp_m_axis] "
+                "[get_bd_intf_pins %s/%s]" % (sdp_name, sdp_name, s_axis_name)
+            )
+
+            # Output side: redirect SDP/m_axis_name → sw_wrapper/rp_s_axis → downstream
+            pr_config.append(
+                "set downstream_slave_%s [get_bd_intf_pins -of_objects "
+                "[get_bd_intf_nets -of_objects [get_bd_intf_pins %s/%s]] "
+                "-filter {mode == Slave}]" % (sdp_name, sdp_name, m_axis_name)
+            )
+            pr_config.append(
+                "delete_bd_objs [get_bd_intf_nets -of_objects "
+                "[get_bd_intf_pins %s/%s]]" % (sdp_name, m_axis_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net [get_bd_intf_pins %s/%s] "
+                "[get_bd_intf_pins sw_wrapper_%s/rp_s_axis]" % (sdp_name, m_axis_name, sdp_name)
+            )
+            pr_config.append(
+                "connect_bd_intf_net "
+                "[get_bd_intf_pins sw_wrapper_%s/m_axis] "
+                "$downstream_slave_%s" % (sdp_name, sdp_name)
+            )
+
+            # Set-selection side: sw_wrapper/m_axis_setsel → SDP/s_axis_tap
+            pr_config.append(
+                "connect_bd_intf_net "
+                "[get_bd_intf_pins sw_wrapper_%s/m_axis_setsel] "
+                "[get_bd_intf_pins %s/s_axis_tap]" % (sdp_name, sdp_name)
             )
 
         for pr_sdp in pr_sdp_nodes:
@@ -1611,7 +1737,10 @@ class ZynqBuild(Transformation):
                 kernel_model = kernel_model.transform(HLSSynthIP())
                 kernel_model = kernel_model.transform(
                     CreateStitchedIP(
-                        self.fpga_part, self.period_ns, sdp_node.onnx_node.name, vitis=False
+                        self.fpga_part,
+                        self.period_ns,
+                        sdp_node.onnx_node.name,
+                        vitis=False,
                     )
                 )
                 kernel_model.set_metadata_prop("platform", "zynq-iodma")
