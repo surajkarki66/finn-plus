@@ -34,6 +34,7 @@ accelerator from an ONNX model.
 import json
 import numpy as np
 import os
+import re
 import shutil
 from copy import deepcopy
 from functools import partial
@@ -137,6 +138,119 @@ from finn.util.exception import FINNUserError
 from finn.util.execution import execute_parent
 from finn.util.logging import log
 from finn.util.mlo_sim import is_mlo, mlo_prehook_func_factory
+
+
+def _generate_pblock_svg(report_json_path, svg_path):
+    """Generate an SVG floorplan diagram from a pr_region_resources JSON report.
+
+    The SVG shows the SLICE-coordinate footprint of each auto-placed pblock
+    against the full device SLICE array. Y-axis is flipped so that FPGA Y=0
+    (bottom of die) appears at the bottom of the image.
+    """
+    with open(report_json_path) as f:
+        report = json.load(f)
+
+    regions = report.get("pr_regions", {})
+    dev_max_x = report.get("device_slice_max_x", 0)
+    dev_max_y = report.get("device_slice_max_y", 0)
+
+    # Parse the first SLICE range from each pblock's grid_ranges string.
+    # grid_ranges looks like: "SLICE_X60Y120:SLICE_X109Y239 RAMB36_X3Y24:..."
+    slice_pat = re.compile(r"SLICE_X(\d+)Y(\d+):SLICE_X(\d+)Y(\d+)")
+    pblocks = []  # list of (x0, y0, x1, y1, name)
+    for pblock_name, data in regions.items():
+        m = slice_pat.search(data.get("grid_ranges", ""))
+        if m:
+            x0, y0, x1, y1 = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            # Fall back on pblock extents if device extents not in report
+            dev_max_x = max(dev_max_x, x1)
+            dev_max_y = max(dev_max_y, y1)
+            pblocks.append((x0, y0, x1, y1, pblock_name))
+
+    if not pblocks:
+        return  # Nothing to draw (manual mode or no SLICE ranges found)
+
+    SCALE = 3  # pixels per SLICE unit
+    PAD = 30  # border padding in pixels
+    FONT = 11
+
+    canvas_w = (dev_max_x + 1) * SCALE + 2 * PAD
+    canvas_h = (dev_max_y + 1) * SCALE + 2 * PAD
+
+    # Palette: distinct colours for up to 8 regions
+    palette = [
+        "#4c9be8",
+        "#e8864c",
+        "#4ce87c",
+        "#e84c9b",
+        "#9b4ce8",
+        "#e8e04c",
+        "#4ce8d8",
+        "#e84c4c",
+    ]
+
+    lines = [
+        f'<svg xmlns="http://www.w3.org/2000/svg"' f' width="{canvas_w}" height="{canvas_h}">',
+        # Background = full device SLICE array
+        f'<rect x="{PAD}" y="{PAD}"'
+        f' width="{(dev_max_x + 1) * SCALE}" height="{(dev_max_y + 1) * SCALE}"'
+        f' fill="#d8d8d8" stroke="#555" stroke-width="1"/>',
+        # Y-axis label (rotated)
+        f'<text transform="rotate(-90)" x="-{canvas_h//2}" y="{PAD - 6}"'
+        f' text-anchor="middle" font-size="{FONT}" font-family="sans-serif">SLICE Y</text>',
+        # X-axis label
+        f'<text x="{canvas_w // 2}" y="{canvas_h - 4}"'
+        f' text-anchor="middle" font-size="{FONT}" font-family="sans-serif">SLICE X</text>',
+    ]
+
+    for i, (x0, y0, x1, y1, name) in enumerate(pblocks):
+        color = palette[i % len(palette)]
+        # Flip Y: FPGA Y=0 is at bottom; SVG Y=0 is top
+        svg_y_top = PAD + (dev_max_y - y1) * SCALE
+        svg_x_left = PAD + x0 * SCALE
+        w = (x1 - x0 + 1) * SCALE
+        h = (y1 - y0 + 1) * SCALE
+        cx = svg_x_left + w // 2
+        cy = svg_y_top + h // 2
+        # Pblock rectangle
+        lines.append(
+            f'<rect x="{svg_x_left}" y="{svg_y_top}" width="{w}" height="{h}"'
+            f' fill="{color}" fill-opacity="0.55" stroke="#222" stroke-width="1.5"/>'
+        )
+        # Label — region name (strip the pblock_Hier_ prefix), two lines if tall enough
+        label = name.replace("pblock_Hier_", "")
+        if h >= FONT * 2 + 4:
+            lines.append(
+                f'<text x="{cx}" y="{cy - FONT//2}" text-anchor="middle"'
+                f' font-size="{FONT}" font-family="sans-serif" font-weight="bold">{label}</text>'
+            )
+            lines.append(
+                f'<text x="{cx}" y="{cy + FONT}" text-anchor="middle"'
+                f' font-size="{FONT - 1}" font-family="sans-serif">'
+                f"X{x0}:{x1} Y{y0}:{y1}</text>"
+            )
+        else:
+            lines.append(
+                f'<text x="{cx}" y="{cy + FONT//3}" text-anchor="middle"'
+                f' font-size="{FONT}" font-family="sans-serif" font-weight="bold">{label}</text>'
+            )
+        # Corner coordinate labels (small monospace text)
+        lines.append(
+            f'<text x="{svg_x_left + 2}" y="{svg_y_top + FONT}"'
+            f' font-size="{max(FONT - 3, 7)}" font-family="monospace" fill="#444">'
+            f"({x0},{y1})</text>"
+        )
+        lines.append(
+            f'<text x="{svg_x_left + w - 2}" y="{svg_y_top + h - 3}"'
+            f' text-anchor="end" font-size="{max(FONT - 3, 7)}"'
+            f' font-family="monospace" fill="#444">'
+            f"({x1},{y0})</text>"
+        )
+
+    lines.append("</svg>")
+
+    with open(svg_path, "w") as f:
+        f.write("\n".join(lines))
 
 
 def verify_step(
@@ -1567,7 +1681,9 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig):
 
             pr_resources_json = model.get_metadata_prop("pr_region_resources_json")
             if pr_resources_json is not None and os.path.isfile(pr_resources_json):
-                copy(pr_resources_json, report_dir + "/pr_region_resources.json")
+                dest_json = report_dir + "/pr_region_resources.json"
+                copy(pr_resources_json, dest_json)
+                _generate_pblock_svg(dest_json, report_dir + "/pr_region_floorplan.svg")
 
             model.set_metadata_prop("bitfile_output", os.path.abspath(bitfile_path))
 

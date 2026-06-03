@@ -169,6 +169,10 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
         # resize_pblock -add accumulates and cannot be selectively cleared.
         set passed 0
         set slice_y_ceil [expr {$slice_y_floor + $height_step - 1}]
+        # Track the best available resources seen across all trials for failure diagnostics.
+        set best_avail_luts  0
+        set best_avail_brams 0
+        set best_avail_dsps  0
 
         while {$slice_y_ceil <= $max_device_y && !$passed} {
             # Scale the pblock height as a fraction of each resource type's *remaining* space,
@@ -242,7 +246,18 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
                     set avail_brams  [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {NAME =~ "RAMB36_*"}]]
                     set avail_dsps   [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {SITE_TYPE == "DSP48E2"}]]
 
-                    puts "    CR_X${ci_start}..${ci_end} | SLICE X${sx_start}..${sx_end} Y${slice_y_floor}..${slice_y_ceil} | RAMB36 Y${ramb_y_floor}..${ramb_y_ceil} | DSP Y${dsp_y_floor}..${dsp_y_ceil}  ->  LUTs: $avail_luts/$req_luts  BRAMs: $avail_brams/$req_brams  DSPs: $avail_dsps/$req_dsps"
+                    # Update best-seen for failure diagnostics
+                    if {$avail_luts  > $best_avail_luts}  { set best_avail_luts  $avail_luts  }
+                    if {$avail_brams > $best_avail_brams} { set best_avail_brams $avail_brams }
+                    if {$avail_dsps  > $best_avail_dsps}  { set best_avail_dsps  $avail_dsps  }
+
+                    # Annotate with which resources are still short for easier scanning
+                    set short_tags ""
+                    if {$avail_luts  < $req_luts}  { append short_tags " [SHORT:LUTs]"  }
+                    if {$avail_brams < $req_brams} { append short_tags " [SHORT:BRAMs]" }
+                    if {$avail_dsps  < $req_dsps}  { append short_tags " [SHORT:DSPs]"  }
+
+                    puts "    CR_X${ci_start}..${ci_end} | SLICE X${sx_start}..${sx_end} Y${slice_y_floor}..${slice_y_ceil} | RAMB36 Y${ramb_y_floor}..${ramb_y_ceil} | DSP Y${dsp_y_floor}..${dsp_y_ceil}  ->  LUTs: $avail_luts/$req_luts  BRAMs: $avail_brams/$req_brams  DSPs: $avail_dsps/$req_dsps${short_tags}"
 
                     if {$avail_luts >= $req_luts && $avail_brams >= $req_brams && $avail_dsps >= $req_dsps} {
                         set passed 1
@@ -291,6 +306,23 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
 
         } else {
             puts "    ERROR: Cannot fulfill resource demands for $pblock_name on remaining fabric!"
+            puts "    ----------------------------------------------------------------"
+            puts "    Resource shortage summary for $pblock_name:"
+            puts "    DEMANDED  -> LUTs: $req_luts | BRAMs: $req_brams | DSPs: $req_dsps"
+            puts "    BEST SEEN -> LUTs: $best_avail_luts | BRAMs: $best_avail_brams | DSPs: $best_avail_dsps"
+            set shortage_detail ""
+            if {$best_avail_luts  < $req_luts}  { append shortage_detail "  LUTs:  need $req_luts, best seen $best_avail_luts (deficit [expr {$req_luts  - $best_avail_luts}])\n" }
+            if {$best_avail_brams < $req_brams} { append shortage_detail "  BRAMs: need $req_brams, best seen $best_avail_brams (deficit [expr {$req_brams - $best_avail_brams}])\n" }
+            if {$best_avail_dsps  < $req_dsps}  { append shortage_detail "  DSPs:  need $req_dsps, best seen $best_avail_dsps (deficit [expr {$req_dsps  - $best_avail_dsps}])\n" }
+            if {$shortage_detail ne ""} {
+                puts "    SHORTFALLS:"
+                puts $shortage_detail
+            } else {
+                puts "    NOTE: all resource types individually reachable — search may have been"
+                puts "    constrained by SLICE floor placement or proportional scaling cutoff."
+            }
+            puts "    Search stopped at SLICE Y${slice_y_ceil} (device max Y${max_device_y})"
+            puts "    ----------------------------------------------------------------"
             return -code error "Floorplanning failed due to resource exhaustion."
         }
     }
@@ -435,6 +467,18 @@ proc write_pr_resource_report {cell_names pblock_names {report_file "pr_resource
     puts " PR Resource Report: querying post-implementation utilisation"
     puts "================================================================"
 
+    # Query device SLICE extent for SVG canvas sizing.
+    # NAME =~ filters are cheap — no netlist needed, just the device db.
+    set dev_slice_max_x 0
+    set dev_slice_max_y 0
+    foreach s [get_sites -filter {SITE_TYPE =~ "SLICE*" && NAME =~ "SLICE_X*Y0"}] {
+        if {[regexp {SLICE_X(\d+)Y0} $s -> x] && $x > $dev_slice_max_x} { set dev_slice_max_x $x }
+    }
+    foreach s [get_sites -filter {SITE_TYPE =~ "SLICE*" && NAME =~ "SLICE_X0Y*"}] {
+        if {[regexp {SLICE_X0Y(\d+)} $s -> y] && $y > $dev_slice_max_y} { set dev_slice_max_y $y }
+    }
+    puts "  Device SLICE extent for SVG: X0..${dev_slice_max_x}  Y0..${dev_slice_max_y}"
+
     set regions_json {}
 
     foreach cell_name $cell_names pblock_name $pblock_names {
@@ -445,6 +489,11 @@ proc write_pr_resource_report {cell_names pblock_names {report_file "pr_resource
         set post_synth      [dict get $finn_pr_report $pblock_name post_synth]
         set fp_input        [dict get $finn_pr_report $pblock_name floorplan_input]
         set pblock_capacity [dict get $finn_pr_report $pblock_name pblock_capacity]
+
+        # GRID_RANGES: snapped pblock rectangle(s) as reported by Vivado — used for SVG
+        set grid_ranges_list [get_property GRID_RANGES [get_pblocks $pblock_name]]
+        # Join into a single space-separated string and escape backslashes/quotes for JSON
+        set grid_ranges_str  [join $grid_ranges_list " "]
 
         # 5) Overhead % = (capacity - actual) / actual * 100 per resource type
         foreach resource {luts brams dsps} {
@@ -460,6 +509,7 @@ proc write_pr_resource_report {cell_names pblock_names {report_file "pr_resource
         # Build the JSON object for this region
         set rj "    \"$pblock_name\": {"
         append rj "\n      \"cell\": \"$cell_name\","
+        append rj "\n      \"grid_ranges\": \"$grid_ranges_str\","
         append rj "\n      \"post_synth\": {"
         append rj "\"luts\": [dict get $post_synth luts], "
         append rj "\"brams\": [dict get $post_synth brams], "
@@ -486,9 +536,13 @@ proc write_pr_resource_report {cell_names pblock_names {report_file "pr_resource
 
         puts "  $pblock_name post_impl: LUTs=[dict get $post_impl luts] BRAMs=[dict get $post_impl brams] DSPs=[dict get $post_impl dsps]"
         puts "    overhead: LUTs=$ovh(luts)% BRAMs=$ovh(brams)% DSPs=$ovh(dsps)%"
+        puts "    grid_ranges: $grid_ranges_str"
     }
 
-    set json "{\n  \"pr_regions\": {\n"
+    set json "{\n"
+    append json "  \"device_slice_max_x\": $dev_slice_max_x,\n"
+    append json "  \"device_slice_max_y\": $dev_slice_max_y,\n"
+    append json "  \"pr_regions\": {\n"
     append json [join $regions_json ",\n"]
     append json "\n  }\n}"
 

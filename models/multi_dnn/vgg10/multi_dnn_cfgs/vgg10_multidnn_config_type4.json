@@ -41,43 +41,35 @@
             "pr_regions" : {
                 "pr_mvau_0" : {
                     "vgg10_A" : ["MVAU_hls_0", "Thresholding_rtl_0"],
-                    "vgg10_B" : ["MVAU_hls_0", "Thresholding_rtl_0"],
-                    "pblock" : "CLOCKREGION_X1Y0:CLOCKREGION_X2Y0"
+                    "vgg10_B" : ["MVAU_hls_0", "Thresholding_rtl_0"]
                 },
                 "pr_mvau_1" : {
                     "vgg10_A" : ["MVAU_hls_1", "Thresholding_hls_0"],
-                    "vgg10_B" : ["MVAU_hls_1", "Thresholding_hls_0"],
-                    "pblock" : "CLOCKREGION_X1Y1:CLOCKREGION_X3Y2"
+                    "vgg10_B" : ["MVAU_hls_1", "Thresholding_hls_0"]
                 },
                 "pr_mvau_2" : {
                     "vgg10_A" : ["MVAU_hls_2", "Thresholding_hls_1"],
-                    "vgg10_B" : ["MVAU_hls_2", "Thresholding_hls_1"],
-                    "pblock" : "CLOCKREGION_X1Y3:CLOCKREGION_X2Y4"
+                    "vgg10_B" : ["MVAU_hls_2", "Thresholding_hls_1"]
                 },
                 "pr_mvau_3" : {
                     "vgg10_A" : ["MVAU_hls_3", "Thresholding_hls_2"],
-                    "vgg10_B" : ["MVAU_hls_3", "Thresholding_hls_2"],
-                    "pblock" : "CLOCKREGION_X1Y6:CLOCKREGION_X2Y6"
+                    "vgg10_B" : ["MVAU_hls_3", "Thresholding_hls_2"]
                 },
                 "pr_mvau_4" : {
                     "vgg10_A" : ["MVAU_hls_4", "Thresholding_hls_3"],
-                    "vgg10_B" : ["MVAU_hls_4", "Thresholding_hls_3"],
-                    "pblock" : "CLOCKREGION_X4Y0:CLOCKREGION_X5Y0"
+                    "vgg10_B" : ["MVAU_hls_4", "Thresholding_hls_3"]
                 },
                 "pr_mvau_5" : {
                     "vgg10_A" : ["MVAU_hls_5", "Thresholding_hls_4"],
-                    "vgg10_B" : ["MVAU_hls_5", "Thresholding_hls_4"],
-                    "pblock" : "CLOCKREGION_X4Y2:CLOCKREGION_X5Y2"
+                    "vgg10_B" : ["MVAU_hls_5", "Thresholding_hls_4"]
                 },
                 "pr_mvau_6" : {
                     "vgg10_A" : ["MVAU_hls_6", "Thresholding_hls_5"],
-                    "vgg10_B" : ["MVAU_hls_6", "Thresholding_hls_5"],
-                    "pblock" : "CLOCKREGION_X4Y4:CLOCKREGION_X5Y4"
+                    "vgg10_B" : ["MVAU_hls_6", "Thresholding_hls_5"]
                 },
                 "pr_mvau_7" : {
                     "vgg10_A" : ["MVAU_hls_7", "Thresholding_hls_6", "MVAU_hls_8", "Thresholding_hls_7", "MVAU_hls_9", "ElementwiseAdd_hls_0"],
-                    "vgg10_B" : ["MVAU_hls_7", "Thresholding_hls_6", "MVAU_hls_8", "Thresholding_hls_7", "MVAU_hls_9", "ElementwiseAdd_hls_0"],
-                    "pblock" : "CLOCKREGION_X4Y6:CLOCKREGION_X5Y6"
+                    "vgg10_B" : ["MVAU_hls_7", "Thresholding_hls_6", "MVAU_hls_8", "Thresholding_hls_7", "MVAU_hls_9", "ElementwiseAdd_hls_0"]
                 }
             }
         }
