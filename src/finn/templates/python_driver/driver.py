@@ -1781,8 +1781,6 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         report = {}
         pr_bitstream_folder = os.path.join(os.path.dirname(self.bitfile_name), "partial_bitstreams")
         socket_prefix = kwargs.get("pr_bitstream_prefix", "StreamingDataflowPartition")
-        num_slots = kwargs.get("num_slots", 2)  # "scheduled slots", not reconfigurable regions!
-        lead_time = kwargs.get("lead_time")
         instr_runtime = kwargs.get("instr_runtime", 1)
         avg_window_size = kwargs.get("avg_window_size", 64)
         num_measurements = kwargs.get("num_measurements", 10)
@@ -1854,48 +1852,17 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             self.dfx_controller_0, sockets=socket_names, bitstream_folder=pr_bitstream_folder
         )
 
-        dfx_scheduler = self.DFXScheduler(self.ip_dict["dfx_schedule"], num_slots=num_slots)
-        dfx_scheduler.pre_decouple_cycles = lead_time
-
-        # Run scheduler on its own for a couple seconds to measure min/max reconfiguration time
-        for slot in range(num_slots):
-            dfx_scheduler.set_slot(slot=slot, rm_id=slot, cycles_wait=int(200 * 1e6))
-        dfx_scheduler.start()
-        min_max = {}
-        time.sleep(10)
-        max_cycles = dfx_scheduler.max_cycles
-        min_cycles = dfx_scheduler.min_cycles
-        min_max["max_cycles"] = max_cycles
-        min_max["min_cycles"] = min_cycles
-        report["min_max_cycles"] = min_max
-
-        # Actual accelerator benchmarking, sweeping inference time
-        # overhead time = max observed reconfiguration time + fixed lead time
-        overhead_cycles = max_cycles + lead_time
-        tests = [
-            100000,
-            250000,
-            500000,
-            750000,
-            1000000,
-            2500000,
-            5000000,
-            7500000,
-            10000000,
-            25000000,
-            50000000,
-            75000000,
-            100000000,
-        ]
+        # Sweep mux_interval: how many frames each tUSER value is held before the
+        # instrumentation wrapper advances to the next one in round-robin order.
+        # The dfx_wrapper detects the tUSER change and triggers partial reconfiguration.
+        # mux_interval=0 means tUSER stays at 0 (no reconfiguration, baseline measurement).
+        mux_intervals = kwargs.get(
+            "mux_intervals", [0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 10000, 100000, 200000]
+        )
 
         test_results = {}
-        for inference_cycles in tests:
-            for slot in range(num_slots):
-                dfx_scheduler.set_slot(
-                    slot=slot, rm_id=slot, cycles_wait=inference_cycles + overhead_cycles
-                )
-            dfx_scheduler.start()
-            self.start_accelerator(avg_window_size=avg_window_size)
+        for mux_interval in mux_intervals:
+            self.start_accelerator(avg_window_size=avg_window_size, mux_interval=mux_interval)
             samples = []
             any_error = False
             for _ in range(num_measurements):
@@ -1939,10 +1906,8 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             # run_cycles/run_frames are cumulative since start; use last sample
             last_run_cycles = samples[-1][6]
             last_run_frames = samples[-1][7]
-            test_results[inference_cycles] = {
-                "overhead_cycles": overhead_cycles,
-                "lead_time": lead_time,
-                "inference_cycles": inference_cycles,
+            test_results[mux_interval] = {
+                "mux_interval": mux_interval,
                 "error": any_error,
                 "checksum": last_checksum,
                 "num_measurements": num_measurements,
@@ -1972,9 +1937,6 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                 else 0,
             }
         report["test"] = test_results
-        report["Error"] = dfx_scheduler.error
-        dfx_scheduler.stop()
-        print(dfx_scheduler.status())
 
         del dfx
         # PCAP test - dry run to buffer bitstreams in RAM
