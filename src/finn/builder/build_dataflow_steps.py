@@ -1373,7 +1373,9 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig):
     Depends on the DataflowOutputType.STITCHED_IP output product."""
 
     # introduce tLAST marker, required for instrumentation
-    if cfg.enable_instrumentation:
+    # Skip for multi-DNN builds: all SDPs are wrapped in dfx_wrapper / sw_wrapper /
+    # dfx_tuser_passthrough, which regenerate tlast internally via NUM_OUTPUT_BEATS.
+    if cfg.enable_instrumentation and cfg.multi_dnn_config_path is None:
         if cfg.shell_flow_type == ShellFlowType.VITIS_ALVEO:
             raise FINNUserError("Instrumentation is not yet implemented for Alveo/Vitis flow")
         model = model.transform(
