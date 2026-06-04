@@ -209,7 +209,16 @@ if { $enable_finn_switch == 1 } {
     connect_bd_net [get_bd_pins axi_gpio_0/gpio2_io_o] [get_bd_pins finn_switch/sel]
     # TODO: This is a workaround - FREQ_HZ changes after applying validate_bd_design the first time, which results in an error
     catch validate_bd_design
-    set_property CONFIG.FREQ_HZ [get_property CONFIG.FREQ_HZ [get_bd_intf_pins /zynq_ps/M_AXI_HPM0_FPD]] [get_bd_intf_pins /finn_switch/*]
+    set clk_freq_hz [get_property CONFIG.FREQ_HZ [get_bd_intf_pins /zynq_ps/M_AXI_HPM0_FPD]]
+    set_property CONFIG.FREQ_HZ $clk_freq_hz [get_bd_intf_pins /finn_switch/*]
+    # instrumentation_wrap_0 AXI-Stream ports inherit FREQ_HZ from HLS synthesis and differ
+    # from finn_switch's frequency, triggering BD 41-237.  Normalise them here.
+    foreach pin {finnix finnox} {
+        set pin_obj [get_bd_intf_pins /instrumentation_wrap_0/$pin -quiet]
+        if {$pin_obj ne ""} {
+            set_property CONFIG.FREQ_HZ $clk_freq_hz $pin_obj
+        }
+    }
 }
 
 save_bd_design

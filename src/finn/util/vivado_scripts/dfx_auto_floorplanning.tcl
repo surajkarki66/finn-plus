@@ -251,25 +251,33 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
                     #highlight_objects -color yellow [get_pblocks *]
                     #unhighlight_objects [get_pblocks *]
 
-                    set avail_slices [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {SITE_TYPE =~ "SLICE*"}]]
-                    set avail_luts   [expr {$avail_slices * 8}]
-                    set avail_brams  [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {NAME =~ "RAMB36_*"}]]
-                    set avail_dsps   [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {SITE_TYPE == "DSP48E2"}]]
+                    set avail_slices  [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {SITE_TYPE =~ "SLICE*"}]]
+                    set avail_luts    [expr {$avail_slices * 8}]
+                    # In UltraScale+: 1 CARRY8 per SLICE, 16 FF/latch sites per SLICE
+                    set avail_carries [expr {$avail_slices}]
+                    set avail_ffs     [expr {$avail_slices * 16}]
+                    set avail_brams   [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {NAME =~ "RAMB36_*"}]]
+                    set avail_dsps    [llength [get_sites -of_objects [get_pblocks $pblock_name] -filter {SITE_TYPE == "DSP48E2"}]]
 
                     # Update best-seen for failure diagnostics
-                    if {$avail_luts  > $best_avail_luts}  { set best_avail_luts  $avail_luts  }
-                    if {$avail_brams > $best_avail_brams} { set best_avail_brams $avail_brams }
-                    if {$avail_dsps  > $best_avail_dsps}  { set best_avail_dsps  $avail_dsps  }
+                    if {$avail_luts    > $best_avail_luts}    { set best_avail_luts    $avail_luts    }
+                    if {$avail_brams   > $best_avail_brams}   { set best_avail_brams   $avail_brams   }
+                    if {$avail_dsps    > $best_avail_dsps}    { set best_avail_dsps    $avail_dsps    }
+                    if {$avail_carries > $best_avail_carries} { set best_avail_carries $avail_carries }
+                    if {$avail_ffs     > $best_avail_ffs}     { set best_avail_ffs     $avail_ffs     }
 
                     # Annotate with which resources are still short for easier scanning
                     set short_tags ""
-                    if {$avail_luts  < $req_luts}  { append short_tags " [SHORT:LUTs]"  }
-                    if {$avail_brams < $req_brams} { append short_tags " [SHORT:BRAMs]" }
-                    if {$avail_dsps  < $req_dsps}  { append short_tags " [SHORT:DSPs]"  }
+                    if {$avail_luts    < $req_luts}    { append short_tags " \[SHORT:LUTs\]"   }
+                    if {$avail_brams   < $req_brams}   { append short_tags " \[SHORT:BRAMs\]"  }
+                    if {$avail_dsps    < $req_dsps}    { append short_tags " \[SHORT:DSPs\]"   }
+                    if {$avail_carries < $req_carries} { append short_tags " \[SHORT:CARRY8\]" }
+                    if {$avail_ffs     < $req_ffs}     { append short_tags " \[SHORT:FFs\]"    }
 
-                    puts "    CR_X${ci_start}..${ci_end} | SLICE X${sx_start}..${sx_end} Y${slice_y_floor}..${slice_y_ceil} | RAMB36 Y${ramb_y_floor}..${ramb_y_ceil} | DSP Y${dsp_y_floor}..${dsp_y_ceil}  ->  LUTs: $avail_luts/$req_luts  BRAMs: $avail_brams/$req_brams  DSPs: $avail_dsps/$req_dsps${short_tags}"
+                    puts "    CR_X${ci_start}..${ci_end} | SLICE X${sx_start}..${sx_end} Y${slice_y_floor}..${slice_y_ceil} | RAMB36 Y${ramb_y_floor}..${ramb_y_ceil} | DSP Y${dsp_y_floor}..${dsp_y_ceil}  ->  LUTs: $avail_luts/$req_luts  BRAMs: $avail_brams/$req_brams  DSPs: $avail_dsps/$req_dsps  CARRY8: $avail_carries/$req_carries  FFs: $avail_ffs/$req_ffs${short_tags}"
 
-                    if {$avail_luts >= $req_luts && $avail_brams >= $req_brams && $avail_dsps >= $req_dsps} {
+                    if {$avail_luts >= $req_luts && $avail_brams >= $req_brams && $avail_dsps >= $req_dsps \
+                            && $avail_carries >= $req_carries && $avail_ffs >= $req_ffs} {
                         set passed 1
                     }
                 }
@@ -364,30 +372,43 @@ proc query_cell_resources {cell_path} {
 
     set report [report_utilization -cells [get_cells $cell_path] -return_string]
 
-    set luts    0
-    set ramb36  0
-    set ramb18  0
-    set dsps    0
-    set carries 0
-    set ffs     0
+    puts "  --- report_utilization output for $cell_path ---"
+    puts $report
+    puts "  --- end report_utilization ---"
+
+    set luts        0
+    set bram_tiles  0
+    set ramb36      0
+    set ramb18      0
+    set dsps        0
+    set carries     0
+    set ffs         0
 
     foreach line [split $report "\n"] {
         set line [string trim $line]
         # Match table rows: "| <Name> | <Used> | ..."
-        # LUT variants
-        if {[regexp {^\|\s+Slice LUTs\s*\*?\s*\|\s+(\d+)\s*\|} $line -> val]} {
+        # LUT variants — Vivado uses "CLB LUTs*", "Slice LUTs*", or "Total LUTs" depending on
+        # device family and report style.  Accept all three, first match wins.
+        if {[regexp {^\|\s+CLB LUTs\s*\*?\s*\|\s+(\d+)\s*\|} $line -> val]} {
+            set luts $val
+        } elseif {$luts == 0 && [regexp {^\|\s+Slice LUTs\s*\*?\s*\|\s+(\d+)\s*\|} $line -> val]} {
             set luts $val
         } elseif {$luts == 0 && [regexp {^\|\s+Total LUTs\s*\|\s+(\d+)\s*\|} $line -> val]} {
             set luts $val
         }
-        # RAMB36
+        # Block RAM Tile — already expressed in RAMB36 equivalents by Vivado
+        # (2 x RAMB18 count as 1 tile), so prefer this row over the manual sum.
+        if {[regexp {^\|\s+Block RAM Tile\s*\|\s+(\d+)\s*\|} $line -> val]} {
+            set bram_tiles $val
+        }
+        # RAMB36 fallback
         if {[regexp {^\|\s+RAMB36/FIFO\*?\s*\|\s+(\d+)\s*\|} $line -> val]} {
             set ramb36 $val
         } elseif {$ramb36 == 0 && [regexp {^\|\s+RAMB36\b[^|]*\|\s+(\d+)\s*\|} $line -> val]} {
             set ramb36 $val
         }
-        # RAMB18
-        if {[regexp {^\|\s+RAMB18\b[^|]*\|\s+(\d+)\s*\|} $line -> val]} {
+        # RAMB18 fallback (match only the aggregate row, not "RAMB18E2 only" sub-row)
+        if {[regexp {^\|\s+RAMB18\s*\|\s+(\d+)\s*\|} $line -> val]} {
             set ramb18 $val
         }
         # DSP – covers DSP48E2, DSPs, DSP Blocks
@@ -400,10 +421,12 @@ proc query_cell_resources {cell_path} {
         if {[regexp {^\|\s+CARRY8\s*\|\s+(\d+)\s*\|} $line -> val]} {
             set carries $val
         }
-        # Slice Registers (FFs + latches, up to 16 per SLICE in UltraScale+).
-        # Prefer the aggregate "Slice Registers" row; fall back to finer-grained
-        # alternatives that appear in some Vivado versions or report styles.
-        if {[regexp {^\|\s+Slice Registers\s*\|\s+(\d+)\s*\|} $line -> val]} {
+        # CLB/Slice Registers (FFs + latches, up to 16 per SLICE in UltraScale+).
+        # Vivado uses "CLB Registers" on UltraScale+ and "Slice Registers" on older families.
+        # Fall back to the finer-grained "Register as Flip Flop" sub-row if neither appears.
+        if {[regexp {^\|\s+CLB Registers\s*\|\s+(\d+)\s*\|} $line -> val]} {
+            set ffs $val
+        } elseif {$ffs == 0 && [regexp {^\|\s+Slice Registers\s*\|\s+(\d+)\s*\|} $line -> val]} {
             set ffs $val
         } elseif {$ffs == 0 && [regexp {^\|\s+Register as Flip Flop\s*\|\s+(\d+)\s*\|} $line -> val]} {
             set ffs $val
@@ -412,8 +435,13 @@ proc query_cell_resources {cell_path} {
         }
     }
 
-    # Convert RAMB18 to RAMB36 equivalents (ceil)
-    set brams [expr {$ramb36 + int(ceil(double($ramb18) / 2.0))}]
+    # Prefer the "Block RAM Tile" count (already in RAMB36 equivalents).
+    # Fall back to manual sum if that row was absent.
+    if {$bram_tiles > 0} {
+        set brams $bram_tiles
+    } else {
+        set brams [expr {$ramb36 + int(ceil(double($ramb18) / 2.0))}]
+    }
 
     puts "  query_cell_resources $cell_path -> LUTs=$luts BRAMs=$brams DSPs=$dsps CARRY8=$carries FFs=$ffs"
     return [dict create luts $luts brams $brams dsps $dsps carries $carries ffs $ffs]
