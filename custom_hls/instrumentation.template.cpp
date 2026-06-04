@@ -64,11 +64,13 @@
  #include <algorithm>
 
  // Module Configuration
- constexpr unsigned  PENDING = @PENDING@; // Max. feature maps in flight
- constexpr unsigned  ILEN    = @ILEN@;    // Input words per IFM
- constexpr unsigned  OLEN    = @OLEN@;    // Output words per OFM
- constexpr unsigned  KO      = @KO@;      // Subwords within OFM transaction word
- constexpr unsigned  AVG_N   = @AVG_N@;   // Max frames in averaging window
+ constexpr unsigned  PENDING          = @PENDING@;          // Max. feature maps in flight
+ constexpr unsigned  ILEN             = @ILEN@;             // Input words per IFM
+ constexpr unsigned  OLEN             = @OLEN@;             // Output words per OFM
+ constexpr unsigned  KO               = @KO@;               // Subwords within OFM transaction word
+ constexpr unsigned  AVG_N            = @AVG_N@;            // Max frames in averaging window
+ constexpr unsigned  TUSER_WIDTH      = @TUSER_WIDTH@;      // Width of tUSER field on finnix output
+ constexpr unsigned  NUM_TUSER_VALUES = @NUM_TUSER_VALUES@; // Number of round-robin tUSER values (1 = fixed at 0)
  using  TI = @TI@;  // IFM transaction word
  using  TO = @TO@;  // OFM transaction word
 
@@ -147,12 +149,13 @@
      typename  TO
  >
  void instrument(
-     hls::stream<TI> &finnix,
+     hls::stream<hls::axis<TI, TUSER_WIDTH, 0, 0>> &finnix,
      hls::stream<TO> &finnox,
-     ap_uint<32>  cfg,   	// [0] - 0:hold, 1:lfsr; [31:1] - minimum interval (cycles) between IFM starts
-     ap_uint<32>  seed,  	// [31:16] - LFSR seed (only upper 16 bits used)
-     ap_uint<32>  avg_n, 	// [31:0] - averaging window size (1..AVG_N frames)
-     ap_uint<32> &status,	// [0] - timestamp overflow; [1] - timestamp underflow
+     ap_uint<32>  cfg,          // [0] - 0:hold, 1:lfsr; [31:1] - minimum interval (cycles) between IFM starts
+     ap_uint<32>  seed,         // [31:16] - LFSR seed (only upper 16 bits used)
+     ap_uint<32>  avg_n,        // [31:0] - averaging window size (1..AVG_N frames)
+     ap_uint<32>  mux_interval, // frames each tUSER value is held before advancing (0 = fixed at 0)
+     ap_uint<32> &status,       // [0] - timestamp overflow; [1] - timestamp underflow
      ap_uint<32> &latency,
      ap_uint<32> &interval,
      ap_uint<32> &checksum,
@@ -184,6 +187,13 @@
  #pragma HLS reset variable=icnt
  #pragma HLS reset variable=lfsr off
  #pragma HLS reset variable=last_ifm_start
+
+     // tUSER schedule state
+     static ap_uint<TUSER_WIDTH>  tuser_val     = 0; // current tUSER value driven on finnix
+     static ap_uint<32>           frame_mux_cnt = 0; // frames elapsed at current tuser_val
+ #pragma HLS reset variable=tuser_val
+ #pragma HLS reset variable=frame_mux_cnt
+
      if(!finnix.full()) {
 
          bool const  first = icnt == 0;
@@ -217,9 +227,26 @@
          }
 
          if(wr) {
-             finnix.write_nb(lfsr);
+             bool const  frame_last = (icnt == ILEN-1);
+             hls::axis<TI, TUSER_WIDTH, 0, 0>  beat;
+             beat.data = lfsr;
+             beat.keep = -1;
+             beat.user = tuser_val;
+             beat.last = frame_last ? ap_uint<1>(1) : ap_uint<1>(0);
+             finnix.write_nb(beat);
              if(first)  timestamp_ovf |= !timestamps.write_nb(cnt_clk);
-             icnt = icnt == ILEN-1? decltype(icnt)(0) : decltype(icnt)(icnt + 1);
+             // After the last beat of a frame, advance the tUSER round-robin schedule
+             if(frame_last && NUM_TUSER_VALUES > 1 && mux_interval > 0) {
+                 if(frame_mux_cnt >= ap_uint<32>(mux_interval - 1)) {
+                     frame_mux_cnt = 0;
+                     tuser_val = (tuser_val == ap_uint<TUSER_WIDTH>(NUM_TUSER_VALUES - 1))
+                                 ? ap_uint<TUSER_WIDTH>(0)
+                                 : ap_uint<TUSER_WIDTH>(tuser_val + 1);
+                 } else {
+                     frame_mux_cnt++;
+                 }
+             }
+             icnt = frame_last? decltype(icnt)(0) : decltype(icnt)(icnt + 1);
          }
      }
 
@@ -375,11 +402,12 @@
  } // instrument()
 
  void instrumentation_wrapper(
-     hls::stream<TI> &finnix,
+     hls::stream<hls::axis<TI, TUSER_WIDTH, 0, 0>> &finnix,
      hls::stream<TO> &finnox,
      ap_uint<32>  cfg,
      ap_uint<32>  seed,
      ap_uint<32>  avg_n,
+     ap_uint<32>  mux_interval,
      ap_uint<32> &status,
      ap_uint<32> &latency,
      ap_uint<32> &interval,
@@ -396,6 +424,7 @@
  #pragma HLS interface s_axilite bundle=ctrl port=cfg
  #pragma HLS interface s_axilite bundle=ctrl port=seed
  #pragma HLS interface s_axilite bundle=ctrl port=avg_n
+ #pragma HLS interface s_axilite bundle=ctrl port=mux_interval
  #pragma HLS interface s_axilite bundle=ctrl port=status
  #pragma HLS interface s_axilite bundle=ctrl port=latency
  #pragma HLS interface s_axilite bundle=ctrl port=interval
@@ -409,7 +438,7 @@
  #pragma HLS interface ap_ctrl_none port=return
 
  #pragma HLS dataflow disable_start_propagation
-     static hls::stream<TI>  finnix0;
+     static hls::stream<hls::axis<TI, TUSER_WIDTH, 0, 0>>  finnix0;
      static hls::stream<Payload<TO>::type>  finnox0;
  #pragma HLS stream variable=finnix0 depth=2
  #pragma HLS stream variable=finnox0 depth=2
@@ -418,7 +447,7 @@
      move(finnox, finnox0);
 
      // Main
-     instrument<PENDING, ILEN, OLEN, KO, AVG_N>(finnix0, finnox0, cfg, seed, avg_n, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
+     instrument<PENDING, ILEN, OLEN, KO, AVG_N>(finnix0, finnox0, cfg, seed, avg_n, mux_interval, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
 
      // FIFO -> AXI-Stream
      move(finnix0, finnix);

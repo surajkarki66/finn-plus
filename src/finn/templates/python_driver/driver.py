@@ -603,10 +603,12 @@ class FINNInstrumentationOverlay(Overlay):
             offset=self.ip_dict["axi_gpio_0"]["registers"]["GPIO_DATA"]["address_offset"], value=0
         )
 
-    def start_accelerator(self, throttle_interval=0, avg_window_size=64):
+    def start_accelerator(self, throttle_interval=0, avg_window_size=64, mux_interval=0):
         """
         Start the accelerator. Input is throttled to the specified interval (in cycles)
         by pausing after each FM transmission. A throttle_interval of 0 means no throttling.
+        mux_interval controls tUSER round-robin scheduling: 0 = fixed tUSER=0,
+        N = advance tUSER every N frames.
         """
         # Set seed
         lfsr_seed = (self.seed << 16) & 0xFFFF0000  # upper 16 bits
@@ -615,6 +617,9 @@ class FINNInstrumentationOverlay(Overlay):
         # Set average measurement window size (in frames),
         # maximum is configured in build config, default value = 64
         self.instrumentation_write("avg_n", avg_window_size)
+
+        # Set tUSER multiplexing interval (frames per tUSER value, 0 = fixed)
+        self.instrumentation_write("mux_interval", mux_interval)
 
         # Start operation
         self.instrumentation_write("cfg", (throttle_interval << 1) | 1)  # bit 0 = start
@@ -681,10 +686,11 @@ class FINNInstrumentationOverlay(Overlay):
         """Run instrumentation experiment and save report."""
         runtime = kwargs.get("runtime")
         report_dir = kwargs.get("report_dir")
+        mux_interval = kwargs.get("mux_interval", 0)
 
         # start accelerator
         print("Running accelerator for %d seconds.." % runtime)
-        self.start_accelerator()
+        self.start_accelerator(mux_interval=mux_interval)
 
         # let it run for specified runtime
         time.sleep(runtime)
