@@ -62,14 +62,14 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
     set cr_x_indices {}
     foreach cr [get_clock_regions] {
         if {[regexp {X(\d+)Y(\d+)} [get_property NAME $cr] -> crx cry]} {
-            # ONLY CONSIDER CR COLUMNS 1-4
-            if {$crx >= 1 && $crx <= 4} {
+            # ONLY CONSIDER CR COLUMNS 1-5
+            if {$crx >= 1 && $crx <= 5} {
                 if {[lsearch -exact $cr_x_indices $crx] < 0} { lappend cr_x_indices $crx }
                 # Prefer the Y=0 row as the column reference object
                 if {$cry == 0 || ![info exists cr_ref($crx)]} { set cr_ref($crx) $cr }
             }
             # Cache a Y1 CR from within the allowed columns for the initial floor reference
-            if {$crx >= 1 && $crx <= 4 && $cry == 1 && ![info exists cr_y1_ref]} { set cr_y1_ref $cr }
+            if {$crx >= 1 && $crx <= 5 && $cry == 1 && ![info exists cr_y1_ref]} { set cr_y1_ref $cr }
         }
     }
     set cr_x_indices [lsort -integer $cr_x_indices]
@@ -143,18 +143,11 @@ proc generate_multi_dfx_pblocks {pblock_configs_list} {
     set height_step $cr_height
     puts "  CR row height: ${cr_height} SLICE rows | step: ${height_step} SLICE rows"
 
-    # Start floors at bottom of CR row Y1 if a suitable reference was found, else Y=0
+    # Start floors at the bottom of CR row Y0 (SLICE/RAMB36/DSP Y=0).
     set slice_y_floor 0
     set ramb_y_floor  0
     set dsp_y_floor   0
-    if {[info exists cr_y1_ref]} {
-        set slice_y_floor [expr {$max_y0_s + 1}]
-        set ramb_y_floor  [expr {$max_y0_r + 1}]
-        set dsp_y_floor   [expr {$max_y0_d + 1}]
-        puts "  Initial floors (CR row Y1): SLICE Y${slice_y_floor} | RAMB36 Y${ramb_y_floor} | DSP Y${dsp_y_floor}"
-    } else {
-        puts "  WARNING: No CR Y1 found in columns 1-4 — starting from Y=0"
-    }
+    puts "  Initial floors (CR row Y0): SLICE Y0 | RAMB36 Y0 | DSP Y0"
 
     foreach config $pblock_configs_list {
         set cell_name   [dict get $config cell]
