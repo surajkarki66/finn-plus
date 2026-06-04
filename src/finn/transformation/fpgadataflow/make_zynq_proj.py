@@ -1204,6 +1204,10 @@ class MakeZYNQProject(Transformation):
             body_model = ModelWrapper(non_pr_sdp_inst.get_nodeattr("model"))
 
             body_ifnames = eval(body_model.get_metadata_prop("vivado_stitch_ifnames"))
+            if not body_ifnames.get("s_axis") or not body_ifnames.get("m_axis"):
+                # IDMA/ODMA endpoint nodes have no bidirectional stream interface;
+                # they do not need a dfx_tuser_passthrough wrapper.
+                continue
             s_axis_name = body_ifnames["s_axis"][0][0]
             m_axis_name = body_ifnames["m_axis"][0][0]
 
