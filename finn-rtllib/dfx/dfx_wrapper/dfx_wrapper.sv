@@ -32,10 +32,13 @@
 
 `timescale 1ns/1ps
 module dfx_wrapper #(
-    parameter int DATA_WIDTH   = 64,   // AXI-Stream tdata width (bits)
-    parameter int TUSER_WIDTH  = 2,    // tUSER width (bits); RM_ID is TUSER_WIDTH bits
-    parameter int NUM_RM       = 2,    // number of Reconfigurable Modules
-    parameter int RESET_CYCLES = 16    // clock cycles to assert accel_reset_n after reconfig
+    parameter int DATA_WIDTH      = 64,  // AXI-Stream tdata width (bits)
+    parameter int TUSER_WIDTH     = 2,   // tUSER width (bits); RM_ID is TUSER_WIDTH bits
+    parameter int NUM_RM          = 2,   // number of Reconfigurable Modules
+    parameter int RESET_CYCLES    = 16,  // clock cycles to assert accel_reset_n after reconfig
+    parameter int NUM_OUTPUT_BEATS = 1   // AXI-Stream beats per output frame; used to
+                                         // regenerate m_axis_tlast without relying on the
+                                         // BDC generating rp_s_axis_tlast internally
 ) (
     input  logic                    aclk,
     input  logic                    aresetn,
@@ -77,11 +80,12 @@ module dfx_wrapper #(
     // --------------------------------------------------------------------------
     // Derived parameters
     // --------------------------------------------------------------------------
-    localparam int RM_ID_W     = (NUM_RM > 1) ? $clog2(NUM_RM) : 1;
-    localparam int RESET_CNT_W = $clog2(RESET_CYCLES + 1);
+    localparam int RM_ID_W      = (NUM_RM > 1) ? $clog2(NUM_RM) : 1;
+    localparam int RESET_CNT_W  = $clog2(RESET_CYCLES + 1);
+    localparam int OUT_CNT_W    = (NUM_OUTPUT_BEATS > 1) ? $clog2(NUM_OUTPUT_BEATS) : 1;
     // Width of the frames-in-flight counter. 8 bits supports up to 255 concurrent
     // frames inside the BDC pipeline, which is far more than any realistic FINN pipeline.
-    localparam int INFLIGHT_W  = 8;
+    localparam int INFLIGHT_W   = 8;
 
     // --------------------------------------------------------------------------
     // State encoding
@@ -105,8 +109,9 @@ module dfx_wrapper #(
     logic [RM_ID_W-1:0]     pending_rm_id;
     logic [RESET_CNT_W-1:0] reset_cnt;
     logic [INFLIGHT_W-1:0]  frames_in_flight;
-    logic [TUSER_WIDTH-1:0] tuser_reg;   // holds full tUSER of the current/most-recent frame
+    logic [TUSER_WIDTH-1:0] tuser_reg;     // holds full tUSER of the current/most-recent frame
     logic                   decouple_prev; // for edge detection
+    logic [OUT_CNT_W-1:0]   out_beat_cnt;  // counts accepted output beats for tLast regeneration
 
     // --------------------------------------------------------------------------
     // Input pass-through to BDC
@@ -127,9 +132,16 @@ module dfx_wrapper #(
     logic output_forward;
     assign output_forward = (state == S_INFERENCE) | (state == S_WAIT_FLUSH);
 
+    // Output beat counter: counts accepted output beats and asserts out_beat_last
+    // every NUM_OUTPUT_BEATS beats.  This regenerates m_axis_tlast independently
+    // of rp_s_axis_tlast, so the BDC (PR bodies) do not need to generate tLast
+    // internally (i.e. InsertTLastMarker is not required in PR bodies).
+    logic out_beat_last;
+    assign out_beat_last = (out_beat_cnt == OUT_CNT_W'(NUM_OUTPUT_BEATS - 1));
+
     assign m_axis_tdata     = rp_s_axis_tdata;
     assign m_axis_tvalid    = rp_s_axis_tvalid & output_forward;
-    assign m_axis_tlast     = rp_s_axis_tlast;
+    assign m_axis_tlast     = out_beat_last;
     // Forward the full upstream tUSER vector so downstream wrappers (dfx or passthrough)
     // receive the RM-selection bits intended for their own stage. tuser_reg is latched
     // in S_CHECK_TUSER from the first beat of each frame; since the FSM blocks new
@@ -147,14 +159,17 @@ module dfx_wrapper #(
     // Frames-in-flight tracking
     //   frame_in : a complete frame boundary (tLast) entered the BDC this cycle.
     //              Gated by input_active so only counted in S_INFERENCE.
+    //              Uses rp_m_axis_tlast which is forwarded from s_axis_tlast (DMA).
     //   frame_out: a complete frame boundary exited the BDC this cycle.
+    //              Uses out_beat_last (the beat counter) rather than rp_s_axis_tlast
+    //              because PR bodies no longer generate tLast internally.
     //              Gated by output_forward (S_INFERENCE | S_WAIT_FLUSH) to avoid
     //              spurious counts while the AMD dfx_decoupler drives tvalid=0.
     // --------------------------------------------------------------------------
     logic frame_in;
     logic frame_out;
     assign frame_in  = rp_m_axis_tvalid & rp_m_axis_tready & rp_m_axis_tlast;
-    assign frame_out = output_forward & rp_s_axis_tvalid & rp_s_axis_tready & rp_s_axis_tlast;
+    assign frame_out = output_forward & rp_s_axis_tvalid & rp_s_axis_tready & out_beat_last;
 
     always_ff @(posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
@@ -166,6 +181,18 @@ module dfx_wrapper #(
                 default: ; // 2'b00 or 2'b11 — net change is zero
             endcase
         end
+    end
+
+    // --------------------------------------------------------------------------
+    // Output beat counter
+    //   Counts accepted output beats (output_forward & tvalid & tready).
+    //   Resets to 0 after every NUM_OUTPUT_BEATS beats (i.e. on out_beat_last).
+    // --------------------------------------------------------------------------
+    always_ff @(posedge aclk or negedge aresetn) begin
+        if (!aresetn)
+            out_beat_cnt <= '0;
+        else if (output_forward & rp_s_axis_tvalid & rp_s_axis_tready)
+            out_beat_cnt <= out_beat_last ? '0 : out_beat_cnt + 1'b1;
     end
 
     // --------------------------------------------------------------------------

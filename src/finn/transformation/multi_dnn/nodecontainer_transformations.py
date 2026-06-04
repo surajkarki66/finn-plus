@@ -10,7 +10,6 @@ from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
 from finn.transformation.fpgadataflow.hlssynth_ip import HLSSynthIP
 from finn.transformation.fpgadataflow.insert_dwc import InsertDWC
 from finn.transformation.fpgadataflow.insert_fifo import InsertFIFO
-from finn.transformation.fpgadataflow.insert_tlastmarker import InsertTLastMarker
 from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.set_fifo_depths import (
     InsertAndSetFIFODepths,
@@ -99,13 +98,6 @@ class GenerateNodeContainerStitched(Transformation):
                         if self.cfg.split_large_fifos:
                             node_model = node_model.transform(SplitLargeFIFOs())
                         node_model = node_model.transform(RemoveShallowFIFOs())
-                        # Insert tLast markers at both the input and output of each PR body.
-                        # The output marker lets the DFX Wrapper detect when a frame has fully
-                        # exited the pipeline (flush detection). The input marker ensures the
-                        # first FINN op inside the BDC sees proper frame boundaries even if the
-                        # upstream does not generate tLast. It also generates the s_axis_tlast
-                        # signal used by the wrapper's frames-in-flight counter.
-                        node_model = node_model.transform(InsertTLastMarker(both=True))
                         node_model = node_model.transform(
                             PrepareIP(
                                 self.cfg._resolve_fpga_part(), self.cfg._resolve_hls_clk_period()

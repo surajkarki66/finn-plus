@@ -3,10 +3,11 @@
 // set_property CONFIG.* on the bd cell.
 `timescale 1ns/1ps
 module dfx_wrapper_wrapper #(
-    parameter DATA_WIDTH   = 64,
-    parameter TUSER_WIDTH  = 2,
-    parameter NUM_RM       = 2,
-    parameter RESET_CYCLES = 16
+    parameter DATA_WIDTH      = 64,
+    parameter TUSER_WIDTH     = 2,
+    parameter NUM_RM          = 2,
+    parameter RESET_CYCLES    = 16,
+    parameter NUM_OUTPUT_BEATS = 1
 ) (
     input  wire                     aclk,
     input  wire                     aresetn,
@@ -40,10 +41,11 @@ module dfx_wrapper_wrapper #(
 );
 
     dfx_wrapper #(
-        .DATA_WIDTH   (DATA_WIDTH),
-        .TUSER_WIDTH  (TUSER_WIDTH),
-        .NUM_RM       (NUM_RM),
-        .RESET_CYCLES (RESET_CYCLES)
+        .DATA_WIDTH      (DATA_WIDTH),
+        .TUSER_WIDTH     (TUSER_WIDTH),
+        .NUM_RM          (NUM_RM),
+        .RESET_CYCLES    (RESET_CYCLES),
+        .NUM_OUTPUT_BEATS(NUM_OUTPUT_BEATS)
     ) inst (
         .aclk                (aclk),
         .aresetn             (aresetn),

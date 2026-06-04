@@ -1073,6 +1073,14 @@ class MakeZYNQProject(Transformation):
             s_axis_name = body_0_ifnames["s_axis"][0][0]
             m_axis_name = body_0_ifnames["m_axis"][0][0]
 
+            # NUM_OUTPUT_BEATS: number of AXI-Stream beats per output frame.
+            # Derived from the last node of the first PR body (all bodies are
+            # functionally equivalent and share the same output shape).
+            # Matches the formula used by dfx_tuser_passthrough and sw_wrapper.
+            last_node_inst = getCustomOp(body_0_model.graph.node[-1])
+            out_shape = last_node_inst.get_folded_output_shape()
+            num_output_beats = int(math.prod(out_shape[1:-1]))
+
             # Create per-region DFX Wrapper (replaces global dfx_schedule + dfx_finn_decouple)
             pr_config.append(
                 "create_bd_cell -type module -reference dfx_wrapper_wrapper dfx_wrapper_%s"
@@ -1082,9 +1090,10 @@ class MakeZYNQProject(Transformation):
                 "set_property -dict [list "
                 "CONFIG.DATA_WIDTH {%d} "
                 "CONFIG.TUSER_WIDTH {%d} "
-                "CONFIG.NUM_RM {%d}] "
+                "CONFIG.NUM_RM {%d} "
+                "CONFIG.NUM_OUTPUT_BEATS {%d}] "
                 "[get_bd_cells dfx_wrapper_%s]"
-                % (data_width, global_tuser_width, num_bodies, sdp_name)
+                % (data_width, global_tuser_width, num_bodies, num_output_beats, sdp_name)
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_wrapper_%s/aclk] "
