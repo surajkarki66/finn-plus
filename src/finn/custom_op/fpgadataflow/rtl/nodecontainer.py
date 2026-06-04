@@ -38,6 +38,10 @@ class NodeContainer(HWCustomOp, RTLBackend):
             "bodies": ("i", True, 0),
             "multi_dnn_type": ("s", True, ""),
             "pblock": ("s", False, ""),
+            # Width of the tUSER field on the external AXI-Stream interfaces of the
+            # DFX Wrapper. 0 means "auto" (computed from ceil(log2(bodies)) at BD
+            # generation time). Only meaningful for partial_reconfiguration type.
+            "tuser_width": ("i", False, 0),
             **b,
         }
         my_attrs.update(HWCustomOp.get_nodeattr_types(self))
