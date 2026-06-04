@@ -438,18 +438,13 @@
  #pragma HLS interface ap_ctrl_none port=return
 
  #pragma HLS dataflow disable_start_propagation
-     static hls::stream<hls::axis<TI, TUSER_WIDTH, 0, 0>>  finnix0;
      static hls::stream<Payload<TO>::type>  finnox0;
- #pragma HLS stream variable=finnix0 depth=2
  #pragma HLS stream variable=finnox0 depth=2
 
      // AXI-Stream -> FIFO
      move(finnox, finnox0);
 
-     // Main
-     instrument<PENDING, ILEN, OLEN, KO, AVG_N>(finnix0, finnox0, cfg, seed, avg_n, mux_interval, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
-
-     // FIFO -> AXI-Stream
-     move(finnix0, finnix);
+     // Main — write directly to the finnix interface port (avoids internal hls::axis stream)
+     instrument<PENDING, ILEN, OLEN, KO, AVG_N>(finnix, finnox0, cfg, seed, avg_n, mux_interval, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
 
  } // instrumentation_wrapper
