@@ -60,17 +60,26 @@ module dfx_tuser_passthrough #(
 
     // --------------------------------------------------------------------------
     // tUSER hold register
-    //   Latches the full tUSER vector on each accepted input frame boundary.
+    //   Latches the full tUSER vector on the FIRST accepted beat of each input
+    //   frame (consistent with dfx_wrapper and sw_wrapper which both sample
+    //   tUSER in S_CHECK_TUSER before admitting the first beat).
+    //   A frame_start flag tracks whether the next accepted beat is the first
+    //   of a new frame: it is set after reset and after every accepted tLast.
     //   All in-flight frames share the same tUSER (dfx_wrapper blocks new input
-    //   during reconfiguration), so no FIFO is needed.
+    //   during reconfiguration), so a single hold register is sufficient.
     // --------------------------------------------------------------------------
     logic [TUSER_WIDTH-1:0] tuser_reg;
+    logic                   frame_start; // 1 when the next accepted beat is the first of a frame
 
     always_ff @(posedge aclk or negedge aresetn) begin
-        if (!aresetn)
-            tuser_reg <= '0;
-        else if (s_axis_tvalid & s_axis_tready & s_axis_tlast)
-            tuser_reg <= s_axis_tuser;
+        if (!aresetn) begin
+            tuser_reg   <= '0;
+            frame_start <= 1'b1;
+        end else if (s_axis_tvalid & s_axis_tready) begin
+            if (frame_start)
+                tuser_reg <= s_axis_tuser;
+            frame_start <= s_axis_tlast; // next beat is first of a frame iff this was the last
+        end
     end
 
     // --------------------------------------------------------------------------
