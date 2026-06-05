@@ -1011,10 +1011,12 @@ class MakeZYNQProject(Transformation):
                 "/xilinx/dfx_decoupler_v1_0/tcl/api.tcl -notrace"
             )
 
-            reset_net_name = "proc_sys_reset_dfx"
+            reset_aresetn_pin = "proc_sys_reset_dfx/peripheral_aresetn"
         else:
-            # SW-only: use the main system reset (proc_sys_reset_0 always exists)
-            reset_net_name = "proc_sys_reset_0"
+            # SW-only: connect to the existing reset net via smartconnect_0/aresetn.
+            # The template connects that pin to the peripheral_aresetn of the
+            # automation-created rst_zynq_ps_* cell, so it carries the same signal.
+            reset_aresetn_pin = "smartconnect_0/aresetn"
 
         # Compute a single consistent tUSER width for the entire accelerator so that
         # all wrapper modules use the same TUSER_WIDTH and tUSER bits propagate
@@ -1101,7 +1103,7 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_wrapper_%s/aresetn] "
-                "[get_bd_pins %s/peripheral_aresetn]" % (sdp_name, reset_net_name)
+                "[get_bd_pins %s]" % (sdp_name, reset_aresetn_pin)
             )
 
             # Create per-region AMD DFX Decoupler on the BDC output side
@@ -1241,7 +1243,7 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_tuser_passthrough_%s/aresetn] "
-                "[get_bd_pins %s/peripheral_aresetn]" % (sdp_name, reset_net_name)
+                "[get_bd_pins %s]" % (sdp_name, reset_aresetn_pin)
             )
 
             # Input side: find the upstream master, disconnect from SDP,
@@ -1296,7 +1298,18 @@ class MakeZYNQProject(Transformation):
             body_model = ModelWrapper(sw_sdp_inst.get_nodeattr("model"))
             body_ifnames = eval(body_model.get_metadata_prop("vivado_stitch_ifnames"))
 
-            s_axis_name, data_in_width = body_ifnames["s_axis"][0]
+            # s_axis list contains both the data stream and the tap port (s_axis_tap_id_*).
+            # Separate them by name prefix.
+            s_axis_data = [
+                (n, w) for n, w in body_ifnames["s_axis"] if not n.startswith("s_axis_tap")
+            ]
+            s_axis_tap_list = [
+                (n, w) for n, w in body_ifnames["s_axis"] if n.startswith("s_axis_tap")
+            ]
+            assert s_axis_data, "No data s_axis interface found on SW SDP %s" % sdp_name
+            assert s_axis_tap_list, "No s_axis_tap interface found on SW SDP %s" % sdp_name
+            s_axis_name, data_in_width = s_axis_data[0]
+            s_axis_tap_name = s_axis_tap_list[0][0]
             m_axis_name, data_out_width = body_ifnames["m_axis"][0]
 
             # Locate the selectable_weights NC to get num_sets and output beat count.
@@ -1339,7 +1352,7 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins sw_wrapper_%s/aresetn] "
-                "[get_bd_pins %s/peripheral_aresetn]" % (sdp_name, reset_net_name)
+                "[get_bd_pins %s]" % (sdp_name, reset_aresetn_pin)
             )
 
             # Input side: redirect upstream → sw_wrapper/s_axis → SDP/s_axis_name
@@ -1382,11 +1395,11 @@ class MakeZYNQProject(Transformation):
                 "$downstream_slave_%s" % (sdp_name, sdp_name)
             )
 
-            # Set-selection side: sw_wrapper/m_axis_setsel → SDP/s_axis_tap
+            # Set-selection side: sw_wrapper/m_axis_setsel → SDP/s_axis_tap_id_*
             pr_config.append(
                 "connect_bd_intf_net "
                 "[get_bd_intf_pins sw_wrapper_%s/m_axis_setsel] "
-                "[get_bd_intf_pins %s/s_axis_tap]" % (sdp_name, sdp_name)
+                "[get_bd_intf_pins %s/%s]" % (sdp_name, sdp_name, s_axis_tap_name)
             )
 
         for pr_sdp in pr_sdp_nodes:
@@ -1416,8 +1429,19 @@ class MakeZYNQProject(Transformation):
         pr_config.append("make_wrapper -files [get_files top.bd] -import -fileset sources_1 -top")
         pr_config.append("set_property top top_wrapper [get_filesets sources_1]")
         pr_config.append("update_compile_order -fileset sources_1")
-        pr_config.append("set_property PR_FLOW 1 [current_project]")
         pr_config.append("generate_target all [get_files top.bd]")
+
+        if not pr_sdp_nodes:
+            # SW-only mode: wrapper connections are complete. No PR configurations,
+            # pblocks, or per-body impl runs needed; the outer Vivado flow handles
+            # synthesis and implementation.
+            pr_config = "\n".join(pr_config) + "\n"
+            return pr_config
+
+        # Enable Vivado DFX implementation flow only when there are actual
+        # reconfigurable partitions. Setting this for SW-only builds would
+        # cause Vivado to require PR configurations and pblocks that don't exist.
+        pr_config.append("set_property PR_FLOW 1 [current_project]")
 
         pr_sdp_bodies = []
         pr_sdp_names = []
