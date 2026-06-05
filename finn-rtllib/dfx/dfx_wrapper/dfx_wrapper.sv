@@ -127,7 +127,14 @@ module dfx_wrapper #(
     // --------------------------------------------------------------------------
     // Output pass-through from BDC
     //   Forward rp_s_axis -> m_axis in INFERENCE and WAIT_FLUSH.
-    //   In all other states absorb rp_s_axis (tready=1) and suppress m_axis_tvalid.
+    //   In S_CHECK_TUSER: back-pressure the BDC output (tready=0) so that no
+    //     output beats are consumed while peeking at s_axis_tuser. Consuming
+    //     beats here without counting them (output_forward=0) would misalign
+    //     out_beat_cnt, causing frame_out to fire at the wrong beat and leading
+    //     to instrumentation timestamp overflow and spurious latency readings.
+    //   In all other non-forwarding states (TRIGGER..RESET): absorb rp_s_axis
+    //     (tready=1) since the AMD dfx_decoupler already drives tvalid=0 during
+    //     this window anyway; the 1'b1 is a safe drain for any residual glitches.
     // --------------------------------------------------------------------------
     logic output_forward;
     assign output_forward = (state == S_INFERENCE) | (state == S_WAIT_FLUSH);
@@ -148,7 +155,8 @@ module dfx_wrapper #(
     // input during reconfiguration all in-flight frames share the same tUSER value,
     // so a single hold register is sufficient.
     assign m_axis_tuser     = tuser_reg;
-    assign rp_s_axis_tready = output_forward ? m_axis_tready : 1'b1;
+    assign rp_s_axis_tready = output_forward    ? m_axis_tready :
+                               (state == S_CHECK_TUSER) ? 1'b0 : 1'b1;
 
     // --------------------------------------------------------------------------
     // Accelerator reset: active-low, de-asserted except in S_RESET
