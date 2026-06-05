@@ -458,10 +458,10 @@ class MakeZYNQProject(Transformation):
                         producer_idma = any(
                             s.name.startswith("IODMA") for s in producer_model.graph.output
                         )
-                        # node_model = ModelWrapper(getCustomOp(node).get_nodeattr("model"))
-                        node_odma = any(
-                            s.name.startswith("TLastMarker") for s in kernel_model.graph.input
-                        )
+                        # True when this node is the terminal output endpoint (ODMA or last SDP).
+                        # Previously detected via TLastMarker inputs, but TLastMarker is no longer
+                        # inserted in multi-DNN flows. Use the graph-level consumer check instead.
+                        node_odma = consumer == []
                         if not (producer_idma or node_odma):
                             config.append(
                                 "connect_bd_intf_net [get_bd_intf_pins %s/s_axis_%d] "
@@ -1426,6 +1426,7 @@ class MakeZYNQProject(Transformation):
             )
 
         pr_config.append("save_bd_design")
+        pr_config.append("validate_bd_design")
         pr_config.append("make_wrapper -files [get_files top.bd] -import -fileset sources_1 -top")
         pr_config.append("set_property top top_wrapper [get_filesets sources_1]")
         pr_config.append("update_compile_order -fileset sources_1")
@@ -1629,6 +1630,8 @@ class MakeZYNQProject(Transformation):
 
         pr_config.append("set pr_flow 1")
         pr_config.append("save_bd_design")
+        # Re-validate now that all wrapper connections are in place
+        pr_config.append("validate_bd_design")
         pr_config = "\n".join(pr_config) + "\n"
         return pr_config
 
