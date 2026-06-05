@@ -15,10 +15,16 @@ from networkx.classes.digraph import DiGraph
 from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.transformation.bipolar_to_xnor import ConvertBipolarMatMulToXnorPopcount
+from qonnx.transformation.general import GiveUniqueNodeNames, RemoveUnusedTensors
+from qonnx.transformation.infer_data_layouts import InferDataLayouts
+from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
 from qonnx.util.cleanup import cleanup as qonnx_cleanup
 from testing_util.test import get_test_model
 from typing import Any, Callable, cast
 
+import finn.transformation.fpgadataflow.convert_to_hw_layers as to_hw
+import finn.transformation.streamline.absorb as absorb
 from finn.builder.build_dataflow import resolve_build_steps
 from finn.builder.build_dataflow_config import DataflowBuildConfig
 from finn.builder.custom_step_library.resnet import (
@@ -26,7 +32,14 @@ from finn.builder.custom_step_library.resnet import (
     step_resnet_streamline,
     step_resnet_tidy,
 )
+from finn.transformation.fpgadataflow.minimize_accumulator_width import MinimizeAccumulatorWidth
+from finn.transformation.fpgadataflow.minimize_weight_bit_width import MinimizeWeightBitWidth
+from finn.transformation.move_reshape import RemoveCNVtoFCFlatten
+from finn.transformation.streamline import Streamline
+from finn.transformation.streamline.reorder import MakeMaxPoolNHWC, MoveScalarLinearPastInvariants
+from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.basic import make_build_dir
+from tests.end2end.test_end2end_bnn_pynq import get_folding_function
 
 # ---- RESNET 18 ----
 
@@ -125,23 +138,105 @@ def generate_mobilenet(
 
 # ---- BASIC MODELS ----
 
-basic_pre_multifpga_steps = [
-    "finn.builder.custom_step_library.general.add_preproc_divide_by_255",  # Custom step
-    "finn.builder.custom_step_library.general.add_postproc_top1",  # Custom step
-    "step_qonnx_to_finn",
-    "step_tidy_up",
-    "step_streamline",
-    "step_convert_to_hw",
-    "step_create_dataflow_partition",
-    "step_specialize_layers",
-    "step_target_fps_parallelization",
-    "step_apply_folding_config",
-    "step_minimize_bit_width",
-    "step_generate_estimate_reports",
-    "step_hw_codegen",
-    "step_hw_ipgen",
-    "step_set_fifo_depths",
-]
+
+def bnn_make_step_streamline_bnn_pynq(
+    model_type: str,
+) -> Callable[[ModelWrapper, DataflowBuildConfig], ModelWrapper]:
+    """Produce a streamline step function, depending on the incoming model type."""
+
+    def streamline(model: ModelWrapper, _: DataflowBuildConfig) -> ModelWrapper:
+        model = model.transform(absorb.AbsorbSignBiasIntoMultiThreshold())
+        # move past any reshapes to be able to streamline input scaling
+        model = model.transform(MoveScalarLinearPastInvariants())
+        model = model.transform(Streamline())
+        if "fc" not in model_type.lower():
+            model = model.transform(LowerConvsToMatMul())
+            model = model.transform(MakeMaxPoolNHWC())
+            model = model.transform(absorb.AbsorbTransposeIntoMultiThreshold())
+        model = model.transform(ConvertBipolarMatMulToXnorPopcount())
+        model = model.transform(Streamline())
+        # absorb final add-mul nodes into TopK
+        model = model.transform(absorb.AbsorbScalarMulAddIntoTopK())
+        model = model.transform(InferDataLayouts())
+        model = model.transform(RemoveUnusedTensors())
+        return model
+
+    return streamline
+
+
+def bnn_make_step_convert_to_hw(
+    topology: str, wbits: int, abits: int
+) -> Callable[[ModelWrapper, DataflowBuildConfig], ModelWrapper]:
+    """Make a custom convert_to_hw step for BNN models, based on model type."""
+    topology = topology.lower()
+
+    def convert(model: ModelWrapper, _: DataflowBuildConfig) -> ModelWrapper:
+        if topology == "tfc" and wbits == 1 and abits == 1:
+            # use standalone thresholds for tfc-w1a1 to also exercise that option
+            model = model.transform(to_hw.InferThresholdingLayer())
+        # needed for bipolar MatMul layers
+        model = model.transform(to_hw.InferBinaryMatrixVectorActivation())
+        # needed for non-bipolar MatMul layers
+        model = model.transform(to_hw.InferQuantizedMatrixVectorActivation())
+        # TopK to LabelSelect
+        model = model.transform(to_hw.InferLabelSelectLayer())
+        # input quantization (if any) to standalone thresholding
+        model = model.transform(to_hw.InferThresholdingLayer())
+        # needed for convolutions
+        if "fc" not in topology:
+            model = model.transform(to_hw.InferPool())
+            model = model.transform(to_hw.InferConvInpGen())
+            model = model.transform(RemoveCNVtoFCFlatten())
+        # get rid of Tranpose -> Tranpose identity seq
+        model = model.transform(absorb.AbsorbConsecutiveTransposes())
+        model = model.transform(GiveUniqueNodeNames())
+        model = model.transform(InferDataLayouts())
+        return model
+
+    return convert
+
+
+def bnn_make_step_fold(
+    topology: str, wbits: int, abits: int
+) -> Callable[[ModelWrapper, DataflowBuildConfig], ModelWrapper] | str:
+    """Make the folding function for the given BNN model."""
+    if topology.lower() == "sfc":
+        return "step_target_fps_parallelization"
+    folding_fxn = get_folding_function(topology.lower(), wbits, abits)
+
+    def fold(model: ModelWrapper, _: DataflowBuildConfig) -> ModelWrapper:
+        return folding_fxn(model)
+
+    return fold
+
+
+def bnn_step_minimize_bitwidth(model: ModelWrapper, _: DataflowBuildConfig) -> ModelWrapper:  # noqa
+    model = model.transform(MinimizeWeightBitWidth())
+    model = model.transform(MinimizeAccumulatorWidth())
+    model = model.transform(RoundAndClipThresholds())
+    model = model.transform(MinimizeWeightBitWidth())
+    return model
+
+
+def bnn_steps(topology: str, wbits: int, abits: int) -> list[str | Callable]:
+    """Return the step list for the givenn bnn pynq model topology."""
+    return [
+        "finn.builder.custom_step_library.general.add_preproc_divide_by_255",  # Custom step
+        "finn.builder.custom_step_library.general.add_postproc_top1",  # Custom step
+        "step_qonnx_to_finn",
+        "step_tidy_up",
+        bnn_make_step_streamline_bnn_pynq(model_type=topology),
+        bnn_make_step_convert_to_hw(topology, wbits, abits),
+        "step_create_dataflow_partition",
+        "step_specialize_layers",
+        bnn_make_step_fold(topology, wbits, abits),
+        "step_apply_folding_config",
+        bnn_step_minimize_bitwidth,
+        "step_generate_estimate_reports",
+        "step_hw_codegen",
+        "step_hw_ipgen",
+        "step_set_fifo_depths",
+    ]
 
 
 def generate_basic_model(
@@ -259,7 +354,7 @@ def get_model(
             modelwrapper = generate_basic_model(
                 Path(cfg.output_dir) / filename, model, wbits, abits, pretrained
             )
-            steps = deepcopy(basic_pre_multifpga_steps)
+            steps = bnn_steps(model.lower(), wbits, abits)
         case _:
             raise NotImplementedError(f"Unknown test model: {model}.")
 

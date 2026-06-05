@@ -249,7 +249,6 @@ class TestAuroraFlowPartitioning:
             solution = part.solve(100)
             assert solution is None
 
-    # TODO: Add mobilenet
     @pytest.mark.parametrize(
         "model_type",
         [

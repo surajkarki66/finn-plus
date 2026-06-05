@@ -1,8 +1,8 @@
 """Graoh utils (mostly networkx based) for Multi-FPGA purposes."""
-
 import itertools
 import networkx as nx
 from qonnx.core.modelwrapper import ModelWrapper
+from typing import Any
 
 from finn.util.exception import FINNMultiFPGAError
 
@@ -16,7 +16,7 @@ def onnx_to_networkx(model: ModelWrapper) -> nx.DiGraph:
     """
     nxg = nx.DiGraph()
     for node in model.graph.node:
-        nxg.add_node(node.name, d=node)
+        nxg.add_node(node.name, onnx_node=node)
     for node in model.graph.node:
         pre = model.find_direct_predecessors(node)
         if pre is None:
@@ -122,7 +122,53 @@ def _get_inseparable_nodes_nx(g: nx.DiGraph) -> list[list[str]]:
     """  # noqa
     # Also count last nodes so that a graph ending in a join node also is processed correctly
     art_points = list(nx.articulation_points(g.to_undirected())) + _get_end_nodes_nx(g)
-    return [_split_nodes_from_nx(g, splitter, art_points) for splitter in _get_split_nodes_nx(g)]
+    start_nodes = _get_start_nodes_nx(g)
+    end_nodes = _get_end_nodes_nx(g)
+    result = []
+    for splitter in _get_split_nodes_nx(g):
+        path_nodes: list[Any] = _split_nodes_from_nx(g, splitter, art_points)
+        if path_nodes != []:
+            result.append(path_nodes)
+
+    # if we have multiple inputs, find the first merge for every input, and put all nodes
+    # between them into one large group. This can be done, since even if one input joins
+    # much later, we still don't allow a device crossing with two parallel branches,
+    # so we need to group every node until the "furthest" join.
+    start_group = []
+    if len(start_nodes) > 1:
+        for start_node in start_nodes:
+            for target_node in nx.dfs_preorder_nodes(g, source=start_node):
+                if g.in_degree(target_node) > 1:
+                    for path in nx.node_disjoint_paths(g, start_node, target_node):
+                        start_group += path
+                    break
+    if start_group != []:
+        result.append(list(set(start_group)))
+
+    # Same for the output nodes
+    end_group = []
+    if len(end_nodes) > 1:
+        for end_node in end_nodes:
+            # We have to change g to undirected here, since we
+            # search "upwards" in the graph until the first fork
+            for target_node in nx.dfs_preorder_nodes(g.to_undirected(), end_node):
+                if g.out_degree(target_node) > 1:
+                    for path in nx.node_disjoint_paths(g, target_node, end_node):
+                        end_group += path
+    if end_group != []:
+        result.append(list(set(end_group)))
+
+    # Merge connected groups
+    for i in range(len(result)):
+        found_merge = True
+        while found_merge:
+            found_merge = False
+            for j in range(i + 1, len(result)):
+                if any(node in result[j] for node in result[i]):
+                    result[i] = list(set(result[i] + result.pop(j)))
+                    found_merge = True
+                    break
+    return result
 
 
 def get_inseparable_nodes(model: ModelWrapper) -> list[list[int]]:
