@@ -143,8 +143,8 @@ from finn.util.test import execute_parent
 from finn.util.vivado import parse_ooc_synth_results
 
 
-def _fifo_debug_live_dir(cfg):
-    return cfg.output_dir + "/debug/_live"
+def _fifo_debug_dir(cfg):
+    return cfg.output_dir + "/debug/fifo_logs"
 
 
 def _maybe_enable_verify_behavioral(cfg):
@@ -156,23 +156,31 @@ def _maybe_enable_verify_behavioral(cfg):
         cfg.verify_rtlsim_behavioral = True
 
 
-def snapshot_fifo_logs(cfg, phase_subdir):
+def _retarget_fifo_log_paths(model, cfg):
+    if not cfg.debug_fifo:
+        return model
+    dbg_dir = _fifo_debug_dir(cfg)
+    os.makedirs(dbg_dir, exist_ok=True)
+    for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
+        inst = getCustomOp(node)
+        old_path = inst.get_nodeattr("debug_log_path")
+        new_path = os.path.abspath(os.path.join(dbg_dir, node.name + ".log"))
+        if old_path and old_path != new_path and os.path.isfile(old_path):
+            os.rename(old_path, new_path)
+        inst.set_nodeattr("debug_log_path", new_path)
+    return model
+
+
+def mark_fifo_debug_phase(cfg, phase_name):
     if not cfg.debug_fifo:
         return
-    live_dir = _fifo_debug_live_dir(cfg)
-    if not os.path.isdir(live_dir):
-        return
-    dest_dir = cfg.output_dir + "/debug/" + phase_subdir
-    os.makedirs(dest_dir, exist_ok=True)
-    for fn in os.listdir(live_dir):
+    dbg_dir = _fifo_debug_dir(cfg)
+    os.makedirs(dbg_dir, exist_ok=True)
+    for fn in os.listdir(dbg_dir):
         if not fn.endswith(".log"):
             continue
-        src = os.path.join(live_dir, fn)
-        if not os.path.isfile(src) or os.path.getsize(src) == 0:
-            continue
-        shutil.copyfile(src, os.path.join(dest_dir, fn))
-    # Delete _live folder to ensure clean state for next simulation
-    shutil.rmtree(live_dir)
+        with open(os.path.join(dbg_dir, fn), "a") as f:
+            f.write(f"=== phase: {phase_name} ===\n")
 
 
 def verify_step(
@@ -342,13 +350,14 @@ def prepare_loop_ops_fifo_sizing(node, cfg):
             swg_exception=cfg.default_swg_exception,
             vivado_ram_style=cfg.large_fifo_mem_style,
             fifosim_input_throttle=cfg.fifosim_input_throttle,
-            debug_log_dir=(_fifo_debug_live_dir(cfg) if cfg.debug_fifo else None),
+            debug_log_dir=(_fifo_debug_dir(cfg) if cfg.debug_fifo else None),
         )
     )
     loop_model = loop_model.transform(SplitLargeFIFOs())
     loop_model = loop_model.transform(RemoveShallowFIFOs())
     loop_model = loop_model.transform(GiveUniqueNodeNames(prefix=node.name + "_"))
     loop_model = loop_model.transform(GiveReadableTensorNames())
+    loop_model = _retarget_fifo_log_paths(loop_model, cfg)
     node_inst.set_nodeattr("body", loop_model.graph)
 
 
@@ -883,13 +892,6 @@ def step_hw_codegen(model: ModelWrapper, cfg: DataflowBuildConfig):
     loop_nodes = model.get_nodes_by_op_type("FINNLoop")
     for node in loop_nodes:
         prepare_loop_ops_fifo_sizing(node, cfg)
-    snapshot_fifo_logs(cfg, "fifo_sizing")
-    if cfg.debug_fifo:
-        for loop_node in loop_nodes:
-            body_model = getCustomOp(loop_node).get_nodeattr("body")
-            for fifo_node in body_model.get_nodes_by_op_type("StreamingFIFO_rtl"):
-                getCustomOp(fifo_node).set_nodeattr("debug_log_path", "")
-            getCustomOp(loop_node).set_nodeattr("body", body_model.graph)
     model = model.transform(
         PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period()),
         apply_to_subgraphs=True,
@@ -1010,6 +1012,7 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
                 model.set_metadata_prop(
                     "rtlsim_trace", os.path.abspath(report_dir) + "/fifosim_trace.wdb"
                 )
+            mark_fifo_debug_phase(cfg, "fifo_sizing")
             model = model.transform(
                 InsertAndSetFIFODepths(
                     cfg._resolve_fpga_part(),
@@ -1018,7 +1021,7 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
                     vivado_ram_style=cfg.large_fifo_mem_style,
                     fifosim_input_throttle=cfg.fifosim_input_throttle,
                     cfg_n_inferences=cfg.fifosim_n_inferences,
-                    debug_log_dir=(_fifo_debug_live_dir(cfg) if cfg.debug_fifo else None),
+                    debug_log_dir=(_fifo_debug_dir(cfg) if cfg.debug_fifo else None),
                 )
             )
             model = model.transform(GiveUniqueNodeNames())
@@ -1084,7 +1087,6 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
     # this will only run for the new nodes (e.g. FIFOs and DWCs)
     model = model.transform(PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period()))
     model = model.transform(HLSSynthIP(cfg._resolve_fpga_part()))
-    snapshot_fifo_logs(cfg, "fifo_sizing")
     return model
 
 
@@ -1151,9 +1153,7 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig):
             # prepare ip-stitched rtlsim
             verify_model = deepcopy(model)
             verify_model = prepare_for_stitched_ip_rtlsim(verify_model, cfg)
-            # Ensure _live folder exists for debug_fifo logging
-            if cfg.debug_fifo:
-                os.makedirs(_fifo_debug_live_dir(cfg), exist_ok=True)
+            mark_fifo_debug_phase(cfg, "verify_stitched_ip_rtlsim")
             # use critical path estimate to set rtlsim liveness threshold
             # (very conservative)
             verify_model = verify_model.transform(AnnotateCycles())
@@ -1175,7 +1175,6 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig):
             else:
                 verify_step(verify_model, cfg, "stitched_ip_rtlsim", need_parent=True)
             os.environ["LIVENESS_THRESHOLD"] = str(prev_liveness)
-            snapshot_fifo_logs(cfg, "verify_stitched_ip_rtlsim")
     return model
 
 
@@ -1208,6 +1207,7 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
         # Use behav=False for performance measurement to use real RTL components
         # instead of behavioral models (FINN_SIMULATION affects FIFOs, MVU, LayerNorm,
         # and RTL elementwise ops)
+        mark_fifo_debug_phase(cfg, "rtlsim_perf")
         rtlsim_perf_dict = xsi_fifosim(model, rtlsim_bs, max_iters=max_iters, behav=False)
         # keep keys consistent between the Python and C++-styles
         cycles = rtlsim_perf_dict["cycles"]
@@ -1239,7 +1239,6 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
         if cfg.verify_save_rtlsim_waveforms:
             # restore original trace depth
             os.environ["RTLSIM_TRACE_DEPTH"] = str(orig_rtlsim_trace_depth)
-        snapshot_fifo_logs(cfg, "rtlsim_perf")
 
     else:
         print(
