@@ -13,7 +13,7 @@ import sys
 import time
 
 # from pynq import PL
-from pynq import MMIO, Bitstream, Overlay, allocate
+from pynq import Bitstream, Overlay, allocate
 
 # from pynq.pl_server.device import Device
 from pynq.ps import Clocks
@@ -1407,29 +1407,6 @@ class FINNLiveFIFOOverlay(FINNInstrumentationOverlay):
 class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
     """FINN overlay for DMA and instrumentation (with Switch Block)."""
 
-    class Selector:
-        """Controls a hardware time-multiplexing for weight switching."""
-
-        def __init__(self, ip_dict_entry):
-            """Initialize Selector from an IP dictionary entry."""
-            base_addr = ip_dict_entry["phys_addr"]
-            addr_range = ip_dict_entry["addr_range"]
-            self.mmio = MMIO(base_addr, addr_range)
-
-        def halt(self):
-            """Halt the selector."""
-            self.mmio.write(0x00, 0x0000_0000)
-
-        def start(self):
-            """Start the selector."""
-            self.mmio.write(0x00, 0x0000_0001)
-
-        def set_schedule(self, schedule: list[int]):
-            """Write a schedule (list of repetition counts) to the selector registers."""
-            for i, rep in enumerate(schedule):
-                value = (i & 0xFFFF) | ((rep & 0xFFFF) << 16)
-                self.mmio.write(0x04 + 4 * i, value)
-
     class DFXController:
         """Manages the DFX Controller IP for partial reconfiguration."""
 
@@ -1621,88 +1598,6 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         """Enable PCAP as the configuration source."""
         os.system("echo 0xffca3008 0xff 0x1 > /sys/firmware/zynqmp/config_reg")
 
-    class DFXScheduler:
-        """Hardware scheduler for timed DFX reconfiguration slots."""
-
-        def __init__(self, ip_dict_entry, num_slots):
-            """Initialize DFXScheduler from an IP dictionary entry and slot count."""
-            base_addr = ip_dict_entry["phys_addr"]
-            addr_range = ip_dict_entry["addr_range"]
-            self.mmio = MMIO(base_addr, addr_range)
-            self.num_slots = num_slots
-
-        def write64(self, msb_offset, value):
-            """Write a 64-bit value split across two 32-bit registers at msb_offset."""
-            self.mmio.write(msb_offset, (value >> 32) & 0xFFFF_FFFF)
-            self.mmio.write(msb_offset + 4, value & 0xFFFF_FFFF)
-
-        def read64(self, msb_offset):
-            """Read a 64-bit value from two 32-bit registers at msb_offset."""
-            msb = self.mmio.read(msb_offset)
-            lsb = self.mmio.read(msb_offset + 4)
-            return (msb << 32) | lsb
-
-        def slot_offset(self, slot):
-            """Return the register offset for the given slot index."""
-            if slot < 0 or slot >= self.num_slots:
-                raise ValueError(f"slot must be in range [0, {self.num_slots - 1}], got {slot}")
-            return 0x1C + slot * 0x0C
-
-        def start(self):
-            """Start the DFX scheduler."""
-            self.mmio.write(0, 0x1)
-
-        def stop(self):
-            """Stop the DFX scheduler."""
-            ctrl = self.mmio.read(0)
-            self.mmio.write(0, ctrl & ~(0x1))
-
-        @property
-        def running(self):
-            """Return True if the scheduler is currently running."""
-            return bool(self.mmio.read(0) & (1 << 0))
-
-        @property
-        def error(self):
-            """Return True if the scheduler has encountered an error."""
-            return bool(self.mmio.read(0) & (1 << 1))
-
-        @property
-        def max_cycles(self):
-            """Return the maximum cycle count observed by the scheduler."""
-            return self.read64(0x04)
-
-        @property
-        def min_cycles(self):
-            """Return the minimum cycle count observed by the scheduler."""
-            return self.read64(0x0C)
-
-        @property
-        def pre_decouple_cycles(self):
-            """Return the pre-decouple cycle count."""
-            return self.read64(0x14)
-
-        @pre_decouple_cycles.setter
-        def pre_decouple_cycles(self, value):
-            """Set the pre-decouple cycle count."""
-            self.write64(0x14, value)
-
-        def set_slot(self, slot, rm_id, cycles_wait):
-            """Configure a scheduler slot with an RM ID and wait-cycle count."""
-            base = self.slot_offset(slot)
-            self.mmio.write(base, (1 << rm_id) & 0xFFFF_FFFF)
-            self.write64(base + 4, cycles_wait)
-
-        def status(self):
-            """Return a status dict with running, error, and cycle-count fields."""
-            return {
-                "running": self.running,
-                "error": self.error,
-                "max_cycles": self.max_cycles,
-                "min_cycles": self.min_cycles,
-                "pre_decouple_cycles": self.pre_decouple_cycles,
-            }
-
     def __init__(
         self,
         bitfile_name,
@@ -1789,9 +1684,8 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
 
         if self.multidnn_mode != "PartialReconfiguration":
             if self.multidnn_mode == "SelectableWeights":
-                selector = self.Selector(self.ip_dict["StreamingDataflowPartition_1_selector"])
-                selector.set_schedule(schedule=[1, 1])
-                selector.start()
+                # TODO: also excercise different weight sets in this mode..
+                pass
 
             self.start_accelerator(avg_window_size=avg_window_size)
             time.sleep(instr_runtime)
