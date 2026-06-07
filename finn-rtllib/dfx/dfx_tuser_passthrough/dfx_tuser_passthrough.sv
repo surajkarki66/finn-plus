@@ -24,38 +24,39 @@
 
 `timescale 1ns/1ps
 module dfx_tuser_passthrough #(
-    parameter int DATA_WIDTH       = 64,  // AXI-Stream tdata width (bits)
+    parameter int IN_DATA_WIDTH    = 64,  // tdata width on input path: s_axis → rp_m_axis (bits)
+    parameter int OUT_DATA_WIDTH   = 64,  // tdata width on output path: rp_s_axis → m_axis (bits)
     parameter int TUSER_WIDTH      = 2,   // tUSER width (bits)
     parameter int NUM_OUTPUT_BEATS = 1    // AXI-Stream beats per output frame
 ) (
-    input  logic                    aclk,
-    input  logic                    aresetn,
+    input  logic                       aclk,
+    input  logic                       aresetn,
 
     // External input: carries tUSER + tLast from upstream (DMA or previous wrapper)
-    input  logic [DATA_WIDTH-1:0]   s_axis_tdata,
-    input  logic                    s_axis_tvalid,
-    output logic                    s_axis_tready,
-    input  logic                    s_axis_tlast,
-    input  logic [TUSER_WIDTH-1:0]  s_axis_tuser,
+    input  logic [IN_DATA_WIDTH-1:0]   s_axis_tdata,
+    input  logic                       s_axis_tvalid,
+    output logic                       s_axis_tready,
+    input  logic                       s_axis_tlast,
+    input  logic [TUSER_WIDTH-1:0]     s_axis_tuser,
 
     // External output: tUSER restored, tLast regenerated for downstream dfx_wrapper
-    output logic [DATA_WIDTH-1:0]   m_axis_tdata,
-    output logic                    m_axis_tvalid,
-    input  logic                    m_axis_tready,
-    output logic                    m_axis_tlast,
-    output logic [TUSER_WIDTH-1:0]  m_axis_tuser,
+    output logic [OUT_DATA_WIDTH-1:0]  m_axis_tdata,
+    output logic                       m_axis_tvalid,
+    input  logic                       m_axis_tready,
+    output logic                       m_axis_tlast,
+    output logic [TUSER_WIDTH-1:0]     m_axis_tuser,
 
     // To wrapped non-PR IP chain (no tUSER; tLast forwarded for protocol compliance)
-    output logic [DATA_WIDTH-1:0]   rp_m_axis_tdata,
-    output logic                    rp_m_axis_tvalid,
-    input  logic                    rp_m_axis_tready,
-    output logic                    rp_m_axis_tlast,
+    output logic [IN_DATA_WIDTH-1:0]   rp_m_axis_tdata,
+    output logic                       rp_m_axis_tvalid,
+    input  logic                       rp_m_axis_tready,
+    output logic                       rp_m_axis_tlast,
 
     // From wrapped non-PR IP chain (no tUSER; tLast not used — regenerated internally)
-    input  logic [DATA_WIDTH-1:0]   rp_s_axis_tdata,
-    input  logic                    rp_s_axis_tvalid,
-    output logic                    rp_s_axis_tready,
-    input  logic                    rp_s_axis_tlast  // present for interface compliance, unused
+    input  logic [OUT_DATA_WIDTH-1:0]  rp_s_axis_tdata,
+    input  logic                       rp_s_axis_tvalid,
+    output logic                       rp_s_axis_tready,
+    input  logic                       rp_s_axis_tlast  // present for interface compliance, unused
 );
 
     // --------------------------------------------------------------------------

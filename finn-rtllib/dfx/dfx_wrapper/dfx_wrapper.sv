@@ -32,7 +32,8 @@
 
 `timescale 1ns/1ps
 module dfx_wrapper #(
-    parameter int DATA_WIDTH      = 64,  // AXI-Stream tdata width (bits)
+    parameter int IN_DATA_WIDTH   = 64,  // AXI-Stream tdata width on the INPUT path (s_axis / rp_m_axis)
+    parameter int OUT_DATA_WIDTH  = 64,  // AXI-Stream tdata width on the OUTPUT path (rp_s_axis / m_axis)
     parameter int TUSER_WIDTH     = 2,   // tUSER width (bits); RM_ID is TUSER_WIDTH bits
     parameter int NUM_RM          = 2,   // number of Reconfigurable Modules
     parameter int RESET_CYCLES    = 16,  // clock cycles to assert accel_reset_n after reconfig
@@ -40,34 +41,34 @@ module dfx_wrapper #(
                                          // regenerate m_axis_tlast without relying on the
                                          // BDC generating rp_s_axis_tlast internally
 ) (
-    input  logic                    aclk,
-    input  logic                    aresetn,
+    input  logic                       aclk,
+    input  logic                       aresetn,
 
     // External input (from upstream static network / DMA)
-    input  logic [DATA_WIDTH-1:0]   s_axis_tdata,
-    input  logic                    s_axis_tvalid,
-    output logic                    s_axis_tready,
-    input  logic                    s_axis_tlast,
-    input  logic [TUSER_WIDTH-1:0]  s_axis_tuser,
+    input  logic [IN_DATA_WIDTH-1:0]   s_axis_tdata,
+    input  logic                       s_axis_tvalid,
+    output logic                       s_axis_tready,
+    input  logic                       s_axis_tlast,
+    input  logic [TUSER_WIDTH-1:0]     s_axis_tuser,
 
     // External output (to downstream static network / DMA)
-    output logic [DATA_WIDTH-1:0]   m_axis_tdata,
-    output logic                    m_axis_tvalid,
-    input  logic                    m_axis_tready,
-    output logic                    m_axis_tlast,
-    output logic [TUSER_WIDTH-1:0]  m_axis_tuser,
+    output logic [OUT_DATA_WIDTH-1:0]  m_axis_tdata,
+    output logic                       m_axis_tvalid,
+    input  logic                       m_axis_tready,
+    output logic                       m_axis_tlast,
+    output logic [TUSER_WIDTH-1:0]     m_axis_tuser,
 
     // To BDC input (no tUSER - FINN ops do not use it)
-    output logic [DATA_WIDTH-1:0]   rp_m_axis_tdata,
-    output logic                    rp_m_axis_tvalid,
-    input  logic                    rp_m_axis_tready,
-    output logic                    rp_m_axis_tlast,
+    output logic [IN_DATA_WIDTH-1:0]   rp_m_axis_tdata,
+    output logic                       rp_m_axis_tvalid,
+    input  logic                       rp_m_axis_tready,
+    output logic                       rp_m_axis_tlast,
 
     // From AMD dfx_decoupler s_intf_0 (BDC output side, no tUSER)
-    input  logic [DATA_WIDTH-1:0]   rp_s_axis_tdata,
-    input  logic                    rp_s_axis_tvalid,
-    output logic                    rp_s_axis_tready,
-    input  logic                    rp_s_axis_tlast,
+    input  logic [OUT_DATA_WIDTH-1:0]  rp_s_axis_tdata,
+    input  logic                       rp_s_axis_tvalid,
+    output logic                       rp_s_axis_tready,
+    input  logic                       rp_s_axis_tlast,
 
     // DFX controller interface
     output logic [NUM_RM-1:0]       controller_trigger,  // hw_triggers to DFX controller

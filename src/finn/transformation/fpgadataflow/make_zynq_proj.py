@@ -1052,6 +1052,14 @@ class MakeZYNQProject(Transformation):
         ]
         global_tuser_width = max(all_tuser_widths) if all_tuser_widths else 1
 
+        # Propagate the tUSER width to the finn_switch so the A path (instrumentation
+        # → first SDP) carries tuser all the way to the dfx_wrapper input.
+        if self.enable_finn_switch:
+            pr_config.append(
+                "set_property CONFIG.TUSER_WIDTH_A {%d} [get_bd_cells finn_switch]"
+                % global_tuser_width
+            )
+
         # Per-region DFX Wrapper and AMD DFX Decoupler instantiation.
         # Each PR SDP gets its own dfx_wrapper (static region controller) and
         # dfx_decoupler (output-side RP isolation), replacing the previous global
@@ -1068,7 +1076,11 @@ class MakeZYNQProject(Transformation):
             pr_nodecontainer_inst = getCustomOp(pr_nodecontainer)
             sdp_name = pr_sdp.name
             num_bodies = pr_nodecontainer_inst.get_nodeattr("bodies")
-            data_width = pr_nodecontainer_inst.get_instream_width()
+            # Use AXI-Stream-padded widths (multiples of 8) for both data paths.
+            # The stitched BDC IP always uses padded widths; using the unpadded
+            # get_instream_width() would cause a data-width mismatch in the BD.
+            in_data_width = pr_nodecontainer_inst.get_instream_width_padded()
+            out_data_width = pr_nodecontainer_inst.get_outstream_width_padded()
 
             body_0_model = pr_nodecontainer_inst.get_nodeattr("body_0")
             body_0_ifnames = eval(body_0_model.get_metadata_prop("vivado_stitch_ifnames"))
@@ -1090,12 +1102,20 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "set_property -dict [list "
-                "CONFIG.DATA_WIDTH {%d} "
+                "CONFIG.IN_DATA_WIDTH {%d} "
+                "CONFIG.OUT_DATA_WIDTH {%d} "
                 "CONFIG.TUSER_WIDTH {%d} "
                 "CONFIG.NUM_RM {%d} "
                 "CONFIG.NUM_OUTPUT_BEATS {%d}] "
                 "[get_bd_cells dfx_wrapper_%s]"
-                % (data_width, global_tuser_width, num_bodies, num_output_beats, sdp_name)
+                % (
+                    in_data_width,
+                    out_data_width,
+                    global_tuser_width,
+                    num_bodies,
+                    num_output_beats,
+                    sdp_name,
+                )
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_wrapper_%s/aclk] "
@@ -1213,9 +1233,13 @@ class MakeZYNQProject(Transformation):
             s_axis_name = body_ifnames["s_axis"][0][0]
             m_axis_name = body_ifnames["m_axis"][0][0]
 
-            # Data width from the last node's output stream width.
+            # Separate padded widths for the input path (s_axis→rp_m_axis) and the
+            # output path (rp_s_axis→m_axis); the wrapped static IP chain can change
+            # the stream width (e.g. DWC inserted between nodes with different SIMD/PE).
+            first_node_inst = getCustomOp(body_model.graph.node[0])
             last_node_inst = getCustomOp(body_model.graph.node[-1])
-            data_width = last_node_inst.get_outstream_width()
+            in_data_width = first_node_inst.get_instream_width_padded()
+            out_data_width = last_node_inst.get_outstream_width_padded()
 
             # NUM_OUTPUT_BEATS: number of AXI-Stream beats per output frame.
             # Derived from the folded output shape: product of all dimensions
@@ -1231,11 +1255,12 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "set_property -dict [list "
-                "CONFIG.DATA_WIDTH {%d} "
+                "CONFIG.IN_DATA_WIDTH {%d} "
+                "CONFIG.OUT_DATA_WIDTH {%d} "
                 "CONFIG.TUSER_WIDTH {%d} "
                 "CONFIG.NUM_OUTPUT_BEATS {%d}] "
                 "[get_bd_cells dfx_tuser_passthrough_%s]"
-                % (data_width, global_tuser_width, num_output_beats, sdp_name)
+                % (in_data_width, out_data_width, global_tuser_width, num_output_beats, sdp_name)
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins dfx_tuser_passthrough_%s/aclk] "
