@@ -97,6 +97,23 @@
      dst.write(src.read().data);
  }
 
+ // Unpack internal {last, user, data} word into an hls::axis beat for the interface port.
+ // hls::axis types must NOT appear in internal hls::stream variables (HLS 214-208).
+ template<typename T, unsigned TUW>
+ static void move(
+     hls::stream<ap_uint<T::width + TUW + 1>> &src,
+     hls::stream<hls::axis<T, TUW, 0, 0>> &dst
+ ) {
+ #pragma HLS pipeline II=1 style=flp
+     ap_uint<T::width + TUW + 1> const  packed = src.read();
+     hls::axis<T, TUW, 0, 0>  beat;
+     beat.data = packed(T::width - 1, 0);
+     beat.user = packed(T::width + TUW - 1, T::width);
+     beat.last = packed[T::width + TUW];
+     beat.keep = -1;
+     dst.write(beat);
+ }
+
  template<typename  T>
  class Payload {
  public:
@@ -149,8 +166,8 @@
      typename  TO
  >
  void instrument(
-     hls::stream<hls::axis<TI, TUSER_WIDTH, 0, 0>> &finnix,
-     hls::stream<TO> &finnox,
+     hls::stream<ap_uint<TI::width + TUSER_WIDTH + 1>> &finnix,
+     hls::stream<TO> &finnox,  // plain type — hls::axis stripped by move() in wrapper
      ap_uint<32>  cfg,          // [0] - 0:hold, 1:lfsr; [31:1] - minimum interval (cycles) between IFM starts
      ap_uint<32>  seed,         // [31:16] - LFSR seed (only upper 16 bits used)
      ap_uint<32>  avg_n,        // [31:0] - averaging window size (1..AVG_N frames)
@@ -228,11 +245,13 @@
 
          if(wr) {
              bool const  frame_last = (icnt == ILEN-1);
-             hls::axis<TI, TUSER_WIDTH, 0, 0>  beat;
-             beat.data = lfsr;
-             beat.keep = -1;
-             beat.user = tuser_val;
-             beat.last = frame_last ? ap_uint<1>(1) : ap_uint<1>(0);
+             // Pack {last[1], user[TUSER_WIDTH], data[TI::width]} into a plain ap_uint.
+             // hls::axis cannot be used in internal streams (HLS 214-208); the wrapper's
+             // move() dataflow process reconstructs the axis beat for the interface port.
+             ap_uint<TI::width + TUSER_WIDTH + 1>  beat;
+             beat(TI::width - 1, 0)                     = lfsr;
+             beat(TI::width + TUSER_WIDTH - 1, TI::width) = tuser_val;
+             beat[TI::width + TUSER_WIDTH]              = frame_last ? ap_uint<1>(1) : ap_uint<1>(0);
              finnix.write_nb(beat);
              if(first)  timestamp_ovf |= !timestamps.write_nb(cnt_clk);
              // After the last beat of a frame, advance the tUSER round-robin schedule
@@ -438,13 +457,22 @@
  #pragma HLS interface ap_ctrl_none port=return
 
  #pragma HLS dataflow disable_start_propagation
+     // Internal FIFO for finnix uses a plain ap_uint packing {last, user, data}.
+     // hls::axis types are forbidden in internal hls::stream variables (HLS 214-208).
+     // The move<TI, TUSER_WIDTH> overload below reconstructs the axis beat for the port.
+     static hls::stream<ap_uint<TI::width + TUSER_WIDTH + 1>>  finnix0;
+ #pragma HLS stream variable=finnix0 depth=2
      static hls::stream<Payload<TO>::type>  finnox0;
  #pragma HLS stream variable=finnox0 depth=2
 
      // AXI-Stream -> FIFO
      move(finnox, finnox0);
 
-     // Main — write directly to the finnix interface port (avoids internal hls::axis stream)
-     instrument<PENDING, ILEN, OLEN, KO, AVG_N>(finnix, finnox0, cfg, seed, avg_n, mux_interval, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
+     // Main — writes to internal FIFO (enables II=1 in instrument)
+     // TI and TO must be explicit: TI cannot be deduced from ap_uint<TI::width+...>
+     instrument<PENDING, ILEN, OLEN, KO, AVG_N, TI, TO>(finnix0, finnox0, cfg, seed, avg_n, mux_interval, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
+
+     // FIFO -> AXI-Stream: reconstruct hls::axis beat from packed internal word
+     move<TI, TUSER_WIDTH>(finnix0, finnix);
 
  } // instrumentation_wrapper
