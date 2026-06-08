@@ -1475,13 +1475,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                     self.set_bs_size(bs_row=bs_id, size=len(buf) * 4, vsm=socket)
 
             for socket in self.socket_dict_paths.keys():
-                # is_full=False: RM 0 is already loaded by the full bitstream programming;
-                # tell the DFX controller to enter the active state without redundant ICAP
-                # re-programming. Using is_full=True would trigger ICAP loading (slow) and
-                # the driver would proceed before it finishes, causing the first hw_trigger
-                # (for RM 1) to find the controller busy → stuck in S_WAIT_DECOUPLE.
-                self.restart_with_status(vsm=socket, is_full=False, rm_id=0)
-                self.wait_for_ready(vsm=socket)
+                self.restart_with_status(vsm=socket, is_full=True, rm_id=0)
 
         def _map_socket(self, socket_name):
             """Map a socket name or integer index to its numeric index."""
@@ -1596,33 +1590,6 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
             print(f"Shutdown: {s['shutdown']}")
             print(f"Error: {s['error']}")
             print(f"State: {s['state']}")
-
-        def wait_for_ready(self, vsm, timeout_s=30, poll_interval_s=0.05):
-            """Poll the DFX controller until the VSM reaches the active (non-shutdown) state.
-
-            After restart_with_status the controller transitions through several internal
-            states before the RM is active and hw_triggers can be accepted.  Calling
-            start_accelerator before this completes leaves the dfx_wrapper stuck in
-            S_WAIT_DECOUPLE when the first reconfiguration trigger fires.
-
-            Args:
-                vsm: socket name or index.
-                timeout_s: maximum time to wait in seconds (default 30).
-                poll_interval_s: polling interval in seconds (default 0.05).
-            Raises:
-                TimeoutError if the ready state is not reached within timeout_s.
-            """
-            deadline = time.time() + timeout_s
-            while time.time() < deadline:
-                s = self.get_status(vsm=vsm)
-                if not s["shutdown"] and not s["error"]:
-                    return
-                time.sleep(poll_interval_s)
-            s = self.get_status(vsm=vsm)
-            raise TimeoutError(
-                f"DFX controller VSM {vsm} did not reach ready state within {timeout_s}s "
-                f"(last status: {s})"
-            )
 
     def get_config_reg(self):
         """Read and return the ZynqMP configuration register value."""
