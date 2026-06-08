@@ -448,14 +448,14 @@ proc query_cell_resources {cell_path} {
 # Arguments:
 #   cell_names    – Tcl list of hierarchical cell paths (one per PR region)
 #   pblock_names  – Tcl list of pblock names, paired 1-to-1 with cell_names
-#   lut_margin    – multiplicative overhead factor applied to LUT counts (default 1.2)
-#   bram_margin   – multiplicative overhead factor applied to BRAM counts (default 1.2)
-#   dsp_margin    – multiplicative overhead factor applied to DSP counts  (default 1.2)
-#   carry_margin  – multiplicative overhead factor applied to CARRY8 counts (default 1.2)
-#   ff_margin     – multiplicative overhead factor applied to FF counts    (default 1.2)
+#   lut_margin    – multiplicative overhead factor applied to LUT counts (default 1.1)
+#   bram_margin   – multiplicative overhead factor applied to BRAM counts (default 1.1)
+#   dsp_margin    – multiplicative overhead factor applied to DSP counts  (default 1.1)
+#   carry_margin  – multiplicative overhead factor applied to CARRY8 counts (default 1.1)
+#   ff_margin     – multiplicative overhead factor applied to FF counts    (default 1.1)
 ################################################################################
 
-proc auto_floorplan_from_synthesis {cell_names pblock_names {lut_margin 1.2} {bram_margin 1.2} {dsp_margin 1.2} {carry_margin 1.2} {ff_margin 1.2}} {
+proc auto_floorplan_from_synthesis {cell_names pblock_names {lut_margin 1.1} {bram_margin 1.1} {dsp_margin 1.1} {carry_margin 1.1} {ff_margin 1.1}} {
     if {[llength $cell_names] != [llength $pblock_names]} {
         error "auto_floorplan_from_synthesis: cell_names and pblock_names must have the same length"
     }
