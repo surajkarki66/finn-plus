@@ -1011,7 +1011,7 @@ class MakeZYNQProject(Transformation):
                 "/xilinx/dfx_decoupler_v1_0/tcl/api.tcl -notrace"
             )
 
-            reset_aresetn_pin = "proc_sys_reset_dfx/peripheral_aresetn"
+            reset_aresetn_pin = "smartconnect_0/aresetn"
         else:
             # SW-only: connect to the existing reset net via smartconnect_0/aresetn.
             # The template connects that pin to the peripheral_aresetn of the
