@@ -1758,11 +1758,14 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         # The dfx_wrapper detects the tUSER change and triggers partial reconfiguration.
         # mux_interval=0 means tUSER stays at 0 (no reconfiguration, baseline measurement).
         mux_intervals = kwargs.get(
-            "mux_intervals", [0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 10000, 100000, 200000]
+            "mux_intervals", [0, 100, 1000, 2, 5, 10, 20, 50, 200, 500, 10000, 100000, 200000]
         )
 
         test_results = {}
         for mux_interval in mux_intervals:
+            # reset instrumentation and accelerator (not DFX controller) for clean measurement:
+            self.reset_accelerator()
+            self.set_current_mode("instr")  # need to set FINN_switch mode again after reset
             self.start_accelerator(avg_window_size=avg_window_size, mux_interval=mux_interval)
             samples = []
             any_error = False
