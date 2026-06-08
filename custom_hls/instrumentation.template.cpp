@@ -177,8 +177,11 @@
      ap_uint<32> &interval,
      ap_uint<32> &checksum,
      ap_uint<32> &min_latency,
-     ap_uint<32> &avg_latency,
-     ap_uint<32> &avg_interval,
+     ap_uint<32> &lat_sum_lo,		// lower 32 bits of latency sliding-window sum (divide by avg_fill in SW)
+     ap_uint<32> &lat_sum_hi,		// upper 32 bits of latency sliding-window sum
+     ap_uint<32> &int_sum_lo,		// lower 32 bits of interval sliding-window sum
+     ap_uint<32> &int_sum_hi,		// upper 32 bits of interval sliding-window sum
+     ap_uint<32> &avg_fill_out,		// number of valid entries in sliding window (divisor)
      ap_uint<32> &run_cycles_lo,	// lower 32 bits of cycle count since cfg[0] rising edge
      ap_uint<32> &run_cycles_hi,	// upper 32 bits of cycle count since cfg[0] rising edge
      ap_uint<32> &run_frames		// completed output frames since cfg[0] rising edge
@@ -288,8 +291,6 @@
      static clock_t  int_buf[AVG_N];
      static ap_uint<64>  lat_sum = 0;
      static ap_uint<64>  int_sum = 0;
-     static clock_t  last_avg_latency  = 0;
-     static clock_t  last_avg_interval = 0;
      static ap_uint<32>  prev_avg_n = 0;
  #pragma HLS reset variable=avg_head
  #pragma HLS reset variable=avg_fill
@@ -297,8 +298,6 @@
  #pragma HLS reset variable=int_buf off
  #pragma HLS reset variable=lat_sum
  #pragma HLS reset variable=int_sum
- #pragma HLS reset variable=last_avg_latency
- #pragma HLS reset variable=last_avg_interval
  #pragma HLS reset variable=prev_avg_n
 
      // Running Throughput Measurement State (resets on rising edge of cfg[0])
@@ -389,8 +388,6 @@
                  }
                  avg_head++;
                  if(avg_head >= ap_uint<clog2nz(AVG_N)+1>(win))  avg_head = 0;
-                 last_avg_latency  = lat_sum / avg_fill;
-                 last_avg_interval = int_sum / avg_fill;
              }
              ocnt = 0;
              if(run_active)  run_frame_count++;
@@ -412,8 +409,11 @@
      interval = last_interval;
      checksum = last_checksum;
      min_latency  = cur_min_latency;
-     avg_latency  = last_avg_latency;
-     avg_interval = last_avg_interval;
+     lat_sum_lo = lat_sum(31,  0);
+     lat_sum_hi = lat_sum(63, 32);
+     int_sum_lo = int_sum(31,  0);
+     int_sum_hi = int_sum(63, 32);
+     avg_fill_out = avg_fill;
      run_cycles_lo = run_total_cycles(31,  0);
      run_cycles_hi = run_total_cycles(63, 32);
      run_frames    = run_frame_count;
@@ -432,8 +432,11 @@
      ap_uint<32> &interval,
      ap_uint<32> &checksum,
      ap_uint<32> &min_latency,
-     ap_uint<32> &avg_latency,
-     ap_uint<32> &avg_interval,
+     ap_uint<32> &lat_sum_lo,
+     ap_uint<32> &lat_sum_hi,
+     ap_uint<32> &int_sum_lo,
+     ap_uint<32> &int_sum_hi,
+     ap_uint<32> &avg_fill,
      ap_uint<32> &run_cycles_lo,
      ap_uint<32> &run_cycles_hi,
      ap_uint<32> &run_frames
@@ -449,8 +452,11 @@
  #pragma HLS interface s_axilite bundle=ctrl port=interval
  #pragma HLS interface s_axilite bundle=ctrl port=checksum
  #pragma HLS interface s_axilite bundle=ctrl port=min_latency
- #pragma HLS interface s_axilite bundle=ctrl port=avg_latency
- #pragma HLS interface s_axilite bundle=ctrl port=avg_interval
+ #pragma HLS interface s_axilite bundle=ctrl port=lat_sum_lo
+ #pragma HLS interface s_axilite bundle=ctrl port=lat_sum_hi
+ #pragma HLS interface s_axilite bundle=ctrl port=int_sum_lo
+ #pragma HLS interface s_axilite bundle=ctrl port=int_sum_hi
+ #pragma HLS interface s_axilite bundle=ctrl port=avg_fill
  #pragma HLS interface s_axilite bundle=ctrl port=run_cycles_lo
  #pragma HLS interface s_axilite bundle=ctrl port=run_cycles_hi
  #pragma HLS interface s_axilite bundle=ctrl port=run_frames
@@ -470,7 +476,7 @@
 
      // Main — writes to internal FIFO (enables II=1 in instrument)
      // TI and TO must be explicit: TI cannot be deduced from ap_uint<TI::width+...>
-     instrument<PENDING, ILEN, OLEN, KO, AVG_N, TI, TO>(finnix0, finnox0, cfg, seed, avg_n, mux_interval, status, latency, interval, checksum, min_latency, avg_latency, avg_interval, run_cycles_lo, run_cycles_hi, run_frames);
+     instrument<PENDING, ILEN, OLEN, KO, AVG_N, TI, TO>(finnix0, finnox0, cfg, seed, avg_n, mux_interval, status, latency, interval, checksum, min_latency, lat_sum_lo, lat_sum_hi, int_sum_lo, int_sum_hi, avg_fill, run_cycles_lo, run_cycles_hi, run_frames);
 
      // FIFO -> AXI-Stream: reconstruct hls::axis beat from packed internal word
      move<TI, TUSER_WIDTH>(finnix0, finnix);

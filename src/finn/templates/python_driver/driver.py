@@ -635,8 +635,11 @@ class FINNInstrumentationOverlay(Overlay):
         min_latency = self.instrumentation_read("min_latency")
         latency = self.instrumentation_read("latency")
         interval = self.instrumentation_read("interval")
-        avg_latency = self.instrumentation_read("avg_latency")
-        avg_interval = self.instrumentation_read("avg_interval")
+        lat_sum_lo = self.instrumentation_read("lat_sum_lo")
+        lat_sum_hi = self.instrumentation_read("lat_sum_hi")
+        int_sum_lo = self.instrumentation_read("int_sum_lo")
+        int_sum_hi = self.instrumentation_read("int_sum_hi")
+        avg_fill = self.instrumentation_read("avg_fill")
         run_cycles_lo = self.instrumentation_read("run_cycles_lo")
         run_cycles_hi = self.instrumentation_read("run_cycles_hi")
         run_frames = self.instrumentation_read("run_frames")
@@ -646,6 +649,10 @@ class FINNInstrumentationOverlay(Overlay):
         overflow_err = (status_reg & 0x00000001) != 0
         underflow_err = (status_reg & 0x00000002) != 0
         run_cycles = (run_cycles_hi << 32) | run_cycles_lo
+        lat_sum = (lat_sum_hi << 32) | lat_sum_lo
+        int_sum = (int_sum_hi << 32) | int_sum_lo
+        avg_latency = lat_sum // avg_fill if avg_fill > 0 else 0
+        avg_interval = int_sum // avg_fill if avg_fill > 0 else 0
 
         if debug_print:
             print("---INSTRUMENTATION_REPORT---")
