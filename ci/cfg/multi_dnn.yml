@@ -3,7 +3,7 @@
     {
         "dut": ["vgg10"], # almost all settings of default DUT are overwritten here (or by multi_dnn_config)
         "board": ["RFSoC4x2"],
-        "synth_clk_period_ns": [5],
+        "synth_clk_period_ns": [10],
         "instrumentation_avg_n": [65536],
         "experiments_config": ["../experiments/multi_dnn.json"],
 
@@ -17,7 +17,7 @@
     {
         "dut": ["vgg10"],
         "board": ["RFSoC4x2"],
-        "synth_clk_period_ns": [5],
+        "synth_clk_period_ns": [10],
         "instrumentation_avg_n": [65536],
         "experiments_config": ["../experiments/multi_dnn.json"],
 
@@ -31,7 +31,7 @@
     {
         "dut": ["vgg10"],
         "board": ["RFSoC4x2"],
-        "synth_clk_period_ns": [5],
+        "synth_clk_period_ns": [10],
         "instrumentation_avg_n": [65536],
         "experiments_config": ["../experiments/multi_dnn.json"],
 
