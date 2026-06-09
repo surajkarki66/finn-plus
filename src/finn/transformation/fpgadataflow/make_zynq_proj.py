@@ -1004,6 +1004,12 @@ class MakeZYNQProject(Transformation):
                 "[get_bd_pins smartconnect_0/aclk]"
             )
 
+            # Assign the DDR address segment to dfx_controller_0/M_AXI_MEM so it can
+            # read bitstreams from DRAM via smartconnect_dfx → zynq_ps/S_AXI_HP1_FPD.
+            # All SDP axilite segments are already assigned via assign_axi_addr_proc,
+            # so this call picks up only the remaining HP1 DDR window.
+            pr_config.append("assign_bd_address")
+
             # Source AMD dfx_decoupler API once (needed before per-PR instantiation loop)
             pr_config.append(
                 "source [get_property REPOSITORY "
