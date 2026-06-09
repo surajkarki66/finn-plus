@@ -137,7 +137,8 @@ class Floorplan(Transformation):
         node_container_nodes = list(
             filter(
                 lambda x: x.op_type == "NodeContainer"
-                and getCustomOp(x).get_nodeattr("multi_dnn_type") == "partial_reconfiguration",
+                and getCustomOp(x).get_nodeattr("multi_dnn_type")
+                in ("partial_reconfiguration", "selectable_weights"),
                 non_dma_nodes,
             )
         )
