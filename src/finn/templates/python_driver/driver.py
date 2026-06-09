@@ -1757,9 +1757,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         # instrumentation wrapper advances to the next one in round-robin order.
         # The dfx_wrapper detects the tUSER change and triggers partial reconfiguration.
         # mux_interval=0 means tUSER stays at 0 (no reconfiguration, baseline measurement).
-        mux_intervals = kwargs.get(
-            "mux_intervals", [0, 100, 1000, 2, 5, 10, 20, 50, 200, 500, 10000, 100000, 200000]
-        )
+        mux_intervals = kwargs.get("mux_intervals", [0, 10000, 1000, 100, 50, 20, 10, 5, 2, 1])
 
         test_results = {}
         for mux_interval in mux_intervals:
@@ -1798,6 +1796,7 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                     )
                 )
             self.stop_accelerator()
+            time.sleep(1)  # ensure accelerator is flushed and DFX controller is idle before reset
             fclk = self.fclk_mhz_actual * 1e6
             n = len(samples)
             avg_min_latency = sum(s[0] for s in samples) / n
