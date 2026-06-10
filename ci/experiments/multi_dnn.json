@@ -21,11 +21,9 @@
           {
             "function_name": "experiment_ma",
             "kwargs" : {
-                "lead_time": 10000,
-                "num_slots": 2,
-                "instr_runtime": 2,
-                "avg_window_size": 16384,
-                "num_measurements": 20
+                "instr_runtime": 10,
+                "avg_window_size": 64,
+                "num_measurements": 1
             }
           }
         ]

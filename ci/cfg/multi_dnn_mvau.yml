@@ -3,23 +3,23 @@
     {
         "dut": ["mvau_multi_dnn"],
         "board": ["RFSoC4x2"],
-        "synth_clk_period_ns": [10],
-        "instrumentation_avg_n": [16384],
+        "synth_clk_period_ns": [5],
+        "instrumentation_avg_n": [64],
         "experiments_config": ["../experiments/multi_dnn.json"],
 
-        "idt": ["INT7"],
-        "wdt": ["INT7"],
+        "idt": ["INT4"],
+        "wdt": ["INT4"],
         #"act": ["INT4"], # thresholding disabled
 
         #"sparsity_type": ["none"],
-        "sparsity_amount": [0, 0.75],
+        "sparsity_amount": [0, 0.5],
 
         "nhw": [[1,32,32]],
         "mw": [32],
         "mh": [32],
         #"sf": [-1],
         #"nf": [-1],
-        "pe_simd": [[1, 1], [32, 32]],
+        "pe_simd": [[1, 1], [1, 2], [2, 2], [2, 4], [4, 4], [4, 8], [8, 8], [8, 16], [16, 16], [16, 32], [32, 32]],
         "m": [1],
 
         #"mem_mode": ["internal_embedded"],

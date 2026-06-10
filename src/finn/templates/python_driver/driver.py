@@ -1757,7 +1757,29 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
         # instrumentation wrapper advances to the next one in round-robin order.
         # The dfx_wrapper detects the tUSER change and triggers partial reconfiguration.
         # mux_interval=0 means tUSER stays at 0 (no reconfiguration, baseline measurement).
-        mux_intervals = kwargs.get("mux_intervals", [0, 10000, 1000, 100, 50, 20, 10, 5, 2, 1])
+        mux_intervals = kwargs.get(
+            "mux_intervals",
+            [
+                0,
+                200000,
+                100000,
+                50000,
+                20000,
+                10000,
+                5000,
+                2000,
+                1000,
+                500,
+                200,
+                100,
+                50,
+                20,
+                10,
+                5,
+                2,
+                1,
+            ],
+        )
 
         test_results = {}
         for mux_interval in mux_intervals:
@@ -1840,86 +1862,91 @@ class FINNDMAInstrumentationOverlay(FINNDMAOverlay, FINNInstrumentationOverlay):
                 else 0,
             }
         report["test"] = test_results
-
         del dfx
-        # PCAP test - dry run to buffer bitstreams in RAM
-        self.enable_pcap()
 
-        full_bs = []
-        full_bs_pattern = re.compile(r"^config_(\d+)\.bit$")
-        for filename in sorted(os.listdir(pr_bitstream_folder)):
-            m = full_bs_pattern.match(filename)
-            if m:
-                path = os.path.join(pr_bitstream_folder, filename)
-                full_bs += [path]
+        do_extra_pr_experiments = False  # TODO
+        if do_extra_pr_experiments:
+            # PCAP test - dry run to buffer bitstreams in RAM
+            self.enable_pcap()
 
-        for p in full_bs:
-            pb = Bitstream(p, None, False)
-            pb.download()
+            full_bs = []
+            full_bs_pattern = re.compile(r"^config_(\d+)\.bit$")
+            for filename in sorted(os.listdir(pr_bitstream_folder)):
+                m = full_bs_pattern.match(filename)
+                if m:
+                    path = os.path.join(pr_bitstream_folder, filename)
+                    full_bs += [path]
 
-        full_configuration_time = []
-        for _ in range(10):
             for p in full_bs:
                 pb = Bitstream(p, None, False)
-                start = time.time()
-                pb.download()
-                end = time.time()
-                full_configuration_time.append(end - start)
-        fct = sorted(full_configuration_time)
-        fn = len(fct)
-        full_configuration_report = {
-            "avg": sum(fct) / fn,
-            "min": fct[0],
-            "q1": fct[fn // 4],
-            "q3": fct[(3 * fn) // 4],
-            "max": fct[-1],
-            "bitfile_sizes_bytes": {os.path.basename(p): os.path.getsize(p) for p in full_bs},
-        }
-        report["full_configuration"] = full_configuration_report
-
-        partial_bs_by_rm = {}
-        partial_bs_pattern = re.compile(rf"^partial_{re.escape(socket_prefix)}_(\d+)_(\d+)\.bit$")
-        for filename in sorted(os.listdir(pr_bitstream_folder)):
-            m = partial_bs_pattern.match(filename)
-            if m:
-                socket_id = int(m.group(1))
-                rm_id = int(m.group(2))
-                path = os.path.join(pr_bitstream_folder, filename)
-                partial_bs_by_rm.setdefault(rm_id, []).append((socket_id, path))
-        for rm_id in partial_bs_by_rm:
-            partial_bs_by_rm[rm_id].sort(key=lambda t: t[0])
-
-        # Dry run
-        for rm_id, sockets in sorted(partial_bs_by_rm.items()):
-            for _, path in sockets:
-                pb = Bitstream(path, None, True)
                 pb.download()
 
-        # Measure reconfiguration time for one full id (all sockets for a given RM id)
-        partial_configuration_time = []
-        for _ in range(10):
+            full_configuration_time = []
+            for _ in range(10):
+                for p in full_bs:
+                    pb = Bitstream(p, None, False)
+                    start = time.time()
+                    pb.download()
+                    end = time.time()
+                    full_configuration_time.append(end - start)
+            fct = sorted(full_configuration_time)
+            fn = len(fct)
+            full_configuration_report = {
+                "avg": sum(fct) / fn,
+                "min": fct[0],
+                "q1": fct[fn // 4],
+                "q3": fct[(3 * fn) // 4],
+                "max": fct[-1],
+                "bitfile_sizes_bytes": {os.path.basename(p): os.path.getsize(p) for p in full_bs},
+            }
+            report["full_configuration"] = full_configuration_report
+
+            partial_bs_by_rm = {}
+            partial_bs_pattern = re.compile(
+                rf"^partial_{re.escape(socket_prefix)}_(\d+)_(\d+)\.bit$"
+            )
+            for filename in sorted(os.listdir(pr_bitstream_folder)):
+                m = partial_bs_pattern.match(filename)
+                if m:
+                    socket_id = int(m.group(1))
+                    rm_id = int(m.group(2))
+                    path = os.path.join(pr_bitstream_folder, filename)
+                    partial_bs_by_rm.setdefault(rm_id, []).append((socket_id, path))
+            for rm_id in partial_bs_by_rm:
+                partial_bs_by_rm[rm_id].sort(key=lambda t: t[0])
+
+            # Dry run
             for rm_id, sockets in sorted(partial_bs_by_rm.items()):
-                start = time.time()
                 for _, path in sockets:
                     pb = Bitstream(path, None, True)
                     pb.download()
-                end = time.time()
-                partial_configuration_time.append(end - start)
-        pct = sorted(partial_configuration_time)
-        pn = len(pct)
-        partial_configuration_report = {
-            "avg": sum(pct) / pn,
-            "min": pct[0],
-            "q1": pct[pn // 4],
-            "q3": pct[(3 * pn) // 4],
-            "max": pct[-1],
-            "bitfile_sizes_bytes": {
-                os.path.basename(path): os.path.getsize(path)
-                for sockets in partial_bs_by_rm.values()
-                for _, path in sockets
-            },
-        }
-        report["partial_configuration"] = partial_configuration_report
+
+            # Measure reconfiguration time for one full id (all sockets for a given RM id)
+            partial_configuration_time = []
+            for _ in range(10):
+                for rm_id, sockets in sorted(partial_bs_by_rm.items()):
+                    start = time.time()
+                    for _, path in sockets:
+                        pb = Bitstream(path, None, True)
+                        pb.download()
+                    end = time.time()
+                    partial_configuration_time.append(end - start)
+            pct = sorted(partial_configuration_time)
+            pn = len(pct)
+            partial_configuration_report = {
+                "avg": sum(pct) / pn,
+                "min": pct[0],
+                "q1": pct[pn // 4],
+                "q3": pct[(3 * pn) // 4],
+                "max": pct[-1],
+                "bitfile_sizes_bytes": {
+                    os.path.basename(path): os.path.getsize(path)
+                    for sockets in partial_bs_by_rm.values()
+                    for _, path in sockets
+                },
+            }
+            report["partial_configuration"] = partial_configuration_report
+
         report["fclk_mhz"] = self.fclk_mhz
         reportfile = os.path.join(report_dir, "report_pr.json")
         with open(reportfile, "w") as f:
