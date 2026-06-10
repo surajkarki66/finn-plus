@@ -609,7 +609,6 @@ class SimEngine:
             self.wlast = top.get_bus_port(mm_axi, "wlast")
             self.bready = top.get_bus_port(mm_axi, "bready")
             self.bvalid = top.get_bus_port(mm_axi, "bvalid")
-            self.bdata = top.get_bus_port(mm_axi, "bdata")
             self.bresp = top.get_bus_port(mm_axi, "bresp")
             self.arready = top.get_bus_port(mm_axi, "arready")
             self.arvalid = top.get_bus_port(mm_axi, "arvalid")
