@@ -120,6 +120,18 @@ def post_synth_res(model, override_synth_report_filename=None):
     if top_dict is not None:
         res_dict["(top)"] = top_dict
 
+    # stats for largest shell components (so we could subtract them later on)
+    # IDMA/ODMA are modeled in ONNX SDPs (queried below)
+    shell_components = [
+        "top_instrumentation_wrap_0_0",
+        "top_axi_interconnect_0_0",
+        "top_smartconnect_0_0",
+    ]
+    for shell_comp in shell_components:
+        shell_dict = get_instance_stats(shell_comp)
+        if shell_dict is not None:
+            res_dict[shell_comp] = shell_dict
+
     for node in model.graph.node:
         if node.op_type == "StreamingDataflowPartition":
             sdp_model = ModelWrapper(getCustomOp(node).get_nodeattr("model"))
