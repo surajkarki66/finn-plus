@@ -261,9 +261,8 @@ int main(int const  argc, char const *const  argv[]) {
 		{
 			Port *const  sim_finish = top.getPort("sim_finish");
 			if(sim_finish) {
-				sim_finish->set(1).write_back();
-				cycle(0);
-				cycle(1);
+				to_write.emplace_back(sim_finish->set(1));
+				cycle(to_write);
 			}
 		}
 
