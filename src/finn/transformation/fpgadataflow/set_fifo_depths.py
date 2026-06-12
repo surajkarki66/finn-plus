@@ -28,7 +28,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import numpy as np
-import os
 import warnings
 from onnx import TensorProto, helper
 from qonnx.core.datatype import DataType
@@ -279,7 +278,7 @@ class InsertAndSetFIFODepths(Transformation):
         vivado_ram_style="auto",
         fifosim_input_throttle=True,
         cfg_n_inferences=2,
-        debug_log_dir=None,
+        debug_log=False,
     ):
         super().__init__()
         self.fpgapart = fpgapart
@@ -292,7 +291,7 @@ class InsertAndSetFIFODepths(Transformation):
         self.cfg_n_inferences = cfg_n_inferences
         self.mlo_max_iter = 0
         self.ind_map = {}
-        self.debug_log_dir = debug_log_dir
+        self.debug_log = debug_log
 
     def apply(self, model):
         model = model.transform(GiveUniqueNodeNames())
@@ -409,11 +408,9 @@ class InsertAndSetFIFODepths(Transformation):
             if (self.max_depth is not None) and (node.get_nodeattr("depth") != self.max_depth):
                 node.set_nodeattr("depth", self.max_depth)
 
-        if self.debug_log_dir is not None:
-            os.makedirs(os.path.abspath(self.debug_log_dir), exist_ok=True)
+        if self.debug_log:
             for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
-                log_path = os.path.abspath(os.path.join(self.debug_log_dir, node.name + ".log"))
-                getCustomOp(node).set_nodeattr("debug_log_path", log_path)
+                getCustomOp(node).set_nodeattr("debug_log", 1)
 
         # insert FIFOs and do all transformations for RTLsim
         model = model.transform(AnnotateCycles())

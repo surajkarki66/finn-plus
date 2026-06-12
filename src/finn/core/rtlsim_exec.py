@@ -296,7 +296,7 @@ def rtlsim_exec_cppxsi(
     runsim_cmd = ["bash", "run_rtlsim.sh"]
     with open(sim_base + "/run_rtlsim.sh", "w") as f:
         f.write(
-            f"LD_LIBRARY_PATH={runsim_env['LD_LIBRARY_PATH']} ./rtlsim_xsi > rtlsim_xsi_log.txt"
+            f"LD_LIBRARY_PATH={runsim_env['LD_LIBRARY_PATH']} ./rtlsim_xsi > rtlsim_xsi_log.txt 2> rtlsim_xsi_stderr.log"
         )
     launch_process_helper(runsim_cmd, cwd=sim_base)
 

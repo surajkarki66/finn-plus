@@ -143,10 +143,6 @@ from finn.util.test import execute_parent
 from finn.util.vivado import parse_ooc_synth_results
 
 
-def _fifo_debug_dir(cfg):
-    return cfg.output_dir + "/debug/fifo_logs"
-
-
 def _maybe_enable_verify_behavioral(cfg):
     if cfg.debug_fifo and not cfg.verify_rtlsim_behavioral:
         print(
@@ -154,33 +150,6 @@ def _maybe_enable_verify_behavioral(cfg):
             "the verify phase uses fifo_gauge and produces per-FIFO logs."
         )
         cfg.verify_rtlsim_behavioral = True
-
-
-def _retarget_fifo_log_paths(model, cfg):
-    if not cfg.debug_fifo:
-        return model
-    dbg_dir = _fifo_debug_dir(cfg)
-    os.makedirs(dbg_dir, exist_ok=True)
-    for node in model.get_nodes_by_op_type("StreamingFIFO_rtl"):
-        inst = getCustomOp(node)
-        old_path = inst.get_nodeattr("debug_log_path")
-        new_path = os.path.abspath(os.path.join(dbg_dir, node.name + ".log"))
-        if old_path and old_path != new_path and os.path.isfile(old_path):
-            os.rename(old_path, new_path)
-        inst.set_nodeattr("debug_log_path", new_path)
-    return model
-
-
-def mark_fifo_debug_phase(cfg, phase_name):
-    if not cfg.debug_fifo:
-        return
-    dbg_dir = _fifo_debug_dir(cfg)
-    os.makedirs(dbg_dir, exist_ok=True)
-    for fn in os.listdir(dbg_dir):
-        if not fn.endswith(".log"):
-            continue
-        with open(os.path.join(dbg_dir, fn), "a") as f:
-            f.write(f"=== phase: {phase_name} ===\n")
 
 
 def verify_step(
@@ -350,14 +319,13 @@ def prepare_loop_ops_fifo_sizing(node, cfg):
             swg_exception=cfg.default_swg_exception,
             vivado_ram_style=cfg.large_fifo_mem_style,
             fifosim_input_throttle=cfg.fifosim_input_throttle,
-            debug_log_dir=(_fifo_debug_dir(cfg) if cfg.debug_fifo else None),
+            debug_log=cfg.debug_fifo,
         )
     )
     loop_model = loop_model.transform(SplitLargeFIFOs())
     loop_model = loop_model.transform(RemoveShallowFIFOs())
     loop_model = loop_model.transform(GiveUniqueNodeNames(prefix=node.name + "_"))
     loop_model = loop_model.transform(GiveReadableTensorNames())
-    loop_model = _retarget_fifo_log_paths(loop_model, cfg)
     node_inst.set_nodeattr("body", loop_model.graph)
 
 
@@ -1012,7 +980,6 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
                 model.set_metadata_prop(
                     "rtlsim_trace", os.path.abspath(report_dir) + "/fifosim_trace.wdb"
                 )
-            mark_fifo_debug_phase(cfg, "fifo_sizing")
             model = model.transform(
                 InsertAndSetFIFODepths(
                     cfg._resolve_fpga_part(),
@@ -1021,7 +988,7 @@ def step_set_fifo_depths(model: ModelWrapper, cfg: DataflowBuildConfig):
                     vivado_ram_style=cfg.large_fifo_mem_style,
                     fifosim_input_throttle=cfg.fifosim_input_throttle,
                     cfg_n_inferences=cfg.fifosim_n_inferences,
-                    debug_log_dir=(_fifo_debug_dir(cfg) if cfg.debug_fifo else None),
+                    debug_log=cfg.debug_fifo,
                 )
             )
             model = model.transform(GiveUniqueNodeNames())
@@ -1153,7 +1120,6 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig):
             # prepare ip-stitched rtlsim
             verify_model = deepcopy(model)
             verify_model = prepare_for_stitched_ip_rtlsim(verify_model, cfg)
-            mark_fifo_debug_phase(cfg, "verify_stitched_ip_rtlsim")
             # use critical path estimate to set rtlsim liveness threshold
             # (very conservative)
             verify_model = verify_model.transform(AnnotateCycles())
@@ -1207,7 +1173,6 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
         # Use behav=False for performance measurement to use real RTL components
         # instead of behavioral models (FINN_SIMULATION affects FIFOs, MVU, LayerNorm,
         # and RTL elementwise ops)
-        mark_fifo_debug_phase(cfg, "rtlsim_perf")
         rtlsim_perf_dict = xsi_fifosim(model, rtlsim_bs, max_iters=max_iters, behav=False)
         # keep keys consistent between the Python and C++-styles
         cycles = rtlsim_perf_dict["cycles"]

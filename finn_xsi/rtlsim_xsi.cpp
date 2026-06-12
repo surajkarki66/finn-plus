@@ -14,6 +14,7 @@
 #include <sstream>
 #include <fstream>
 #include <chrono>
+#include <map>
 #include <vector>
 #include <tuple>
 #include <functional>
@@ -34,6 +35,7 @@ int main(int argc, char *argv[]) {
 
 	// Ultimate Simulation Summary
 	std::string  synopsis;
+	std::map<std::string, unsigned>  maxcounts;
 
 	{ // RTL Simulation
 
@@ -245,6 +247,27 @@ int main(int argc, char *argv[]) {
 			"RUNTIME_S\t" << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - begin).count();
 		synopsis = bld.str();
 
+		// Read maxcount ports before $finish tears down the design
+		for(Port &p : top.ports()) {
+			if(p.isOutput()) {
+				char const *const  name = p.name();
+				if(std::strncmp(name, "maxcount", 8) == 0) {
+					p.read();
+					maxcounts[name] = p.as_unsigned();
+				}
+			}
+		}
+
+		// Trigger $finish via sim_finish port so that final blocks execute
+		{
+			Port *const  sim_finish = top.getPort("sim_finish");
+			if(sim_finish) {
+				sim_finish->set(1).write_back();
+				cycle(0);
+				cycle(1);
+			}
+		}
+
 	} // done simulation
 
 	// Dump Simulation Statistics to stdout and results.txt
@@ -258,14 +281,8 @@ int main(int argc, char *argv[]) {
 	{ // Synopsis and `max_count` readings to results file
 		std::ofstream  results_file("results.txt", std::ios::out | std::ios::trunc);
 		results_file << synopsis << std::endl;
-		for(Port &p : top.ports()) {
-			if(p.isOutput()) {
-				char const *const  name = p.name();
-				if(std::strncmp(name, "maxcount", 8) == 0) {
-					p.read();
-					results_file << name << '\t' << p.as_unsigned() << std::endl;
-				}
-			}
+		for(auto const &[name, val] : maxcounts) {
+			results_file << name << '\t' << val << std::endl;
 		}
 	}
 
