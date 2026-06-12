@@ -295,8 +295,11 @@ def rtlsim_exec_cppxsi(
     runsim_env["LD_LIBRARY_PATH"] = get_vivado_root() + "/lib/lnx64.o"
     runsim_cmd = ["bash", "run_rtlsim.sh"]
     with open(sim_base + "/run_rtlsim.sh", "w") as f:
+        ld_path = runsim_env["LD_LIBRARY_PATH"]
         f.write(
-            f"LD_LIBRARY_PATH={runsim_env['LD_LIBRARY_PATH']} ./rtlsim_xsi > rtlsim_xsi_log.txt 2> rtlsim_xsi_stderr.log"
+            f"LD_LIBRARY_PATH={ld_path}"
+            " ./rtlsim_xsi > rtlsim_xsi_log.txt"
+            " 2> rtlsim_xsi_stderr.log"
         )
     launch_process_helper(runsim_cmd, cwd=sim_base)
 

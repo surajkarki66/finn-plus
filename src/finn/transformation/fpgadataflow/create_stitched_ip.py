@@ -403,9 +403,7 @@ class CreateStitchedIP(Transformation):
         self.connect_cmds.append(
             "make_bd_pins_external [get_bd_pins %s/sim_finish]" % sim_ctrl_name
         )
-        self.connect_cmds.append(
-            "set_property name sim_finish [get_bd_ports sim_finish_0]"
-        )
+        self.connect_cmds.append("set_property name sim_finish [get_bd_ports sim_finish_0]")
 
     def apply(self, model):
         # ensure non-relative readmemh .dat files
