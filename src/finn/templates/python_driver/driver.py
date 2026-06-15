@@ -90,6 +90,7 @@ class FINNDMAOverlay(Overlay):
             # set the clock frequency as specified by user during transformations
             if self.fclk_mhz > 0:
                 Clocks.fclk0_mhz = self.fclk_mhz
+                self.fclk_mhz_actual = Clocks.fclk0_mhz
         # load any external + runtime weights
         self.load_external_weights()
         self.load_runtime_weights()
