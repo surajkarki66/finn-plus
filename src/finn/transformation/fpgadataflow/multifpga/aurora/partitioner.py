@@ -28,11 +28,11 @@ class AuroraPartitioner(Partitioner):  # noqa
         devices: int,
         nodes: int,
         inseparable_nodes: list[list[int]],
-        resources_per_device: dict,
+        resources_per_device: dict[str, int | float],
         verbosity: MFVerbosity,
         topology: MFTopology,
         output_dir: Path,
-        resource_estimates: dict | None = None,
+        resource_estimates: dict[int, dict[str, int | float]] | None = None,
         considered_resources: list[str] | None = None,
         limit_nodes_per_device: int | None = None,
         max_utilization: float | None = None,
@@ -101,6 +101,19 @@ class AuroraPartitioner(Partitioner):  # noqa
                 f"during routing. Consider decreasing max utilization "
                 f"in case implementation fails."
             )
+
+        # Warn about total resources
+        if resource_estimates is not None and considered_resources is not None:
+            for restype in considered_resources:
+                total_required = sum([rv[restype] for rv in resource_estimates.values()])
+                total_on_devices = devices * resources_per_device[restype]
+                if total_required > total_on_devices:
+                    raise FINNMultiFPGAUserError(
+                        f"The model requires a total of "
+                        f"{total_required} {restype}, but "
+                        f"{devices} devices combined only have "
+                        f"{total_on_devices} {restype} in total."
+                    )
 
         log.debug("Creating partitioning model")
 

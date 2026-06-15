@@ -233,7 +233,10 @@ class PartitionForMultiFPGA(Transformation):
         # TODO: This currently does not store the mapping in the log. This is
         # TODO: currently done via solution.txt, which should be put into the output_dir
         if self.verbosity.value == MFVerbosity.EXTRA_HIGH.value:
+            assert self.partitioner is not None
+            log.info(f"Model objective value: {self.partitioner.model.objective.x}")
             self.show_mapping(model, mapping)
+
         if self.verbosity.value > MFVerbosity.NONE.value:
             device_nodes = {}
             for i in range(len(model.graph.node)):
@@ -251,7 +254,7 @@ class PartitionForMultiFPGA(Transformation):
             # Stop if there are more devices than nodes
             raise FINNMultiFPGAConfigError(
                 f"Model infeasible: Cannot partition a model with "
-                f"{len(model.graph.node)} to {self.devices} devices!"
+                f"{len(model.graph.node)} nodes to {self.devices} devices!"
             )
         if not is_single_in_out_model(model):
             # Dont split during branches. Find all layers that should be on the same device.

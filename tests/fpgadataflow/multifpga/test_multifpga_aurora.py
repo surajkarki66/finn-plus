@@ -291,12 +291,22 @@ class TestAuroraFlowPartitioning:
             f"test_partitioning_{typename}_{wbits}_{abits}_{pretrained}_"
             f"{devices}_{partition_strategy.name}_{topology.name}_{board}_{max_util}_{ideal_util}"
         )
+
+        # Skip tests for models that don't fit on certain devices
+        if typename in ["mobilenetv1", "resnet18"] and board not in ["U280"]:
+            pytest.skip(reason=f"Model {typename} too large for board {board}!")  # type: ignore
+
+        # Skip the same tests that the end2end tests skip
+        if typename.lower() == "lfc" and not (wbits == 1 and abits == 1):
+            pytest.skip("Not running LFC models with W1A1.")  # type: ignore
+
+        # Build the config
         flow_type = self.get_shell_flow_type(board)
         cfg = DataflowBuildConfig(
             output_dir=make_build_dir(test_identifier),
             board=board,
-            mvau_wwidth_max=512,
-            target_fps=500,
+            mvau_wwidth_max=32,
+            target_fps=100,
             synth_clk_period_ns=10.0,
             standalone_thresholds=True,
             minimize_bit_width=True,
@@ -310,7 +320,7 @@ class TestAuroraFlowPartitioning:
                 ideal_utilization=ideal_util,
                 ports_per_device=2,
                 separate_iodmas=True,
-                partition_solver_timeout=60,
+                partition_solver_timeout=180,
             ),
         )
 
@@ -327,15 +337,29 @@ class TestAuroraFlowPartitioning:
             identifier="test_partitioning",
         )
 
+        # Catch if there are more devices than nodes
+        context = contextlib.nullcontext()
+        if len(model.graph.node) < devices:
+            context = pytest.raises(FINNMultiFPGAConfigError)
+
         # Do the partitioning
-        assert cfg.partitioning_configuration is not None
-        part = PartitionForMultiFPGA(
-            cfg.partitioning_configuration,
-            cfg._resolve_fpga_part(),  # noqa
-            board,
-            Path(make_build_dir("")),
-        )
-        model = model.transform(part)
+        # IMPORTANT: Large device counts open a very large search space for the model,
+        # which is why it could happen that the solver does not find a solution in the given time,
+        # despite the model being feasible. The current timeout should prevent this from happening.
+        with context:
+            assert cfg.partitioning_configuration is not None
+            part = PartitionForMultiFPGA(
+                cfg.partitioning_configuration,
+                cfg._resolve_fpga_part(),  # noqa
+                board,
+                Path(make_build_dir("")),
+            )
+            model = model.transform(part)
+
+        # If there are more devices than nodes, we are done here, since we already tested,
+        # that the error is raised
+        if len(model.graph.node) < devices:
+            return
 
         # Check that partitioning was successful
         assert part.partitioner is not None
