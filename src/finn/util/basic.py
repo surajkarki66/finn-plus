@@ -42,6 +42,7 @@ basic system operations, hardware abstraction, and build tool integration.
 """
 
 import contextlib
+import errno
 import os
 import signal
 import stat as statmod
@@ -121,7 +122,7 @@ part_map["V80"] = "xcv80-lsva4737-2MHP-e-s"
 def wait_for_file(
     path: Path,
     timeout: float = 30.0,
-    stable_for: float = 0.2,
+    stable_for: float = 0.05,
     interval: float = 0.05,
     expect_dir: bool | None = False,
 ) -> bool:
@@ -130,16 +131,23 @@ def wait_for_file(
     If expect_dir is True, only a directory satisfies the check. If False,
     only a regular file satisfies it. If None, either file or directory is ok.
     """
-    deadline = time.time() + timeout
+    deadline = time.monotonic() + timeout
     last = None
     last_change = None
 
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         try:
             st = path.stat()
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             time.sleep(interval)
             continue
+        except OSError as e:
+            # Under high parallelism, avoid failing immediately on transient
+            # process/file table exhaustion and retry until timeout.
+            if e.errno in (errno.EMFILE, errno.ENFILE):
+                time.sleep(interval)
+                continue
+            raise
 
         if expect_dir is True and not statmod.S_ISDIR(st.st_mode):
             time.sleep(interval)
@@ -148,8 +156,11 @@ def wait_for_file(
             time.sleep(interval)
             continue
 
+        if stable_for <= 0:
+            return True
+
         cur = (st.st_size, st.st_mtime_ns)
-        now = time.time()
+        now = time.monotonic()
         if cur == last:
             if last_change is not None and (now - last_change) >= stable_for:
                 return True
@@ -163,7 +174,7 @@ def wait_for_file(
 
 
 def wait_for_dir(
-    path: Path, timeout: float = 30.0, stable_for: float = 0.2, interval: float = 0.05
+    path: Path, timeout: float = 30.0, stable_for: float = 0.05, interval: float = 0.05
 ) -> bool:
     """Wait until directory exists and is stable in size/mtime for stable_for seconds."""
     return wait_for_file(

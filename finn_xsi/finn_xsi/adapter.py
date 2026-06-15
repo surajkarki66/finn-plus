@@ -50,6 +50,14 @@ def compile_sim_obj(
         if glbl is not None:
             f.write(f"verilog work {glbl}\n")
 
+        # Check that every source file is found in the filesystem
+        for src in source_list:
+            if not wait_for_file(Path(src), timeout=5):
+                raise FINNInternalError(
+                    f"Source file {src} not found. Check that all codegen ran successfully and "
+                    "that the source files are in the expected location."
+                )
+
         # extract (unique, by using a set) verilog headers for inclusion
         verilog_headers = {str(Path(x).parent) for x in source_list if x.endswith((".vh", ".svh"))}
         verilog_header_incl_str = " ".join(["--include " + x for x in verilog_headers])
@@ -100,6 +108,9 @@ def compile_sim_obj(
         "--O3",
         "-s",
         top_module_name,
+        "-prj",
+        "rtlsim.prj",
+        "-incr",
     ]
     # Add debug flag if debug is enabled
     if debug:

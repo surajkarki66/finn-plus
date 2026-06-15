@@ -27,9 +27,6 @@ verif_steps = [
     "stitched_ip_rtlsim",
 ]
 
-fpga_part = "xcvc1902-vsva2197-2MP-e-S"
-clk_ns = 5
-
 
 def generate_random_threshold_values(data_type, num_input_channels, num_steps):
     if data_type.is_integer():
@@ -419,6 +416,7 @@ def create_chained_loop_bodies(
 @pytest.mark.fpgadataflow
 @pytest.mark.vivado
 @pytest.mark.slow
+@pytest.mark.only
 def test_finnloop_end2end_mlo(
     dim, iteration, elemwise_optype, rhs_shape, eltw_param_dtype, tail_node
 ):
