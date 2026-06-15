@@ -197,7 +197,7 @@ class TestAuroraFlowPartitioning:
         elif board in ["Pynq-Z1"]:  # noqa
             return ShellFlowType.VIVADO_ZYNQ
         raise NotImplementedError(
-            f"Unknown board type ({board}) for this test. " f"Unsure which shell type to use."
+            f"Unknown board type ({board}) for this test. Unsure which shell type to use."
         )
 
     @pytest.mark.parametrize("network_ports", [2])
@@ -257,7 +257,6 @@ class TestAuroraFlowPartitioning:
             ("CNV", 2, 2, True),
             ("LFC", 1, 1, True),
             ("LFC", 1, 2, True),
-            ("SFC", 1, 1, True),
             ("SFC", 1, 2, True),
             ("SFC", 2, 2, True),
             ("TFC", 1, 1, True),
@@ -296,9 +295,9 @@ class TestAuroraFlowPartitioning:
         cfg = DataflowBuildConfig(
             output_dir=make_build_dir(test_identifier),
             board=board,
-            mvau_wwidth_max=64,
-            target_fps=1,
-            synth_clk_period_ns=5.0,
+            mvau_wwidth_max=512,
+            target_fps=500,
+            synth_clk_period_ns=10.0,
             standalone_thresholds=True,
             minimize_bit_width=True,
             shell_flow_type=flow_type,

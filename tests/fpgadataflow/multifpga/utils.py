@@ -10,6 +10,7 @@ import random
 import torch
 from brevitas.export import export_qonnx
 from brevitas_examples.bnn_pynq.models.resnet import quant_resnet18
+from collections.abc import Callable
 from copy import deepcopy
 from networkx.classes.digraph import DiGraph
 from pathlib import Path
@@ -21,7 +22,7 @@ from qonnx.transformation.infer_data_layouts import InferDataLayouts
 from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
 from qonnx.util.cleanup import cleanup as qonnx_cleanup
 from testing_util.test import get_test_model
-from typing import Any, Callable, cast
+from typing import cast
 
 import finn.transformation.fpgadataflow.convert_to_hw_layers as to_hw
 import finn.transformation.streamline.absorb as absorb
@@ -111,11 +112,13 @@ mn_pre_multifpga_steps = [
     "finn.builder.custom_step_library.mobilenet.step_mobilenet_streamline",  # Custom step
     "finn.builder.custom_step_library.mobilenet.step_mobilenet_lower_convs",  # Custom step
     "finn.builder.custom_step_library.mobilenet.step_mobilenet_convert_to_hw_layers",
+    # "finn.builder.custom_step_library.mobilenet.step_mobilenet_convert_to_hw_layers_separate_th",
     "step_create_dataflow_partition",
     "step_specialize_layers",
+    "step_target_fps_parallelization",
     "step_apply_folding_config",
     "step_minimize_bit_width",
-    "step_transpose_decomposition",
+    # "step_transpose_decomposition",
     "step_generate_estimate_reports",
     "step_hw_codegen",
     "step_hw_ipgen",

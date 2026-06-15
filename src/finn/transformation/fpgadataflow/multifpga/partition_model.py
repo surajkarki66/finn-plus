@@ -267,7 +267,7 @@ class PartitionForMultiFPGA(Transformation):
 
         # Calculate resource estimates for the solver objective function (if needed)
         model = model.transform(GiveUniqueNodeNames())
-        estimates = get_estimated_model_resources(model, self.part, self.considered_resources)
+        estimates = get_estimated_model_resources(model, self.part, self.considered_resources, True)
         self.check_missing_estimates(estimates)
 
         # Create the partitioner itself

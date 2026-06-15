@@ -1,6 +1,7 @@
 """Partitioners for Multi-FPGA usage."""
 
 from __future__ import annotations
+import locale
 
 import mip
 import yaml
@@ -61,6 +62,12 @@ class Partitioner(ABC):
         self.status: mip.OptimizationStatus | None
         self.solver = solver
         self.solver_emphasis = solver_emphasis
+
+        # Store locale. Necessary to avoid a bug, where a failed Gurobi model instantiation
+        # causes the default locale/encoding to switch away from UTF8, causing file
+        # IO errors later on.
+        current_locale = locale.getlocale(locale.LC_CTYPE)
+
         if solver is None:
             try:
                 self.model = Model()
@@ -85,6 +92,9 @@ class Partitioner(ABC):
                     f"Cannot create mip solver of type {solver}. Original error: {e}"
                 ) from e
         self.model.name = "FINN_MultiFPGA_Partitioning_Model"
+
+        # Restore locale, as mentioned above.
+        locale.setlocale(locale.LC_CTYPE, current_locale)
 
         # Set model emphasis
         self.model.emphasis = self.solver_emphasis
