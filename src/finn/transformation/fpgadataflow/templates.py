@@ -107,16 +107,17 @@ if {$ZYNQ_TYPE == "zynq_us+"} {
         set_property -dict [list CONFIG.PSU__USE__M_AXI_GP0 {1}] [get_bd_cells zynq_ps]
         set_property -dict [list CONFIG.PSU__USE__M_AXI_GP2 {0}] [get_bd_cells zynq_ps]
     }
-    #set frequency of PS clock (this can't always be exactly met)
+    #set PS PL clock to ~100 MHz as reference for the Clocking Wizard
     set_property -dict [list CONFIG.PSU__OVERRIDE__BASIC_CLOCK {0}] [get_bd_cells zynq_ps]
-    set_property -dict [list CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ [expr int($FREQ_MHZ)]] [get_bd_cells zynq_ps]
+    set_property -dict [list CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {100}] [get_bd_cells zynq_ps]
 } elseif {$ZYNQ_TYPE == "zynq_7000"} {
     set zynq_ps_vlnv [get_property VLNV [get_ipdefs "xilinx.com:ip:processing_system7:*"]]
     set zynq_ps_clkname "FCLK_CLK0"
     create_bd_cell -type ip -vlnv $zynq_ps_vlnv zynq_ps
     apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 -config {make_external "FIXED_IO, DDR" apply_board_preset "1" Master "Disable" Slave "Disable" }  [get_bd_cells zynq_ps]
     set_property -dict [list CONFIG.PCW_USE_S_AXI_HP0 {1}] [get_bd_cells zynq_ps]
-    set_property -dict [list CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ [expr int($FREQ_MHZ)]] [get_bd_cells zynq_ps]
+    #set PS PL clock to ~100 MHz as reference for the Clocking Wizard
+    set_property -dict [list CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {100}] [get_bd_cells zynq_ps]
 } else {
     puts "Unrecognized Zynq type"
 }
@@ -130,24 +131,55 @@ create_bd_cell -type ip -vlnv $smartconnect_vlnv smartconnect_0
 set_property -dict [list CONFIG.NUM_SI $NUM_AXIMM] [get_bd_cells smartconnect_0]
 set_property -dict [list CONFIG.NUM_MI $NUM_AXILITE] [get_bd_cells axi_interconnect_0]
 
-#create reset controller and connect interconnects to PS
+# Instantiate Clocking Wizard. The PS PL clock is used as a stable reference.
+# The MMCM generates FREQ_MHZ with far higher accuracy than the PS clock divider
+# chain, eliminating synthesis vs. runtime frequency mismatches.
+# VALUE_SRC PROPAGATED lets Vivado derive PRIM_IN_FREQ automatically from the
+# connected pl_clk0/FCLK_CLK0 pin, avoiding BD 41-238 frequency mismatches.
+create_bd_cell -type ip -vlnv [get_property VLNV [get_ipdefs -filter {NAME == clk_wiz}]] clk_wiz_0
+set_property -dict [list \
+    CONFIG.PRIM_IN_FREQ.VALUE_SRC PROPAGATED \
+    CONFIG.PRIM_SOURCE {No_buffer} \
+    CONFIG.PRIMITIVE {PLL} \
+    CONFIG.CLKOUT1_REQUESTED_OUT_FREQ $FREQ_MHZ \
+    CONFIG.USE_LOCKED {true} \
+    CONFIG.USE_RESET {true} \
+    CONFIG.RESET_TYPE {ACTIVE_LOW} \
+    CONFIG.RESET_PORT {resetn} \
+] [get_bd_cells clk_wiz_0]
+
+# Create proc_sys_reset_0 driven by Clocking Wizard output and locked signal.
+# Using a fixed name avoids reliance on naming chosen by apply_bd_automation.
+create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_0
+connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins proc_sys_reset_0/slowest_sync_clk]
+connect_bd_net [get_bd_pins clk_wiz_0/locked] [get_bd_pins proc_sys_reset_0/dcm_locked]
+
+#connect interconnects to PS and wire all clocks/resets explicitly
 if {$ZYNQ_TYPE == "zynq_us+"} {
     set axi_peripheral_base 0xA0000000
     connect_bd_intf_net [get_bd_intf_pins smartconnect_0/M00_AXI] [get_bd_intf_pins zynq_ps/S_AXI_HP0_FPD]
     connect_bd_intf_net [get_bd_intf_pins zynq_ps/M_AXI_HPM0_FPD] -boundary_type upper [get_bd_intf_pins axi_interconnect_0/S00_AXI]
-    #connect interconnect clocks and resets
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/pl_clk0} Freq {} Ref_Clk0 {} Ref_Clk1 {} Ref_Clk2 {}}  [get_bd_pins axi_interconnect_0/ACLK]
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/pl_clk0} Freq {} Ref_Clk0 {} Ref_Clk1 {} Ref_Clk2 {}}  [get_bd_pins axi_interconnect_0/S00_ACLK]
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/pl_clk0} Freq {} Ref_Clk0 {} Ref_Clk1 {} Ref_Clk2 {}}  [get_bd_pins zynq_ps/saxihp0_fpd_aclk]
+    connect_bd_net [get_bd_pins zynq_ps/pl_clk0] [get_bd_pins clk_wiz_0/clk_in1]
+    connect_bd_net [get_bd_pins zynq_ps/pl_resetn0] [get_bd_pins clk_wiz_0/resetn]
+    connect_bd_net [get_bd_pins zynq_ps/pl_resetn0] [get_bd_pins proc_sys_reset_0/ext_reset_in]
+    connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins zynq_ps/saxihp0_fpd_aclk]
+    connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins zynq_ps/maxihpm0_fpd_aclk]
 } elseif {$ZYNQ_TYPE == "zynq_7000"} {
     set axi_peripheral_base 0x40000000
     connect_bd_intf_net -boundary_type upper [get_bd_intf_pins zynq_ps/M_AXI_GP0] [get_bd_intf_pins axi_interconnect_0/S00_AXI]
     connect_bd_intf_net [get_bd_intf_pins smartconnect_0/M00_AXI] [get_bd_intf_pins zynq_ps/S_AXI_HP0]
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/FCLK_CLK0} Freq {} Ref_Clk0 {} Ref_Clk1 {} Ref_Clk2 {}}  [get_bd_pins axi_interconnect_0/ACLK]
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/FCLK_CLK0} Freq {} Ref_Clk0 {} Ref_Clk1 {} Ref_Clk2 {}}  [get_bd_pins axi_interconnect_0/S00_ACLK]
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/FCLK_CLK0} Freq {} Ref_Clk0 {} Ref_Clk1 {} Ref_Clk2 {}}  [get_bd_pins zynq_ps/S_AXI_HP0_ACLK]
+    connect_bd_net [get_bd_pins zynq_ps/FCLK_CLK0] [get_bd_pins clk_wiz_0/clk_in1]
+    connect_bd_net [get_bd_pins zynq_ps/FCLK_RESET0_N] [get_bd_pins clk_wiz_0/resetn]
+    connect_bd_net [get_bd_pins zynq_ps/FCLK_RESET0_N] [get_bd_pins proc_sys_reset_0/ext_reset_in]
+    connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins zynq_ps/S_AXI_HP0_ACLK]
+    connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins zynq_ps/M_AXI_GP0_ACLK]
 }
-connect_bd_net [get_bd_pins axi_interconnect_0/ARESETN] [get_bd_pins smartconnect_0/aresetn]
+connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins axi_interconnect_0/ACLK]
+connect_bd_net [get_bd_pins proc_sys_reset_0/interconnect_aresetn] [get_bd_pins axi_interconnect_0/ARESETN]
+connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins axi_interconnect_0/S00_ACLK]
+connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins axi_interconnect_0/S00_ARESETN]
+connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins smartconnect_0/aclk]
+connect_bd_net [get_bd_pins proc_sys_reset_0/interconnect_aresetn] [get_bd_pins smartconnect_0/aresetn]
 
 #procedure used by below IP instantiations to map BD address segments based on the axi interface aperture
 proc assign_axi_addr_proc {axi_intf_path} {
@@ -173,9 +205,9 @@ if {%d == 1} {
     set_property HDL_ATTRIBUTE.DEBUG true [get_bd_intf_nets {StreamingDataflowPartition_1_m_axis_0}]
     set_property HDL_ATTRIBUTE.DEBUG true [get_bd_intf_nets {smartconnect_0_M00_AXI}]
     apply_bd_automation -rule xilinx.com:bd_rule:debug -dict [list \
-                                                              [get_bd_intf_nets smartconnect_0_M00_AXI] {AXI_R_ADDRESS "Data and Trigger" AXI_R_DATA "Data and Trigger" AXI_W_ADDRESS "Data and Trigger" AXI_W_DATA "Data and Trigger" AXI_W_RESPONSE "Data and Trigger" CLK_SRC "/zynq_ps/FCLK_CLK0" SYSTEM_ILA "Auto" APC_EN "0" } \
-                                                              [get_bd_intf_nets idma0_m_axis_0] {AXIS_SIGNALS "Data and Trigger" CLK_SRC "/zynq_ps/FCLK_CLK0" SYSTEM_ILA "Auto" APC_EN "0" } \
-                                                              [get_bd_intf_nets StreamingDataflowPartition_1_m_axis_0] {AXIS_SIGNALS "Data and Trigger" CLK_SRC "/zynq_ps/FCLK_CLK0" SYSTEM_ILA "Auto" APC_EN "0" } \
+                                                              [get_bd_intf_nets smartconnect_0_M00_AXI] {AXI_R_ADDRESS "Data and Trigger" AXI_R_DATA "Data and Trigger" AXI_W_ADDRESS "Data and Trigger" AXI_W_DATA "Data and Trigger" AXI_W_RESPONSE "Data and Trigger" CLK_SRC "/clk_wiz_0/clk_out1" SYSTEM_ILA "Auto" APC_EN "0" } \
+                                                              [get_bd_intf_nets idma0_m_axis_0] {AXIS_SIGNALS "Data and Trigger" CLK_SRC "/clk_wiz_0/clk_out1" SYSTEM_ILA "Auto" APC_EN "0" } \
+                                                              [get_bd_intf_nets StreamingDataflowPartition_1_m_axis_0] {AXIS_SIGNALS "Data and Trigger" CLK_SRC "/clk_wiz_0/clk_out1" SYSTEM_ILA "Auto" APC_EN "0" } \
                                                              ]
 }
 
@@ -194,22 +226,18 @@ if { $enable_gpio_reset == 1 || $enable_finn_switch == 1 } {
 
 # Connect GPIO1 to
 if { $enable_gpio_reset == 1 } {
-    connect_bd_net [get_bd_pins axi_gpio_0/gpio_io_o] [get_bd_pins rst_zynq_ps_*/aux_reset_in]
+    connect_bd_net [get_bd_pins axi_gpio_0/gpio_io_o] [get_bd_pins proc_sys_reset_0/aux_reset_in]
 }
 
 #finalize clock and reset connections for interconnects
-if {$ZYNQ_TYPE == "zynq_us+"} {
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/pl_clk0} }  [get_bd_pins axi_interconnect_0/M*_ACLK]
-} elseif {$ZYNQ_TYPE == "zynq_7000"} {
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { Clk {/zynq_ps/FCLK_CLK0} }  [get_bd_pins axi_interconnect_0/M*_ACLK]
-}
+connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins axi_interconnect_0/M*_ACLK]
+connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins axi_interconnect_0/M*_ARESETN]
 
 if { $enable_finn_switch == 1 } {
     set_property -dict [list CONFIG.C_ALL_OUTPUTS_2 {1} CONFIG.C_GPIO2_WIDTH {1} CONFIG.C_IS_DUAL {1}] [get_bd_cells axi_gpio_0]
     connect_bd_net [get_bd_pins axi_gpio_0/gpio2_io_o] [get_bd_pins finn_switch/sel]
-    # TODO: This is a workaround - FREQ_HZ changes after applying validate_bd_design the first time, which results in an error
-    catch validate_bd_design
-    set clk_freq_hz [get_property CONFIG.FREQ_HZ [get_bd_intf_pins /zynq_ps/M_AXI_HPM0_FPD]]
+    # Compute design clock frequency in Hz directly from FREQ_MHZ.
+    set clk_freq_hz [expr {int($FREQ_MHZ * 1000000)}]
     set_property CONFIG.FREQ_HZ $clk_freq_hz [get_bd_intf_pins /finn_switch/*]
     # instrumentation_wrap_0 AXI-Stream ports inherit FREQ_HZ from HLS synthesis and differ
     # from finn_switch's frequency, triggering BD 41-237.  Normalise them here.

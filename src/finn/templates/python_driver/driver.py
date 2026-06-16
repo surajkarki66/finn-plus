@@ -87,8 +87,19 @@ class FINNDMAOverlay(Overlay):
             if self.platform == "alveo":
                 self.odma_handle.append(None)
         if self.platform == "zynq-iodma":
-            # set the clock frequency as specified by user during transformations
-            if self.fclk_mhz > 0:
+            if "clk_wiz_0" in self.ip_dict:
+                # New-style: PS clock is a 100 MHz reference; Clocking Wizard generates
+                # the exact design clock. Read the achieved frequency from HWH.
+                Clocks.fclk0_mhz = 100.0
+                clk_wiz_params = self.ip_dict["clk_wiz_0"]["parameters"]
+                self.fclk_mhz_actual = float(
+                    clk_wiz_params.get(
+                        "CLKOUT1_OUT_FREQ",
+                        clk_wiz_params.get("CLKOUT1_REQUESTED_OUT_FREQ", str(self.fclk_mhz)),
+                    )
+                )
+            elif self.fclk_mhz > 0:
+                # Legacy: PS clock IS the design clock (best-effort, may not achieve exact freq)
                 Clocks.fclk0_mhz = self.fclk_mhz
                 self.fclk_mhz_actual = Clocks.fclk0_mhz
         # load any external + runtime weights
@@ -581,7 +592,19 @@ class FINNInstrumentationOverlay(Overlay):
 
         # configure clock (for ZYNQ platforms)
         if self.platform == "zynq-iodma":
-            if self.fclk_mhz > 0:
+            if "clk_wiz_0" in self.ip_dict:
+                # New-style: PS clock is a 100 MHz reference; Clocking Wizard generates
+                # the exact design clock. Read the achieved frequency from HWH.
+                Clocks.fclk0_mhz = 100.0
+                clk_wiz_params = self.ip_dict["clk_wiz_0"]["parameters"]
+                self.fclk_mhz_actual = float(
+                    clk_wiz_params.get(
+                        "CLKOUT1_OUT_FREQ",
+                        clk_wiz_params.get("CLKOUT1_REQUESTED_OUT_FREQ", str(self.fclk_mhz)),
+                    )
+                )
+            elif self.fclk_mhz > 0:
+                # Legacy: PS clock IS the design clock (best-effort, may not achieve exact freq)
                 Clocks.fclk0_mhz = self.fclk_mhz
                 self.fclk_mhz_actual = Clocks.fclk0_mhz
 

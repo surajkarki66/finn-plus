@@ -304,8 +304,12 @@ class MakeZYNQProject(Transformation):
                 )
                 # connect clocks/reset
                 config.append(
-                    "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
-                    '"Clk /zynq_ps/$zynq_ps_clkname" [get_bd_pins axi_interconnect_%d/ACLK]' % (i)
+                    "connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] "
+                    "[get_bd_pins axi_interconnect_%d/ACLK]" % (i)
+                )
+                config.append(
+                    "connect_bd_net [get_bd_pins proc_sys_reset_0/interconnect_aresetn] "
+                    "[get_bd_pins axi_interconnect_%d/ARESETN]" % (i)
                 )
                 master_axilite_idx += 1
                 total_axilite_count = max(0, total_axilite_count - 64)
@@ -594,8 +598,12 @@ class MakeZYNQProject(Transformation):
         # finalize nested interconnect clock/reset
         for i in range(1, nested_interconnect_count + 1):
             config.append(
-                "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
-                '"Clk /zynq_ps/$zynq_ps_clkname"  [get_bd_pins axi_interconnect_%d/M*_ACLK]' % (i)
+                "connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] "
+                "[get_bd_pins axi_interconnect_%d/M*_ACLK]" % (i)
+            )
+            config.append(
+                "connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] "
+                "[get_bd_pins axi_interconnect_%d/M*_ARESETN]" % (i)
             )
 
         # create a temporary folder for the project
@@ -871,7 +879,7 @@ class MakeZYNQProject(Transformation):
             )
             pr_config.append(
                 "connect_bd_net [get_bd_pins icape3_wrapper/clk] "
-                "[get_bd_pins zynq_ps/$zynq_ps_clkname]"
+                "[get_bd_pins clk_wiz_0/clk_out1]"
             )
             for pr_sdp in pr_sdp_nodes:
                 pr_sdp_inst = getCustomOp(pr_sdp)
@@ -916,9 +924,12 @@ class MakeZYNQProject(Transformation):
                 "proc_sys_reset_dfx"
             )
             pr_config.append(
-                "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
-                '"Clk /zynq_ps/$zynq_ps_clkname" '
+                "connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] "
                 "[get_bd_pins proc_sys_reset_dfx/slowest_sync_clk]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins clk_wiz_0/locked] "
+                "[get_bd_pins proc_sys_reset_dfx/dcm_locked]"
             )
 
             pr_config.append(
@@ -962,9 +973,12 @@ class MakeZYNQProject(Transformation):
                 "[get_bd_intf_pins axi_interconnect_0/[format M%02d_AXI $dfx_mi_idx]]"
             )
             pr_config.append(
-                "apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config "
-                '"Clk /zynq_ps/$zynq_ps_clkname" '
+                "connect_bd_net [get_bd_pins clk_wiz_0/clk_out1] "
                 "[get_bd_pins axi_interconnect_0/[format M%02d_ACLK $dfx_mi_idx]]"
+            )
+            pr_config.append(
+                "connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] "
+                "[get_bd_pins axi_interconnect_0/[format M%02d_ARESETN $dfx_mi_idx]]"
             )
             pr_config.append(
                 "assign_bd_address [get_bd_addr_segs {dfx_controller_0/s_axi_reg/Reg}]"
