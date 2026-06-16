@@ -671,6 +671,10 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     #: If enable_instrumentation is True, one can disable the DMA with this flag
     instrumentation_no_dma: Optional[bool] = False
 
+    #: (Only relevant if enable_instrumentation is True) Size of the averaging window
+    #: (number of frames) used by the instrumentation wrapper for throughput measurement.
+    instrumentation_avg_n: int = 64
+
     #: Whether pdb postmortem debugging will be launched when the build fails.
     enable_build_pdb_debug: bool = False
 

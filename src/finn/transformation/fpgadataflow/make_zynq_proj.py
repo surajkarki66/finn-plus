@@ -628,6 +628,7 @@ class ZynqBuild(Transformation):
         enable_debug=False,
         enable_instrumentation=False,
         instrumentation_no_dma=False,
+        instrumentation_avg_n=64,
         live_fifo_sizing=False,
         partition_model_dir=None,
     ):
@@ -640,6 +641,7 @@ class ZynqBuild(Transformation):
         self.enable_debug = enable_debug
         self.enable_instrumentation = enable_instrumentation
         self.instrumentation_no_dma = instrumentation_no_dma
+        self.instrumentation_avg_n = instrumentation_avg_n
         self.live_fifo_sizing = live_fifo_sizing
         self.partition_model_dir = partition_model_dir
 
@@ -655,14 +657,18 @@ class ZynqBuild(Transformation):
         if self.enable_instrumentation:
             if self.instrumentation_no_dma is True or self.live_fifo_sizing is True:
                 prep_transforms = [
-                    GenerateInstrumentationIP(self.fpga_part, self.period_ns),
+                    GenerateInstrumentationIP(
+                        self.fpga_part, self.period_ns, self.instrumentation_avg_n
+                    ),
                     Floorplan(),
                     CreateDataflowPartition(partition_model_dir=self.partition_model_dir),
                 ]
             else:
                 # DMA & Instrumentation Wrapper Case
                 prep_transforms = [
-                    GenerateInstrumentationIP(self.fpga_part, self.period_ns),
+                    GenerateInstrumentationIP(
+                        self.fpga_part, self.period_ns, self.instrumentation_avg_n
+                    ),
                     InsertIODMA(self.axi_port_width),
                     InsertDWC(),
                     SpecializeLayers(self.fpga_part),
