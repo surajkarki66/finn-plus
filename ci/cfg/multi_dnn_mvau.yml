@@ -23,7 +23,7 @@
         "m": [1],
 
         #"mem_mode": ["internal_embedded"],
-        "scenario_mem_mode": [[3, "internal_decoupled"], [4, "internal_embedded"]],
+        "scenario_mem_mode": [[0, "internal_embedded"], [3, "internal_decoupled"], [4, "internal_embedded"]],
         "ram_style": ["distributed"],
         "ram_style_thr": ["distributed"], # thresholding disabled
 

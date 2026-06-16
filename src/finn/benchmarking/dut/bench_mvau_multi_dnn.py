@@ -252,7 +252,19 @@ class bench_mvau_multi_dnn(bench):
             {"step_collapse_multi_dnn": "Multi_DNN_Wrapper"},
         ] + post_collapse_steps
 
-        if scenario == 3:
+        if scenario == 0:
+            generation = {
+                "mode": "Parallel",
+                "kwargs": {
+                    "combine_inputs_channelwise": self._params.get(
+                        "combine_inputs_channelwise", True
+                    ),
+                    "combine_outputs_channelwise": self._params.get(
+                        "combine_outputs_channelwise", True
+                    ),
+                },
+            }
+        elif scenario == 3:
             generation = {
                 "mode": "SelectableWeights",
                 "kwargs": {"models": ["mvau_A", "mvau_B"]},
@@ -274,7 +286,7 @@ class bench_mvau_multi_dnn(bench):
                 },
             }
         else:
-            raise ValueError(f"Unsupported multi_dnn scenario: {scenario}")
+            raise ValueError(f"Unsupported multi_dnn scenario: {scenario} (supported: 0, 3, 4)")
 
         return {
             "Submodels": {
