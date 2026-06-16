@@ -108,11 +108,11 @@ class FINNMultiFPGAConfigError(FINNUserError):
         super().__init__(*args)
 
 
-class FINNMultiFPGANoPartitionerSolutionError(FINNUserError):
-    """(User) The partitioner could not find a solution."""
+class FINNMultiFPGAPartitionerError(FINNUserError):
+    """(User) Multi-FPGA Error in the partitioning of the model."""
 
     def __init__(self, *args: object) -> None:
-        """Create a new FINNMultiFPGANoPartitionerSolutionError."""
+        """Create a new FINNMultiFPGAPartitionerError."""
         super().__init__(*args)
 
 

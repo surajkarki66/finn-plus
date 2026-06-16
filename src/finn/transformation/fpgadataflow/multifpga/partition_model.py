@@ -27,7 +27,7 @@ from finn.util.exception import (
     FINNInternalError,
     FINNMultiFPGAConfigError,
     FINNMultiFPGAError,
-    FINNMultiFPGANoPartitionerSolutionError,
+    FINNMultiFPGAPartitionerError,
     FINNMultiFPGAUserError,
 )
 from finn.util.fpgadataflow import set_device_id
@@ -308,7 +308,7 @@ class PartitionForMultiFPGA(Transformation):
             solver_timeout=self.timeout,
         )
         if self.mapping is None:
-            raise FINNMultiFPGANoPartitionerSolutionError(
+            raise FINNMultiFPGAPartitionerError(
                 f"No feasible partitioning solution could be found for "
                 f"the given model and configuration. If you are sure "
                 f"that everything is set up correctly, try using a "

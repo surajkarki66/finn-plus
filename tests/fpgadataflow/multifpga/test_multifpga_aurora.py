@@ -33,7 +33,8 @@ from finn.util.basic import make_build_dir
 from finn.util.exception import (
     FINNError,
     FINNMultiFPGAConfigError,
-    FINNMultiFPGANoPartitionerSolutionError,
+    FINNMultiFPGAPartitionerError,
+    FINNMultiFPGAUserError,
 )
 from finn.util.fpgadataflow import get_device_id
 from finn.util.platforms import platforms
@@ -230,7 +231,7 @@ class TestAuroraFlowPartitioning:
 
         # Since every device can have only one node, one device will be overutilized slightly,
         # and no solution should be found.
-        with pytest.raises(FINNMultiFPGANoPartitionerSolutionError):
+        with pytest.raises(FINNMultiFPGAPartitionerError):
             part = AuroraPartitioner(
                 output_dir=Path(make_build_dir(test_dir_identifier + "_")),
                 network_ports_per_device=network_ports,
@@ -238,7 +239,7 @@ class TestAuroraFlowPartitioning:
                 devices=devices,
                 nodes=nodes,
                 considered_resources=considered_resources,
-                resources_per_device=res_per_device,
+                resources_per_device=res_per_device,  # type: ignore
                 inseparable_nodes=[],
                 topology=topology,
                 max_utilization=max_util,
@@ -510,6 +511,21 @@ class TestAuroraFlowPartitioning:
         """Test partitioning with the Aurora model based
         on constructed data instead of real models.
         """
+        # This specific case creates an infeasible model. The available
+        # LUTs per device are ~53k. At 85% utilization, there is overall space for roughly 90k LUTs.
+        # This could theoretically hold all 90k LUTs required, however the 90k are split
+        # across devices. Since a layer is 10k, and each device can hold roughly 45k alone, the 5k
+        # leftover LUTs are not utilized, giving effectively 80k LUTs overall,
+        # making the model requiring 90k LUTs infeasible.
+        if (
+            max_util <= 0.85
+            and devices == 2
+            and distribution_args["level"] == 10000
+            and board == "Pynq-Z1"
+            and distribution == "equal-LUT"
+        ):
+            pytest.skip("Infeasible model configuration.")  # type: ignore
+
         dist_type = distribution.split("-")[0]
         dist_res = distribution.split("-")[1]
 
@@ -540,7 +556,16 @@ class TestAuroraFlowPartitioning:
             for resource in considered_resources:
                 # Check if we overshoot the limit
                 if estimates[resource] > res_per_device[resource] * max_util:
-                    exception_context = pytest.raises(FINNMultiFPGAConfigError)
+                    exception_context = pytest.raises(FINNMultiFPGAPartitionerError)
+
+        # Check if we expect an error because the total resource amount is larger than
+        # what we have available over all devices
+        total_estimates = {
+            rt: sum([rvs[rt] for rvs in resource_estimates.values()]) for rt in considered_resources
+        }
+        for rt in considered_resources:
+            if total_estimates[rt] > max_util * res_per_device[rt] * devices:
+                exception_context = pytest.raises(FINNMultiFPGAPartitionerError)
 
         with exception_context:
             part = AuroraPartitioner(
@@ -550,7 +575,7 @@ class TestAuroraFlowPartitioning:
                 devices=devices,
                 nodes=nodes,
                 considered_resources=considered_resources,
-                resources_per_device=res_per_device,
+                resources_per_device=res_per_device,  # type: ignore
                 inseparable_nodes=[],
                 topology=topology,
                 max_utilization=max_util,
@@ -577,6 +602,8 @@ class TestAuroraFlowPartitioning:
         if devices > nodes or overutilized_overall or overutilized_per_device:
             assert solution is None
             return
+
+        # Check that a solution was found
         assert solution is not None
 
         # Get the resource of the partitioned design.

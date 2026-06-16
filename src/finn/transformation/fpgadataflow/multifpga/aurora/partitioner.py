@@ -14,8 +14,7 @@ from finn.util.exception import (
     FINNInternalError,
     FINNMultiFPGAConfigError,
     FINNMultiFPGAError,
-    FINNMultiFPGANoPartitionerSolutionError,
-    FINNMultiFPGAUserError,
+    FINNMultiFPGAPartitionerError,
 )
 from finn.util.logging import log
 
@@ -71,12 +70,12 @@ class AuroraPartitioner(Partitioner):  # noqa
         self.status: mip.OptimizationStatus | None = None
 
         if max_utilization is not None and max_utilization > 1.0:
-            raise FINNMultiFPGAUserError(
+            raise FINNMultiFPGAPartitionerError(
                 f"Max utilization was set to {max_utilization:2.2%} > "
                 f"100%. Decrease max_utilization to continue."
             )
         if ideal_utilization is not None and ideal_utilization > 1.0:
-            raise FINNMultiFPGAUserError(
+            raise FINNMultiFPGAPartitionerError(
                 f"Ideal utilization was set to {ideal_utilization:2.2%} > "
                 f"100%. Decrease ideal_utilization to continue."
             )
@@ -86,7 +85,7 @@ class AuroraPartitioner(Partitioner):  # noqa
             and max_utilization is not None
             and ideal_utilization > max_utilization
         ):
-            raise FINNMultiFPGAConfigError(
+            raise FINNMultiFPGAPartitionerError(
                 "Cannot create Multi-FPGA partition if the requested ideal utilization"
                 "is greater than the requested max allowed utilization "
                 f"({ideal_utilization:.2%} > {max_utilization:.2%})"
@@ -103,12 +102,16 @@ class AuroraPartitioner(Partitioner):  # noqa
             )
 
         # Warn about total resources
-        if resource_estimates is not None and considered_resources is not None:
+        if (
+            resource_estimates is not None
+            and considered_resources is not None
+            and max_utilization is not None
+        ):
             for restype in considered_resources:
                 total_required = sum([rv[restype] for rv in resource_estimates.values()])
                 total_on_devices = devices * resources_per_device[restype]
-                if total_required > total_on_devices:
-                    raise FINNMultiFPGAUserError(
+                if total_required > max_utilization * total_on_devices:
+                    raise FINNMultiFPGAPartitionerError(
                         f"The model requires a total of "
                         f"{total_required} {restype}, but "
                         f"{devices} devices combined only have "
@@ -151,21 +154,21 @@ class AuroraPartitioner(Partitioner):  # noqa
             for i, group in enumerate(self.inseparable_nodes):
                 # 1. Single group larger than the model itself
                 if len(group) > nodes:
-                    raise FINNMultiFPGAError(
+                    raise FINNMultiFPGAPartitionerError(
                         f"Group {i} of inseparable nodes is larger than the total set of all "
                         f"nodes in the model. (Has {len(group)} nodes, but only {nodes} "
                         "nodes in the graph!)"
                     )
                 # 2. Num. nodes == Num. groups. Leads to atleast 1 empty device
                 if len(group) == nodes and devices > 1:
-                    raise FINNMultiFPGAError(
+                    raise FINNMultiFPGAPartitionerError(
                         f"Group {i} has the same number of nodes as the graph in total. However "
                         "since more than 1 device is used, this would result in one device "
                         "being completely empty, leading to an invalid partitioning model."
                     )
             # 3. Not enough devices to have this many nodes in groups
             if devices > max_devices_possible:
-                raise FINNMultiFPGAError(
+                raise FINNMultiFPGAPartitionerError(
                     f"Requested number of FPGAs ({devices}) is larger than the number of "
                     f"devices possible. {nodes - nodes_in_groups} nodes can be alone on a "
                     f"device, and {len(self.inseparable_nodes)} groups of nodes can be on a "
@@ -343,7 +346,7 @@ class AuroraPartitioner(Partitioner):  # noqa
                                 "on a single device. Partitioning might fail!"
                             )
                         else:
-                            raise FINNMultiFPGANoPartitionerSolutionError(
+                            raise FINNMultiFPGAPartitionerError(
                                 f"Node {node}'s usage of {restype} is above "
                                 f"the allowed utilization per device "
                                 f"({self.resource_estimates[node][restype]} > "
