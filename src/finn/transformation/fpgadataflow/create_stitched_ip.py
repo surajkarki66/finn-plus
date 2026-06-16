@@ -452,6 +452,7 @@ class CreateStitchedIP(Transformation):
             tcl.append("launch_runs synth_1 -jobs %s" % str(num_workers))
             tcl.append("wait_on_run [get_runs synth_1]")
             tcl.append("open_run synth_1 -name synth_1")
+            tcl.append("opt_design")
             tcl.append("write_verilog -force -mode synth_stub %s.v" % block_name)
             tcl.append("write_checkpoint %s.dcp" % block_name)
             tcl.append("write_xdc %s.xdc" % block_name)
