@@ -32,6 +32,8 @@ def _get_finn_root() -> Path:
     For editable installs, this returns the repository root.
     For normal installs, this returns the site-packages installation location (site-packages/finn).
     """
+    print("At import time, __file__ is: " + __file__)
+    print("Cwd is: " + str(os.getcwd()))
     try:
         dist = distribution("finn-plus")
         # Check if it's an editable install
