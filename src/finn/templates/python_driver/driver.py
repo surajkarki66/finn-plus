@@ -11,6 +11,7 @@ import random
 import re
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 # from pynq import PL
 from pynq import Bitstream, Overlay, allocate
@@ -21,6 +22,32 @@ from qonnx.core.datatype import DataType
 from qonnx.util.basic import gen_finn_dt_tensor
 
 from finn.util.data_packing import finnpy_to_packed_bytearray, packed_bytearray_to_finnpy
+
+
+def _get_clk_wiz_params_from_hwh(bitfile_name):
+    """Parse the HWH file to get clk_wiz_0 parameters.
+
+    PYNQ's ip_dict only contains IPs with an AXI-Lite slave interface, so the
+    Clocking Wizard (when configured without AXI-Lite) will not appear there.
+    This function reads the HWH XML directly to retrieve its parameters.
+
+    Returns a dict of parameter name -> value strings, or None if not found.
+    """
+    hwh_path = os.path.splitext(bitfile_name)[0] + ".hwh"
+    if not os.path.exists(hwh_path):
+        return None
+    try:
+        tree = ET.parse(hwh_path)
+        root = tree.getroot()
+        for module in root.iter("MODULE"):
+            if module.get("INSTANCE") == "clk_wiz_0":
+                params = {}
+                for param in module.iter("PARAMETER"):
+                    params[param.get("NAME")] = param.get("VALUE")
+                return params
+    except Exception:
+        return None
+    return None
 
 
 class FINNDMAOverlay(Overlay):
@@ -67,7 +94,7 @@ class FINNDMAOverlay(Overlay):
         self.obuf_packed_device = None
         self.platform = platform
         self.batch_size = batch_size
-        self.fclk_mhz = fclk_mhz
+        self.fclk_mhz = fclk_mhz  # currently ignored (TODO: make clocking wizard configurable)
         self.validation_dataset = validation_dataset
         self.idma = []
         self.odma = []
@@ -87,21 +114,14 @@ class FINNDMAOverlay(Overlay):
             if self.platform == "alveo":
                 self.odma_handle.append(None)
         if self.platform == "zynq-iodma":
-            if "clk_wiz_0" in self.ip_dict:
-                # New-style: PS clock is a 100 MHz reference; Clocking Wizard generates
-                # the exact design clock. Read the achieved frequency from HWH.
-                Clocks.fclk0_mhz = 100.0
-                clk_wiz_params = self.ip_dict["clk_wiz_0"]["parameters"]
-                self.fclk_mhz_actual = float(
-                    clk_wiz_params.get(
-                        "CLKOUT1_OUT_FREQ",
-                        clk_wiz_params.get("CLKOUT1_REQUESTED_OUT_FREQ", str(self.fclk_mhz)),
-                    )
+            clk_wiz_params = _get_clk_wiz_params_from_hwh(bitfile_name)
+            Clocks.fclk0_mhz = 100.0  # Clocking Wizard is configured for fixed 100 MHz input clock
+            self.fclk_mhz_actual = float(
+                clk_wiz_params.get(
+                    "CLKOUT1_OUT_FREQ",
+                    clk_wiz_params.get("CLKOUT1_REQUESTED_OUT_FREQ", str(self.fclk_mhz)),
                 )
-            elif self.fclk_mhz > 0:
-                # Legacy: PS clock IS the design clock (best-effort, may not achieve exact freq)
-                Clocks.fclk0_mhz = self.fclk_mhz
-                self.fclk_mhz_actual = Clocks.fclk0_mhz
+            )
         # load any external + runtime weights
         self.load_external_weights()
         self.load_runtime_weights()
@@ -587,26 +607,19 @@ class FINNInstrumentationOverlay(Overlay):
         super().__init__(bitfile_name, download=download, device=device)
 
         self.platform = platform
-        self.fclk_mhz = fclk_mhz
+        self.fclk_mhz = fclk_mhz  # currently ignored (TODO: make clocking wizard configurable)
         self.seed = seed
 
         # configure clock (for ZYNQ platforms)
         if self.platform == "zynq-iodma":
-            if "clk_wiz_0" in self.ip_dict:
-                # New-style: PS clock is a 100 MHz reference; Clocking Wizard generates
-                # the exact design clock. Read the achieved frequency from HWH.
-                Clocks.fclk0_mhz = 100.0
-                clk_wiz_params = self.ip_dict["clk_wiz_0"]["parameters"]
-                self.fclk_mhz_actual = float(
-                    clk_wiz_params.get(
-                        "CLKOUT1_OUT_FREQ",
-                        clk_wiz_params.get("CLKOUT1_REQUESTED_OUT_FREQ", str(self.fclk_mhz)),
-                    )
+            clk_wiz_params = _get_clk_wiz_params_from_hwh(bitfile_name)
+            Clocks.fclk0_mhz = 100.0  # Clocking Wizard is configured for fixed 100 MHz input clock
+            self.fclk_mhz_actual = float(
+                clk_wiz_params.get(
+                    "CLKOUT1_OUT_FREQ",
+                    clk_wiz_params.get("CLKOUT1_REQUESTED_OUT_FREQ", str(self.fclk_mhz)),
                 )
-            elif self.fclk_mhz > 0:
-                # Legacy: PS clock IS the design clock (best-effort, may not achieve exact freq)
-                Clocks.fclk0_mhz = self.fclk_mhz
-                self.fclk_mhz_actual = Clocks.fclk0_mhz
+            )
 
     def instrumentation_read(self, name):
         """Read instrumentation register."""
