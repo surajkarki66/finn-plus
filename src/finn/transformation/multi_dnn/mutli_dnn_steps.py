@@ -59,3 +59,25 @@ def step_collapse_multi_dnn(model: ModelWrapper, cfg: DataflowBuildConfig):
     model = model.transform(GiveUniqueNodeNames())
     model = model.transform(NameNodeContainerNodes())
     return model
+
+
+def step_maximize_concat_split_simd(model: ModelWrapper, cfg: DataflowBuildConfig):
+    """Maximize SIMD on StreamingConcat_hls nodes after collapse.
+
+    The Parallel multi-DNN flow inserts SplitMultiHeads_hls (already fully
+    parallel, no SIMD attribute) and StreamingConcat_hls (initialized with
+    SIMD=1). This step raises SIMD on StreamingConcat_hls nodes to the largest
+    common divisor of ChannelsPerStream so their cycle count is as close as
+    possible to the surrounding operators.
+    """
+    from qonnx.custom_op.registry import getCustomOp
+
+    from finn.transformation.fpgadataflow.set_folding import common_divisors
+
+    for node in model.graph.node:
+        if node.op_type == "StreamingConcat_hls":
+            node_inst = getCustomOp(node)
+            channels_per_stream = node_inst.get_nodeattr("ChannelsPerStream")
+            max_simd = int(max(common_divisors(channels_per_stream)))
+            node_inst.set_nodeattr("SIMD", max_simd)
+    return model
