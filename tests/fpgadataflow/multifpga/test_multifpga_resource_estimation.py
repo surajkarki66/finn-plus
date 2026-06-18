@@ -29,7 +29,6 @@ if TYPE_CHECKING:
         ("CNV", 2, 2, True),
         ("LFC", 1, 1, True),
         ("LFC", 1, 2, True),
-        ("SFC", 1, 1, True),
         ("SFC", 1, 2, True),
         ("SFC", 2, 2, True),
         ("TFC", 1, 1, True),

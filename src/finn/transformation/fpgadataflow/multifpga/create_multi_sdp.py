@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import yaml
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveUniqueNodeNames
@@ -10,8 +9,7 @@ from typing import TYPE_CHECKING
 
 from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
-from finn.transformation.fpgadataflow.multifpga.graph import get_inseparable_nodes
-from finn.util.exception import FINNMultiFPGAError, FINNMultiFPGAUserError
+from finn.util.exception import FINNInternalError
 from finn.util.fpgadataflow import get_device_id, get_submodel, set_device_id
 from finn.util.logging import log
 
@@ -20,12 +18,78 @@ if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
 
 
-class CreateMultiFPGAStreamingDataflowPartition(Transformation):
-    """Operates like CreateDataflowPartition but using the nodes device id as a key. Additionally,
-    two non consecutive instances on the same device create
-    different SDPs (think for example about a there-and-back topology).
+class ClusterByNodeattribute(Transformation):
+    """Cluster nodes by a "comparing attribute". If two nodes are clustered together, they
+    have their "partition attribute" set to the same value. Can be run by `transform` until no more
+    merges happen, then the graph is fully partitioned by the given attribute.
 
-    IMPORTANT: Currently this assumes that every branch is split and joined on the same device.
+    Requirements:
+        - An attribute that can be compared on equality (==)
+        - A partition attribute of type `int`. Every node will receive a unique partition ID
+            upon first call.
+    """
+
+    def __init__(self, compare_attribute: str, partition_attribute: str = "partition_id") -> None:
+        """Cluster by comparison attribute, by setting partition_attribute."""
+        self.comp = compare_attribute
+        self.part = partition_attribute
+        self.first_call = True
+
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
+        """Merge nodes with their neighbors. If atleast one merge happens, return modified=True."""
+        # Check that all compare attributes exist
+        for i, node in enumerate(model.graph.node):
+            try:
+                _ = getCustomOp(node).get_nodeattr(self.comp)
+            except AttributeError as e:
+                raise FINNInternalError(
+                    f"Cannot cluster because "
+                    f"comparison node attribute "
+                    f"'{self.comp}' is  missing "
+                    f"on at least one node ({node.name})."
+                ) from e
+            if self.first_call:
+                try:
+                    getCustomOp(node).set_nodeattr(self.part, i)
+                except AttributeError as e:
+                    raise FINNInternalError(
+                        f"Cannot initialize partition attribute '{self.part}' "
+                        f"on at least one node ({node.name}). Make sure the "
+                        f"attribute exists and is of type 'int'."
+                    ) from e
+
+        # Dont re-initialize partition attributes again
+        self.first_call = False
+
+        # Merge
+        modified = False
+        for node in model.graph.node:
+            node_op = getCustomOp(node)
+            pre = model.find_direct_predecessors(node)
+            suc = model.find_direct_successors(node)
+            if pre is None:
+                pre = []
+            if suc is None:
+                suc = []
+            neighbors = pre + suc
+            for neighbor in neighbors:
+                neighbor_op = getCustomOp(neighbor)
+                if node_op.get_nodeattr(self.comp) == neighbor_op.get_nodeattr(
+                    self.comp
+                ) and node_op.get_nodeattr(self.part) != neighbor_op.get_nodeattr(self.part):
+                    neighbor_op.set_nodeattr(self.part, node_op.get_nodeattr(self.part))
+                    modified = True
+        return model, modified
+
+
+class CreateMultiFPGAStreamingDataflowPartition(Transformation):
+    """Create SDPs for Multi-FPGA models. This is done by clustering all nodes according to their
+    device ID. The nodes are then packed into SDPs which have the
+    same device ID as their submodel nodes.
+
+    For different, separated sections of the model with the same device ID,
+    the transformation creates separate partitions. Thus a model with
+    devices A -> A -> B -> A will have 3 SDPs: 0 (A) -> 1 (B) -> 2 (A).
     """
 
     def __init__(  # noqa
@@ -48,93 +112,21 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
         self.cdfp_dir = dataflow_partition_directory
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
-        for node in model.graph.node:
-            # Check that all nodes have an device ID
-            if get_device_id(node) is None:
-                raise FINNMultiFPGAUserError(
-                    f"Cannot create StreamingDataflowParititions "
-                    f"for Multi-FPGA without an assigned device "
-                    f"ID. (Node: {node.name}). Did you forget "
-                    f"to run partitioning first?"
-                )
-            # Check that we have no SDPs yet
-            if node.op_type in ["StreamingDataflowPartition", "GenericPartition"]:
-                raise FINNMultiFPGAUserError(
-                    f"Cannot create SDPs in graph: Node "
-                    f"{node.name} is already a dataflow partition."
-                )
+        # Cluster the partition IDs
+        model = model.transform(ClusterByNodeattribute("device_id", "partition_id"))
 
-        # Check that all inseparable nodes have the same device
-        inseparable_nodes = get_inseparable_nodes(model)
-        for group in inseparable_nodes:
-            for i in range(1, len(group)):
-                n0 = model.graph.node[group[i]]
-                n1 = model.graph.node[group[i - 1]]
-                d0 = get_device_id(n0)
-                d1 = get_device_id(n1)
-                if d0 != d1:
-                    raise FINNMultiFPGAError(
-                        f"Nodes in branches of the graph have different device"
-                        f" IDs. This should be prevented by the automatic "
-                        f"partitioning, but can happen with a manual "
-                        f"partitioning configuration. The nodes are "
-                        f"{n0.name} (device {d0}) and "
-                        f"{n1.name} (device {d1})"
-                    )
-
-        # Prepare everything
-        current_device = get_device_id(model.graph.node[0])
-        current_max = 0 if not self.separate_iodmas else 1
-        mapping = {}
-        total = 0
-
-        # Go through every node
-        for node in model.graph.node:
-            if current_max not in mapping:
-                mapping[current_max] = []
-
-            # Consider IODMAs
-            if "IODMA" in node.op_type and self.separate_iodmas:
-                if model.find_direct_predecessors(node) is None:
-                    getCustomOp(node).set_nodeattr("partition_id", 0)
-                    mapping[0] = [{"device": get_device_id(node), "node": node.name}]
-                    total += 1
-                if model.find_direct_successors(node) is None:
-                    last_id = len(model.graph.node) + 1
-                    getCustomOp(node).set_nodeattr("partition_id", last_id)
-                    mapping[last_id] = [{"device": get_device_id(node), "node": node.name}]
-                    total += 1
-                continue  # without changing the device number
-
-            # Save for logging purposes
-            mapping[current_max].append({"device": current_device, "node": node.name})
-
-            # Get the new device number to check whether it changed
-            device = get_device_id(node)
-
-            # TODO: Setting partition_id and calling CreateDataflowPartitions might not be
-            # the best way to do it. Maybe change at some point
-            if device != current_device:
-                current_device = device
-                current_max += 1
-
-            # Set the partition ID
-            getCustomOp(node).set_nodeattr("partition_id", current_max)
-            total += 1
-
-        if self.verbosity.value > MFVerbosity.NONE.value:
-            log.info(f"Creating a total of {total} StreamingDataflowPartitions...")
-
-        # Write partition ID <-> Device+Node name mapping into a human readable file for
-        # debugging
-        sdp_logfile = self.cdfp_dir / "partition_id_mapping.yaml"
-        if not self.cdfp_dir.exists():
-            self.cdfp_dir.mkdir(parents=True)
-        with sdp_logfile.open("w+") as f:
-            yaml.dump(mapping, f, yaml.Dumper)
-
-        if self.verbosity.value > MFVerbosity.LOW.value:
-            log.info(f"Storing SDP mapping at: {sdp_logfile}")
+        # Create separate IODMAs
+        all_ids = [getCustomOp(node).get_nodeattr("partition_id") for node in model.graph.node]
+        if self.separate_iodmas:
+            for node in model.graph.node:
+                if node.op_type == "IODMA_hls":
+                    current_max = max(all_ids)
+                    getCustomOp(node).set_nodeattr("partition_id", current_max + 1)
+                    all_ids.append(current_max + 1)
+        if self.verbosity.value > MFVerbosity.MEDIUM.value:
+            log.info(
+                f"Clustered the graph into {len(set(all_ids))} partitions according to device ID."
+            )
 
         # Create the SDFPs
         model = model.transform(CreateDataflowPartition(str(self.cdfp_dir)))
