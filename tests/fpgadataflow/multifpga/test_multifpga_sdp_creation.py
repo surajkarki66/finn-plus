@@ -20,6 +20,7 @@ from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     ClusterByNodeattribute,
     CreateMultiFPGAStreamingDataflowPartition,
+    ResolveCircularPartitionIDs,
     get_device_id,
 )
 from finn.util.basic import make_build_dir
@@ -81,7 +82,123 @@ def testing_model_from_nx(g: nx.DiGraph) -> ModelWrapper:
 # Edges contain a source and target node
 # Expected partitions contain sets of nodes that should have the same partition ID
 test_graphs = {
-    "simple": {"nodes": [(0, 0), (1, 1)], "edges": [(0, 1)], "expected_partitions": [{0}, {1}]}
+    # Basic test
+    "simple": {"nodes": [(0, 0), (1, 1)], "edges": [(0, 1)], "expected_partitions": [{0}, {1}]},
+    # This graph tests that the partitions are correctly created, if the devices
+    # switch while in a branch
+    #                   / 5(1) - 6(1) - 8(2) \
+    # 0(0) - 1(0) - 2(0)                      9(2) - 10(2)
+    #                   \ 3(0) - 4(0) - 7(2) /
+    "branches1": {
+        "nodes": [
+            (0, 0),
+            (1, 0),
+            (2, 0),
+            (3, 0),
+            (4, 0),
+            (5, 1),
+            (6, 1),
+            (7, 2),
+            (8, 2),
+            (9, 2),
+            (10, 2),
+        ],
+        "edges": [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 7),
+            (2, 5),
+            (5, 6),
+            (6, 8),
+            (7, 9),
+            (8, 9),
+            (9, 10),
+        ],
+        "expected_partitions": [{0, 1, 2, 3, 4}, {5, 6}, {7, 8, 9, 10}],
+    },
+    # This graph tests that switches between devices are mapped to separate SDPs
+    # It also tests multi IO
+    # 0(0) \    / 3(3) - 4(3) - 5(3) -------\      / 11(7)
+    #       2(2)                              10(6)
+    # 1(1) /    \ 6(4) - 7(5) - 8(4) - 9(5) /      \ 12(8)
+    "branches2": {
+        "nodes": [
+            (0, 0),
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 3),
+            (5, 3),
+            (6, 4),
+            (7, 5),
+            (8, 4),
+            (9, 5),
+            (10, 6),
+            (11, 7),
+            (12, 8),
+        ],
+        "edges": [
+            (0, 2),
+            (1, 2),
+            (2, 3),
+            (2, 6),
+            (3, 4),
+            (4, 5),
+            (5, 10),
+            (6, 7),
+            (7, 8),
+            (8, 9),
+            (9, 10),
+            (10, 11),
+            (10, 12),
+        ],
+        "expected_partitions": [{0}, {1}, {2}, {3, 4, 5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}],
+    },
+    # This graph tests multiple branches on their own devices, with a long skip connection back
+    # to the initial device
+    #      / - 1(1) - 10(1) - 11(1) - 12(1) \
+    #     / - 2(2) - 20(2) - 21(2) --------- \
+    # 0(0) - 3(3) - 30(3) ------------------- 4(0)
+    #    \ --------------------------------- /
+    "branches3": {
+        "nodes": [
+            (0, 0),
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (10, 1),
+            (11, 1),
+            (12, 1),
+            (20, 2),
+            (21, 2),
+            (30, 3),
+            (4, 0),
+        ],
+        "edges": [
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 10),
+            (10, 11),
+            (11, 12),
+            (12, 4),
+            (2, 20),
+            (20, 21),
+            (21, 4),
+            (3, 30),
+            (30, 4),
+            (0, 4),
+        ],
+        "expected_partitions": [{0}, {4}, {1, 10, 11, 12}, {2, 20, 21}, {3, 30}],
+    },
+    # This graph tests multi IO and a single device. Everything should be grouped together
+    "single_device_multi_io": {
+        "nodes": [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0)],
+        "edges": [(0, 4), (1, 4), (2, 4), (3, 4), (4, 5), (4, 6), (4, 7)],
+        "expected_partitions": [{0, 1, 2, 3, 4, 5, 6, 7}],
+    },
 }
 
 
@@ -107,7 +224,9 @@ def test_sdp_creation(
     model = testing_model_from_nx(g)
 
     # Test clustering and SDP creation separately. First, clustering:
-    pmodel = model.transform(ClusterByNodeattribute("device_id"))
+    pmodel = model.transform(
+        ClusterByNodeattribute(resolve_circular_dependencies=True, compare_attribute="device_id")
+    )
     groups = {}
     for node in pmodel.graph.node:
         pid = getCustomOp(node).get_nodeattr("partition_id")
@@ -116,7 +235,7 @@ def test_sdp_creation(
             groups[pid] = []
         groups[pid].append(original_index)
     for group in groups.values():
-        assert set(group) in graph["expected_partitions"]
+        assert set(group) in graph["expected_partitions"], f"Groups: {groups}"
     assert len(groups) == len(graph["expected_partitions"])
 
     # Test SDP creation now
