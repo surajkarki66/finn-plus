@@ -45,6 +45,7 @@ from subprocess import CalledProcessError
 from typing import TYPE_CHECKING, Literal, cast
 
 if TYPE_CHECKING:
+    from finn.custom_op.fpgadataflow.rtl.finn_loop import FINNLoop
     from onnx import NodeProto
 
 from finn.custom_op.fpgadataflow.hlsbackend import HLSBackend
@@ -851,9 +852,48 @@ close $ofile
                 f"{vivado_stitch_proj_dir} to find out why it failed."
             ) from e
 
+        # Extract list of Verilog files used in the loop bodies and
+        # add it to the list of files for the stitched IP
+        files_loop_body: list[str] = []
+        loop_nodes = model.get_nodes_by_op_type("FINNLoop")
+        for node in loop_nodes:
+            node_inst = cast("FINNLoop", getCustomOp(node))
+            loop_model = cast("ModelWrapper", node_inst.get_nodeattr("body"))
+            loop_stitch_proj = loop_model.get_metadata_prop("vivado_stitch_proj")
+            if loop_stitch_proj is None:
+                raise FINNInternalError(
+                    f"Loop node {node.name} does not have metadata property "
+                    f"vivado_stitch_proj after CreateStitchedIP. This should "
+                    f"have been set during the recursive call to CreateStitchedIP "
+                    f"on the loop body. Aborting."
+                )
+            loop_stitch_proj_dir = Path(loop_stitch_proj)
+            if not loop_stitch_proj_dir.is_dir():
+                raise FINNInternalError(
+                    f"Loop node {node.name} has vivado_stitch_proj metadata property "
+                    f"set to {loop_stitch_proj}, but this is not a valid directory. "
+                    f"Aborting."
+                )
+            loop_v_file_list = loop_stitch_proj_dir / "all_verilog_srcs.txt"
+            if not loop_v_file_list.is_file():
+                raise FINNInternalError(
+                    f"Loop node {node.name} has vivado_stitch_proj metadata property "
+                    f"set to {loop_stitch_proj}, but expected file all_verilog_srcs.txt "
+                    f"not found in that directory. Aborting."
+                )
+            with loop_v_file_list.open("r") as f:
+                for line in f:
+                    files_loop_body.append(line.strip())
+        # Deduplicate list of files and add to the list of files for the stitched IP
+        files_loop_body = list(set(files_loop_body))
+
         if self.functional_simulation:
             with Path(v_file_list).open("a") as f:
                 f.write(f"{fifosim_wrapper_filename}\n")
+
+        with Path(v_file_list).open("a") as f:
+            for file in files_loop_body:
+                f.write(f"{file}\n")
 
         # wrapper may be created in different location depending on Vivado version
         if not wait_for_file(Path(wrapper_filename), timeout=5.0):

@@ -50,6 +50,8 @@ from typing import cast
 from finn.core.rtlsim_exec import rtlsim_exec
 from finn.util.exception import FINNInternalError
 
+from finn.xsi import SimEngine
+
 
 def execute_onnx(
     model: "ModelWrapper",
@@ -57,6 +59,8 @@ def execute_onnx(
     return_full_exec_context: bool = False,
     start_node: NodeProto | None = None,
     end_node: NodeProto | None = None,
+    pre_hook: Callable[[SimEngine], None] | None = None,
+    post_hook: Callable[[SimEngine], None] | None = None,
 ) -> dict[str, np.ndarray]:
     """Execute given ONNX ModelWrapper with given named inputs.
     If return_full_exec_context is False, a dict of named outputs is returned
@@ -109,7 +113,7 @@ def execute_onnx(
                     )
 
         # use stitched IP for rtlsim
-        rtlsim_exec(model, cast("dict[str, np.ndarray]", execution_context))
+        rtlsim_exec(model, cast("dict[str, np.ndarray]", execution_context), pre_hook, post_hook)
     else:
         raise FINNInternalError(
             """Metadata property "exec_mode" is set to an unknown value. Can be left

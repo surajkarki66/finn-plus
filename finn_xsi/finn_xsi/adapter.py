@@ -258,7 +258,8 @@ def rtlsim_multi_io(
     ret = sim.run()
     if len(ret) > 0:
         raise FINNUserError(
-            f"RTL simulation watchdogs {ret!s} timed out. Check rtlsim_trace if any."
+            f"RTL simulation watchdogs {ret!s} timed out with {liveness_threshold} cycles. "
+            f"Check rtlsim_trace if any."
         )
     end_ticks = sim.ticks
     for out in io_dict["outputs"]:

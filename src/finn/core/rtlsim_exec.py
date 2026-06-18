@@ -30,7 +30,7 @@
 import numpy as np
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from finn import xsi as finnxsi
 from finn.util.basic import get_liveness_threshold_cycles, getHWCustomOp, make_build_dir
@@ -224,7 +224,7 @@ def rtlsim_exec_finnxsi(
     n_cycles = finnxsi.rtlsim_multi_io(
         sim,
         io_dict,
-        num_out_values,
+        cast("dict[str, int | np.integer]|int", num_out_values),
         sname="",
         liveness_threshold=get_liveness_threshold_cycles() * batchsize,
     )

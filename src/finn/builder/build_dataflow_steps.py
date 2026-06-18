@@ -78,7 +78,6 @@ from finn.builder.build_dataflow_config import (
 )
 from finn.builder.passes import step_passes_frontend
 from finn.core.onnx_exec import execute_onnx
-from finn.core.rtlsim_exec import rtlsim_exec
 from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
@@ -136,6 +135,8 @@ from finn.util.execution import execute_parent
 from finn.util.logging import log
 from finn.util.mlo_sim import is_mlo, mlo_prehook_func_factory
 
+from finn.xsi import SimEngine
+
 if TYPE_CHECKING:
     from finn.custom_op.fpgadataflow.rtl.finn_loop import FINNLoop
 
@@ -168,7 +169,7 @@ def verify_step(
     cfg: DataflowBuildConfig,
     step_name: str,
     need_parent: bool,
-    rtlsim_pre_hook=None,
+    rtlsim_pre_hook: Callable[[SimEngine], None] | None = None,
 ) -> None:
     """Verify a build step by running simulation and comparing results.
 
@@ -243,12 +244,8 @@ def verify_step(
                 log.info("Attempting to force model shape on verification input")
                 in_npy = in_npy.reshape(exp_ishape)
             inp_dict = {inp_tensor_name: in_npy}
-            if rtlsim_pre_hook is not None:
-                rtlsim_exec(model, inp_dict, pre_hook=rtlsim_pre_hook)
-                out_npy = inp_dict[out_tensor_name]
-            else:
-                out_dict = execute_onnx(model, inp_dict, True)
-                out_npy = out_dict[out_tensor_name]
+            out_dict = execute_onnx(model, inp_dict, True, pre_hook=rtlsim_pre_hook)
+            out_npy = out_dict[out_tensor_name]
         exp_oshape = exp_out_npy.shape
         if out_npy.shape != exp_oshape:
             log.warning(
@@ -375,10 +372,12 @@ def verify_step(
 
 
 @register_build_dataflow_step()
-def step_hw_codegen(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
+def step_hw_codegen(
+    model: ModelWrapper, cfg: DataflowBuildConfig, parent_node: str | None = None
+) -> ModelWrapper:
     """Generate Vitis HLS code to prepare HLSBackend nodes for IP generation.
     And fills RTL templates for RTLBackend nodes."""
-    model = model.transform(GiveUniqueNodeNamesRecursive())
+    model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
     model = model.transform(
         PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period()),
         apply_to_subgraphs=True,
@@ -502,7 +501,7 @@ def step_set_fifo_depths(
 
             # Clean up model
             model = model.transform(SortGraph())
-            model = model.transform(GiveUniqueNodeNamesRecursive())
+            model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
             model = model.transform(GiveReadableTensorNames())
 
             # save original folding config before potentially modifying it
@@ -540,7 +539,7 @@ def step_set_fifo_depths(
 
             # Clean up model
             model = model.transform(SortGraph())
-            model = model.transform(GiveUniqueNodeNamesRecursive())
+            model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
             model = model.transform(GiveReadableTensorNames())
 
             # Set impl_style + ID attributes
@@ -582,7 +581,7 @@ def step_set_fifo_depths(
 
         if cfg.split_large_fifos:
             model = model.transform(SplitLargeFIFOs(max_qsrl_depth=256))
-        model = model.transform(GiveUniqueNodeNamesRecursive())
+        model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
         model = model.transform(GiveReadableTensorNames())
     else:
         if cfg.fifo_config_file is None:
@@ -596,18 +595,18 @@ def step_set_fifo_depths(
         # set by ApplyConfig, so create_shallow_fifos=True
         model = model.transform(InsertFIFO(create_shallow_fifos=True))
         model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-        model = model.transform(GiveUniqueNodeNamesRecursive())
+        model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
         model = model.transform(GiveReadableTensorNames())
         model = model.transform(ApplyFIFODepthsFromFile(cfg.fifo_config_file))
         if cfg.split_large_fifos:
             model = model.transform(SplitLargeFIFOs(max_qsrl_depth=256))
-            model = model.transform(GiveUniqueNodeNamesRecursive())
+            model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
             model = model.transform(GiveReadableTensorNames())
 
     # after FIFOs are ready to go, call PrepareIP and HLSSynthIP again
     # this will only run for the new nodes (e.g. FIFOs and DWCs)
     # Codegen for the inserted FIFOs
-    model = step_hw_codegen(model, cfg)
+    model = step_hw_codegen(model, cfg, parent_node=parent_node)
     # IP Gen for the inserted FIFOs and any remaining
     # IPs that needed to be re-gen after FIFO insertion
     model = step_hw_ipgen(model, cfg, parent_node=parent_node)
@@ -620,7 +619,7 @@ def step_generate_hardware(
 ) -> ModelWrapper:
     """Generate the hardware IP of the model. This includes generating the code, IPs and sizing the
     fifos for the model and all submodels."""
-    model = model.transform(GiveUniqueNodeNamesRecursive())
+    model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
     # Recursively call this step for all subgraphs
     for node in model.get_nodes_by_op_type("FINNLoop"):
         node_inst = cast("FINNLoop", getCustomOp(node))
@@ -633,7 +632,7 @@ def step_generate_hardware(
         node_inst.set_nodeattr("body", loop_model.graph)
 
     # Codegen for the current model
-    model = step_hw_codegen(model, cfg)
+    model = step_hw_codegen(model, cfg, parent_node=parent_node)
 
     # Stitch submodels
     for node in model.get_nodes_by_op_type("FINNLoop"):
@@ -648,7 +647,6 @@ def step_generate_hardware(
             )
         )
         node_inst.set_nodeattr("body", loop_model.graph)
-
     # IP Gen for the current model
     model = step_hw_ipgen(model, cfg, parent_node=parent_node)
 
@@ -998,7 +996,7 @@ def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig) 
         for node in loop_nodes:
             node_inst = getCustomOp(node)
             loop_model = node_inst.get_nodeattr("body")
-            loop_model = loop_model.transform(GiveUniqueNodeNamesRecursive(prefix=node.name + "_"))
+            loop_model = loop_model.transform(GiveUniqueNodeNamesRecursive(prefix=node.name))
             node_inst.set_nodeattr("body", loop_model.graph)
     else:
         log.info("Model doesn't contain any Shuffle nodes, skipping step_transpose_decomposition.")

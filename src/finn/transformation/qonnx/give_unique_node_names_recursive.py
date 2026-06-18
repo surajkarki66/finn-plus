@@ -15,7 +15,7 @@ class GiveUniqueNodeNamesRecursive(Transformation):
     """Give unique names to each node in the graph using enumeration, starting
     with given prefix (if specified in the constructor)."""
 
-    def __init__(self, prefix: str = "") -> None:
+    def __init__(self, prefix: str | None = None) -> None:
         """Initialize the transformation with an optional prefix for node names."""
         super().__init__()
         self.prefix = prefix
@@ -26,12 +26,16 @@ class GiveUniqueNodeNamesRecursive(Transformation):
         for n in model.graph.node:
             if n.op_type not in optype_count.keys():
                 optype_count[n.op_type] = 0
-            n.name = f"{self.prefix}{n.op_type}_{optype_count[n.op_type]}"
+            n.name = (
+                f"{self.prefix}_{n.op_type}_{optype_count[n.op_type]}"
+                if self.prefix is not None
+                else f"{n.op_type}_{optype_count[n.op_type]}"
+            )
             optype_count[n.op_type] += 1
             if n.op_type == "FINNLoop":
                 loop_inst = cast("FINNLoop", getCustomOp(n))
                 loop_body = cast("ModelWrapper", loop_inst.get_nodeattr("body"))
-                loop_body = loop_body.transform(GiveUniqueNodeNamesRecursive(prefix=n.name + "_"))
+                loop_body = loop_body.transform(GiveUniqueNodeNamesRecursive(prefix=n.name))
                 loop_inst.set_nodeattr("body", loop_body.graph)
         # return model_was_changed = False as single iteration is always enough
         return (model, False)

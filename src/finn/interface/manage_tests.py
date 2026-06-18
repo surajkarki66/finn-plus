@@ -113,8 +113,7 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
                         f"(end2end or sanity_bnn or notebooks) and only' "
                         f"--junitxml={ci_project_dir}/reports/main.xml "
                         f"--html={ci_project_dir}/reports/main.html "
-                        f"-p no:xdist -p no:cov -p no:rerunfailures"
-                        # f"--reruns 1 --dist load -n {num_workers}"
+                        f"--reruns 1 --dist loadgroup -n {num_workers}"
                     ),
                     posix=IS_POSIX,
                 )
