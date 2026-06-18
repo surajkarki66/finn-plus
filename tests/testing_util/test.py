@@ -172,14 +172,3 @@ def resize_smaller_side(target_pixels, img):
 def crop_center(size, img):
     """Crop central size*size window out of a PIL image."""
     return torchvision_util.center_crop(img, size)
-
-
-def get_empty_modelwrapper() -> ModelWrapper:
-    """Return an empty modelwrapper, with a graph with a single node
-    without any graph or node inputs/outputs.
-    This can be useful for testing metadata_prop related functionality.
-    """
-    identity_node = oh.make_node("Identity", [], [])
-    graph = oh.make_graph([identity_node], "test_graph", [], [])
-    onnx_model = oh.make_model(graph)
-    return ModelWrapper(onnx_model)

@@ -100,7 +100,7 @@ def test_resource_est_for_all_layers(
 
     # Check that resource estimates were added if resource type was not used in a layer
     if model_name == "CNV" and wbits == 2 and abits == 2:
-        no_ff = [f"ConvolutionInputGenerator_rtl_{i}" for i in range(8)] + ["Tresholding_rtl_0"]
+        no_ff = [f"ConvolutionInputGenerator_rtl_{i}" for i in range(8)]
         layers_seen: dict[str, bool] = dict.fromkeys(no_ff, False)
         for i, node in enumerate(model.graph.node):
             if node.name in no_ff:

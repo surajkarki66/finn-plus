@@ -28,6 +28,7 @@ from finn.util.fpgadataflow import (
 )
 from finn.util.logging import log
 
+
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
 
@@ -124,6 +125,15 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
             `link_configs/0/config.yaml`
         where 0 is the device ID and link_configs the stored path.
 
+        >>> from tests.fpgadataflow.vitisbuild.test_vitis_build import get_empty_modelwrapper
+        >>> config = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
+        >>> model = VitisLinkConfiguration.store_to_model({0: config}, get_empty_modelwrapper())
+        >>> path = Path(model.get_metadata_prop("vitis_link_configs"))
+        >>> path.exists()
+        True
+        >>> (path / "0" / "config.yaml").exists()
+        True
+
         Arguments:
         ---------
             `configs`: The configuration objects to store.
@@ -133,14 +143,6 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         -------
             ModelWrapper: The modified modelwrapper with the updated metadata prop.
 
-        >>> from tests.testing_util.test import get_empty_modelwrapper
-        >>> config = VitisLinkConfiguration(Path("conf.txt"), 100, "", "platform")
-        >>> model = VitisLinkConfiguration.store_to_model({0: config}, get_empty_modelwrapper())
-        >>> path = Path(model.get_metadata_prop("vitis_link_configs"))
-        >>> path.exists()
-        True
-        >>> (path / "0" / "config.yaml").exists()
-        True
         """
         path = model.get_metadata_prop("vitis_link_configs")
         if path is None:
@@ -429,9 +431,9 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
                 if cu == cu2 and kernel != kernel2:
                     errors.append(
                         FINNVitisLinkConfigError(
-                            f"There are 2 or more CUs named {cu} "
-                            f"from different kernels ({kernel} "
-                            f"and {kernel2})"
+                            f"There are 2 or more CUs named '{cu}' "
+                            f"from different kernels ('{kernel}' "
+                            f"and '{kernel2}')"
                         )
                     )
         if len(errors) > 0:
@@ -445,8 +447,8 @@ class VitisLinkConfiguration(DataClassYAMLMixin):
         # Checking for errors
         errors = self.get_config_validation_errors(silent_warnings=True)
         if errors is not None:
-            for err in errors:
-                log.error(f"{self.config_path}: {err}")
+            for i, err in enumerate(errors):
+                log.error(f"[Linking Config Error {i+1} / {len(errors)}] {self.config_path}: {err}")
             if len(errors) == 1:
                 # TODO: When we have switched to Python 3.11 use an exception group
                 # TODO: to raise all exceptions at once, instead of one per run.
