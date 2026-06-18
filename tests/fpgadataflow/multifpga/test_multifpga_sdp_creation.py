@@ -1,26 +1,143 @@
 """Test that Multi-FPGA SDPs are created correctly based on a given partitioning."""
 import pytest
 
+import networkx as nx
+import onnx.helper as oh
 import os
 import random
 from copy import deepcopy
+from fpgadataflow.multifpga.utils import TestingNode
+from onnx import TensorProto
 from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
+from qonnx.util.basic import qonnx_make_model
 from random import randint
-from typing import cast
+from typing import Literal, cast
 
 from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
+    ClusterByNodeattribute,
     CreateMultiFPGAStreamingDataflowPartition,
     get_device_id,
 )
 from finn.util.basic import make_build_dir
-from finn.util.fpgadataflow import set_device_id
+from finn.util.fpgadataflow import get_submodel, set_device_id
 from tests.fpgadataflow.test_set_folding import make_multi_fclayer_model
 
-# TODO: Tests for this util function
+
+def testing_model_from_nx(g: nx.DiGraph) -> ModelWrapper:
+    """Create a testing node only model from a DiGraph. Sets all data attributes
+    of the DiGraph as node attributes on the ONNX node.
+    """
+    # Prepare all tensors / edges
+    tensors = {
+        (i, j): oh.make_tensor_value_info(f"t_{i}{j}", TensorProto.FLOAT, [1]) for i, j in g.edges
+    }
+
+    # Create all nodes (without Inputs/Outputs for now)
+    nodes = {
+        i: oh.make_node(
+            "TestingNode",
+            [],
+            [],
+            backend="fpgadataflow",
+            domain="finn.custom_op.fpgadataflow",
+            **data,
+        )
+        for i, data in g.nodes(data=True)
+    }
+
+    # Connect all nodes
+    for (i, j), tensor in tensors.items():
+        nodes[i].output.append(tensor.name)
+        nodes[j].input.append(tensor.name)
+
+    # Create inputs and outputs for the graph
+    for i in g.nodes:
+        if g.in_degree(i) == 0:
+            tensors[(None, i)] = oh.make_tensor_value_info(f"in_{i}", TensorProto.FLOAT, [1])
+            nodes[i].input.append(tensors[(None, i)].name)
+        if g.out_degree(i) == 0:
+            tensors[(i, None)] = oh.make_tensor_value_info(f"out_{i}", TensorProto.FLOAT, [1])
+            nodes[i].output.append(tensors[(i, None)].name)
+
+    # Build graph and model
+    graph = oh.make_graph(
+        nodes=list(nodes.values()),
+        name="graph",
+        inputs=[tensor for key, tensor in tensors.items() if key[0] is None],
+        outputs=[tensor for key, tensor in tensors.items() if key[1] is None],
+        value_info=[
+            tensor for key, tensor in tensors.items() if key[0] is not None and key[1] is not None
+        ],
+    )
+    model = qonnx_make_model(graph)
+    return ModelWrapper(model)
+
+
+# Nodes contain as first element their ID, as second element their device ID
+# Edges contain a source and target node
+# Expected partitions contain sets of nodes that should have the same partition ID
+test_graphs = {
+    "simple": {"nodes": [(0, 0), (1, 1)], "edges": [(0, 1)], "expected_partitions": [{0}, {1}]}
+}
+
+
+@pytest.mark.parametrize(
+    "graph",
+    [pytest.param(graph_data, id=graph_name) for graph_name, graph_data in test_graphs.items()],
+)
+def test_sdp_creation(
+    graph: dict[str, list[tuple[int, int]] | list[set[int]]], request: pytest.FixtureRequest
+) -> None:
+    """Test SDP creation on all the given graphs."""
+    name = request.node.callspec.id
+    # Create graph and assign device ID to nodes. Also assigns "original_index", which stores the
+    # nx graph node that the eventual ONNX node will be made from. This is used to later check that
+    # the partitions are as expected. Since the ordering of nodes in the ONNX might not
+    # yield the same indexes as the original node names/ids, we store them as a node attribute.
+    # This way we can in the modelwrapper still identify which node "6" originally was.
+    g = nx.DiGraph()
+    for node, device in graph["nodes"]:
+        g.add_node(node, device_id=device, partition_id=0, original_index=node)
+    for source, target in graph["edges"]:
+        g.add_edge(source, target)
+    model = testing_model_from_nx(g)
+
+    # Test clustering and SDP creation separately. First, clustering:
+    pmodel = model.transform(ClusterByNodeattribute("device_id"))
+    groups = {}
+    for node in pmodel.graph.node:
+        pid = getCustomOp(node).get_nodeattr("partition_id")
+        original_index = getCustomOp(node).get_nodeattr("original_index")
+        if pid not in groups.keys():
+            groups[pid] = []
+        groups[pid].append(original_index)
+    for group in groups.values():
+        assert set(group) in graph["expected_partitions"]
+    assert len(groups) == len(graph["expected_partitions"])
+
+    # Test SDP creation now
+    model = model.transform(
+        CreateMultiFPGAStreamingDataflowPartition(
+            separate_iodmas=True,
+            dataflow_partition_directory=Path(make_build_dir(f"test_sdp_creation_{name}_")),
+            verbosity=MFVerbosity.NONE,
+        )
+    )
+    assert len(model.graph.node) == len(graph["expected_partitions"])
+    for i in range(len(model.graph.node) - 1):
+        assert get_device_id(model.graph.node[i]) != get_device_id(model.graph.node[i + 1])
+    for sdp in model.graph.node:
+        for node in get_submodel(sdp)[0].graph.node:
+            assert get_device_id(node) == get_device_id(sdp)
+
+
+def test_iodma_separation() -> None:
+    """Test that IODMAs receive their own partition ID if requested."""
+    raise NotImplementedError()
 
 
 def equal_device_assignment(devices: int, nodes: int) -> list[int]:

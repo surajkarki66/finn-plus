@@ -16,13 +16,14 @@ from networkx.classes.digraph import DiGraph
 from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.custom_op.base import CustomOp
 from qonnx.transformation.bipolar_to_xnor import ConvertBipolarMatMulToXnorPopcount
 from qonnx.transformation.general import GiveUniqueNodeNames, RemoveUnusedTensors
 from qonnx.transformation.infer_data_layouts import InferDataLayouts
 from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
 from qonnx.util.cleanup import cleanup as qonnx_cleanup
 from testing_util.test import get_test_model
-from typing import cast
+from typing import Any, cast
 
 import finn.transformation.fpgadataflow.convert_to_hw_layers as to_hw
 import finn.transformation.streamline.absorb as absorb
@@ -465,3 +466,43 @@ def get_model(
     # Restore steps
     cfg.steps = all_steps
     return modelwrapper, cfg
+
+
+class TestingNode(CustomOp):
+    """A CustomOp purely for testing graph related functionality."""
+
+    def get_nodeattr_types(self) -> dict[str, tuple[str, bool, Any]]:
+        """Node attribute definitions."""
+        return {
+            # To store the original index, if given, from an nx DiGraph
+            "original_index": ("i", False, 0),
+            "partition_id": ("i", False, 0),
+            "device_id": ("i", False, 0),
+            # SDP attributes
+            "res_estimate": ("s", False, ""),
+            "res_hls": ("s", False, ""),
+            "res_synth": ("s", False, ""),
+            "slr": ("i", False, -1),
+            "mem_port": ("s", False, ""),
+            "instance_name": ("s", False, ""),
+            "return_full_exec_context": ("i", False, 0),
+            "network_connections": ("strings", False, []),
+        }
+
+    def make_shape_compatible_op(self, model):  # noqa
+        pass
+
+    def infer_node_datatype(self, model):  # noqa
+        pass
+
+    def execute_node(self, context, graph):  # noqa
+        pass
+
+    def verify_node(self):  # noqa
+        pass
+
+
+# Register test node when importing this testing module
+from finn.custom_op.fpgadataflow import custom_op  # noqa
+
+custom_op["TestingNode"] = TestingNode
