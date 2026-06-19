@@ -62,13 +62,14 @@ def step_collapse_multi_dnn(model: ModelWrapper, cfg: DataflowBuildConfig):
 
 
 def step_maximize_concat_split_simd(model: ModelWrapper, cfg: DataflowBuildConfig):
-    """Maximize SIMD on StreamingConcat_hls nodes after collapse.
+    """Set SIMD on StreamingConcat_hls nodes to match surrounding MVAU parallelism.
 
     The Parallel multi-DNN flow inserts SplitMultiHeads_hls (already fully
     parallel, no SIMD attribute) and StreamingConcat_hls (initialized with
-    SIMD=1). This step raises SIMD on StreamingConcat_hls nodes to the largest
-    common divisor of ChannelsPerStream so their cycle count is as close as
-    possible to the surrounding operators.
+    SIMD=1). This step sets SIMD on StreamingConcat_hls nodes to PE*2 of the
+    upstream MVAU (x2 because the concat handles two input streams), using the
+    largest valid common divisor of ChannelsPerStream that does not exceed that
+    target. Falls back to the maximum common divisor if no upstream MVAU is found.
     """
     from qonnx.custom_op.registry import getCustomOp
 
@@ -78,6 +79,24 @@ def step_maximize_concat_split_simd(model: ModelWrapper, cfg: DataflowBuildConfi
         if node.op_type == "StreamingConcat_hls":
             node_inst = getCustomOp(node)
             channels_per_stream = node_inst.get_nodeattr("ChannelsPerStream")
-            max_simd = int(max(common_divisors(channels_per_stream)))
-            node_inst.set_nodeattr("SIMD", max_simd)
+            valid_divisors = sorted(common_divisors(channels_per_stream))
+
+            # Find PE of the first upstream MVAU node
+            upstream_pe = None
+            for inp_tensor in node.input:
+                producer = model.find_producer(inp_tensor)
+                if producer is not None and "MVAU" in producer.op_type:
+                    upstream_pe = getCustomOp(producer).get_nodeattr("PE")
+                    break
+
+            if upstream_pe is not None:
+                # x2: the concat must handle two input streams simultaneously
+                target_simd = upstream_pe * 2
+                valid = [d for d in valid_divisors if d <= target_simd]
+                simd = int(max(valid)) if valid else int(min(valid_divisors))
+            else:
+                # Fallback: use the maximum common divisor
+                simd = int(max(valid_divisors))
+
+            node_inst.set_nodeattr("SIMD", simd)
     return model
