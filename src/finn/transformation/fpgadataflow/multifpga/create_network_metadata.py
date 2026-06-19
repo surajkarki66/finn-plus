@@ -75,21 +75,30 @@ class CreateNetworkMetadata(Transformation):
                     f"not a StreamingDataflowPartition. Make sure to "
                     f"run CreateMultiFPGAStreamingDataflowPartition first."
                 )
-        for n1 in model.graph.node:
-            sucs = model.find_direct_successors(n1)
-            if sucs is None:
+
+        for node in model.graph.node:
+            suc = model.find_direct_successors(node)
+            if suc is None:
                 continue
-            for n2 in sucs:
-                d1 = get_device_id(n1)
-                d2 = get_device_id(n2)
-                if d1 is None:
-                    raise FINNMultiFPGAError(f"Node {n1.name} does not have a device id!")
+            d1 = get_device_id(node)
+            if d1 is None:
+                raise FINNMultiFPGAError(
+                    f"Node {node.name} has no device ID. "
+                    f"Make sure to partition the model "
+                    f"before creating the metadata."
+                )
+            for s in suc:
+                d2 = get_device_id(s)
                 if d2 is None:
-                    raise FINNMultiFPGAError(f"Node {n2.name} does not have a device id!")
+                    raise FINNMultiFPGAError(
+                        f"Node {s.name} has no device ID. "
+                        f"Make sure to partition the model "
+                        f"before creating the metadata."
+                    )
                 if d1 != d2:
                     if self.verbosity.value > MFVerbosity.MEDIUM.value:
-                        log.info(f"Adding connection:  {n1.name} [{d1}] ----> {n2.name} [{d2}]")
-                    self.metadata.add_connection(int(d1), n1.name, int(d2), n2.name)
+                        log.info(f"Adding connection:  {node.name} [{d1}] ----> {s.name} [{d2}]")
+                    self.metadata.add_connection(d1, node.name, d2, s.name)
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
         self.create_metadata(model)

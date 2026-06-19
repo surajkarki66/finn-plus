@@ -39,6 +39,13 @@ from finn.util.resources import available_resources, get_estimated_model_resourc
 class ApplyPartitioning(Transformation):
     """Apply partitioning from a YAML file to the graph. Can be used to load an existing
     configuration. Afterwards every node has their device_id node attribute set.
+
+    This expects a YAML file:
+    ```
+    MVAU_hls_0: 1
+    FMPadding_rtl_2: 19
+    ...
+    ```
     """
 
     def __init__(self, mapping: dict[str, int] | Path) -> None:
