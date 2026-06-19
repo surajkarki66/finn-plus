@@ -283,6 +283,37 @@ def which(program):
     return None
 
 
+_XILINX_TOOL_DIR_ENV = "FINN_TOOL_DIR_OVERRIDE"
+
+
+def resolve_xilinx_tool(tool_name):
+    """Return the Xilinx-tool command to embed in generated bash scripts. Update
+    the following list if new tools use this resolver.
+
+    Default names:
+    - vivado
+    - vitis_hls
+    - vitis-run
+    - v++
+
+    With FINN_TOOL_DIR_OVERRIDE set, the command resolves to
+    <override>/<tool_name>, otherwise the bare tool_name is used.
+    The single directory override is all a tool-wrapping site (e.g. an LSF
+    bsub dispatcher) needs: point it at a shim dir whose filenames match the
+    bare tool names. Raises FileNotFoundError when the resolved command is
+    not found, so all the default names must have a corresponding shim filename.
+    """
+    dir_override = os.environ.get(_XILINX_TOOL_DIR_ENV)
+    tool = os.path.join(dir_override, tool_name) if dir_override else tool_name
+    if which(tool) is None:
+        if dir_override:
+            raise FileNotFoundError(
+                "%s not found (%s=%r)" % (tool, _XILINX_TOOL_DIR_ENV, dir_override)
+            )
+        raise FileNotFoundError("%s not found in PATH" % tool)
+    return tool
+
+
 mem_primitives_versal = {
     "URAM_72x4096": (72, 4096),
     "URAM_36x8192": (36, 8192),
