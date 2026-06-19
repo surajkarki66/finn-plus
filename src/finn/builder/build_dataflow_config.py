@@ -226,6 +226,13 @@ class PartitioningConfiguration:
     # saved in the output dir instead.
     partitioning: dict[str, int] | Path | None = None
 
+    # Custom partition constraints. This can be used to, for example,
+    # assign a specific layer to a specific device. Maps node names to device IDs.
+    # If `partitioning` is given, this is ignored.
+    # Keep in mind that if the custom constraints contradict implicit other
+    # model constraints, the model may become infeasible.
+    custom_partitioning_constraints: dict[str, int] = field(default_factory=dict)
+
     # The number of FPGAs to use for Multi-FPGA
     # TODO: Allow -1, etc.
     num_fpgas: int = 0
@@ -250,6 +257,14 @@ class PartitioningConfiguration:
     # data encoding, etc.
     # It is up to the kernel preparation transformation to interprete this data.
     communication_kernel_arguments: dict[str, str] = field(default_factory=dict)
+
+    # If set to true, the partitioner considers only cuts in the model where a single concurrent
+    # stream is active. This results in a model that can be distributed across multiple devices,
+    # regardless of the number of network ports available. If set to False, the partitioner can
+    # cut anyhwere - this is more flexible and results in potentially more balanced designs, but
+    # requires that multiple data streams can be
+    # networked (either multiplexed/routed or over multiple ports).
+    single_stream_network: bool = True
 
     # How much a FPGA can be utilized at max. The solver will fail if it
     # cannot comply with this limitation. Since platforms.py seems to contain

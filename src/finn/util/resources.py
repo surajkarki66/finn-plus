@@ -1,6 +1,4 @@
-from numbers import Real
 from qonnx.core.modelwrapper import ModelWrapper
-from typing import cast
 
 from finn.analysis.fpgadataflow.hls_synth_res_estimation import hls_synth_res_estimation
 from finn.analysis.fpgadataflow.res_estimation import res_estimation
@@ -8,10 +6,10 @@ from finn.util.exception import FINNUserError
 from finn.util.logging import log
 from finn.util.platforms import Platform
 
-ResourceEstimates = dict[str, dict[str, Real]]
+ResourceEstimates = dict[str, dict[str, int | float]]
 """Short alias for a resource dict."""
 
-ResourceEstimatesByIndex = dict[int, dict[str, Real]]
+ResourceEstimatesByIndex = dict[int, dict[str, int | float]]
 """Short alias for a resource dict."""
 
 
@@ -63,7 +61,7 @@ def get_estimated_model_resources(  # noqa
     fpga_part: str,
     considered_resources: list[str],
     add_missing_resources: bool,
-) -> ResourceEstimatesByIndex:
+) -> ResourceEstimates:
     """Gather resources of all layers based on estimates both from FINNs HWCustomOp implementation,
     as well as the HLS reports. These are then merged to produce
     the worst case resource estimates and returned.
@@ -89,7 +87,7 @@ def get_estimated_model_resources(  # noqa
         for restype in considered_resources:
             if restype not in result[layer]:
                 if add_missing_resources:
-                    result[layer][restype] = cast("Real", 0)
+                    result[layer][restype] = 0
                     log.info(f"Added missing resource estimation on layer {layer} ({restype}: 0)")
                 else:
                     resource_missing = True
@@ -97,18 +95,16 @@ def get_estimated_model_resources(  # noqa
 
     # Check that estimates for all layers are available
     layer_missing = False
-    est_by_index = {}
-    for i, node in enumerate(model.graph.node):
+    for node in model.graph.node:
         if node.name not in result:
             layer_missing = True
             # TODO: Move this out of the function? (Should this better be checked by the caller?)
             log.error(f"No resource estimations were found for node {node.name}!")
-        est_by_index[i] = result[node.name]
     if layer_missing or resource_missing:
         raise FINNUserError(
             "At least one node is missing one or more resource estimation numbers.\n" + str(result)
         )
-    return est_by_index
+    return result
 
 
 def _resources_per_device_per_slr(p: Platform) -> dict[int, dict[str, int]]:
@@ -127,7 +123,7 @@ def _resources_per_device_per_slr(p: Platform) -> dict[int, dict[str, int]]:
     return new
 
 
-def available_resources(p: Platform, considered_resources: list[str]) -> dict[str, int]:
+def available_resources_on_platform(p: Platform, considered_resources: list[str]) -> dict[str, int]:
     """Return the total resources per device. Normally,
     these values are split by SLR.
     """

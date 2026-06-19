@@ -58,7 +58,6 @@ from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
 from qonnx.util.basic import get_by_name
 from qonnx.util.cleanup import cleanup_model
 from shutil import copy, move
-from typing import cast
 
 import finn.transformation.fpgadataflow.convert_to_hw_layers as to_hw
 import finn.transformation.streamline.absorb as absorb
@@ -1523,7 +1522,6 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
             "Cannot do Multi-FPGA without " "'board' being specified in the config!"
         )
     # Commonly used config variables
-    output_dir = Path(cfg.output_dir)
     part = cfg._resolve_fpga_part()
     platform = cfg._resolve_vitis_platform()
     clk_ns = cfg.synth_clk_period_ns
@@ -1563,9 +1561,7 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
                 if pc.partitioning is not None:
                     model = model.transform(ApplyPartitioning(pc.partitioning))
                 else:
-                    model = model.transform(
-                        PartitionForMultiFPGA(pc, part, cast("str", cfg.board), output_dir)
-                    )
+                    model = model.transform(PartitionForMultiFPGA(cfg))
                 model = model.transform(
                     CreateMultiFPGAStreamingDataflowPartition(
                         pc.separate_iodmas, sdp_partition_dir, pc.verbosity
