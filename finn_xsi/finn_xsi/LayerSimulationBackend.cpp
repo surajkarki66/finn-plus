@@ -354,7 +354,7 @@ int main(int argc, const char* argv[]) {
         // Construct simulation
         SingleNodeSimulation<InstreamCount, OutstreamCount, RTLSimConfig::LoggingEnabled, RTLSimConfig::NodeIndex, RTLSimConfig::TotalNodes, RTLSimConfig::IsInputNode,
                              RTLSimConfig::IsOutputNode, RTLSimConfig::preciseTimeout>
-            sim(RTLSimConfig::kernel_libname, RTLSimConfig::design_libname, "xsim_log_file.txt", "trace_file.txt", RTLSimConfig::istream_descs, RTLSimConfig::ostream_descs,
+            sim(RTLSimConfig::kernel_libname, RTLSimConfig::design_libname, RTLSimConfig::xsim_log_filename.c_str(), RTLSimConfig::trace_filename.value_or("").c_str(), RTLSimConfig::istream_descs, RTLSimConfig::ostream_descs,
                 RTLSimConfig::inputInterfaceNames, RTLSimConfig::outputInterfaceNames, 2);
 
         // Create simulation controller

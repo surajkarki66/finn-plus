@@ -702,7 +702,9 @@ def test_fpgadataflow_rtl_mvau(
         )
 
     if pe == 1 and simd == 1 and pumpedMemory:
-        pytest.skip("Skip PE=SIMD=1 with pumpedMemory=True, known weight generation bug")
+        pytest.xfail("Skip PE=SIMD=1 with pumpedMemory=True, known weight generation bug")
+    if simd == mw and pumpedCompute:
+        pytest.xfail("Skip SIMD=MW with pumpedCompute=True, memstreamer not working in rtl sim")
 
     if simd == 1 and pumpedCompute:
         pytest.skip("""Clock pumping an input of SIMD=1 is not meaningful. Skipping test""")

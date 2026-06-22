@@ -416,7 +416,6 @@ def create_chained_loop_bodies(
 @pytest.mark.fpgadataflow
 @pytest.mark.vivado
 @pytest.mark.slow
-@pytest.mark.only
 def test_finnloop_end2end_mlo(
     dim, iteration, elemwise_optype, rhs_shape, eltw_param_dtype, tail_node
 ):

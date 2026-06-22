@@ -534,6 +534,15 @@ class SimulationBuilder:
         node_model.set_metadata_prop("input_node", str(input_node).lower())
         node_model.set_metadata_prop("output_node", str(output_node).lower())
 
+        rtlsim_trace_str = self.model.get_metadata_prop("rtlsim_trace")
+        if rtlsim_trace_str is not None:
+            rtlsim_trace_path = Path(rtlsim_trace_str)
+            # Add suffix to name depending on node name
+            rtlsim_trace_path = rtlsim_trace_path.with_name(
+                rtlsim_trace_path.stem + f"_{target_node.name}" + rtlsim_trace_path.suffix
+            )
+            node_model.set_metadata_prop("rtlsim_trace", str(rtlsim_trace_path))
+
         return node_model
 
     def _get_stream_descriptions(self, model: ModelWrapper) -> tuple[str, str]:
@@ -859,6 +868,7 @@ class SimulationBuilder:
             build_dir: Path,
         ) -> Any:
             """Build simulation for a single node."""
+            self.model.save("/scratch/pc2-mitarbeiter/linusjun/mvaumodel.onnx")
             nodemodel = self._isolated_node_model(node_index)
             nodemodel = nodemodel.transform(InferShapes())
             nodemodel = nodemodel.transform(PrepareIP(self.fpgapart, self.clk_ns))
