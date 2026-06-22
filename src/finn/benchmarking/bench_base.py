@@ -296,8 +296,7 @@ class bench:
         dut_path = Path(__file__).parent / "dut" / dut_yaml_name
         if dut_path.is_file():
             with dut_path.open() as f:
-                data = yaml.load(f, Loader=yaml.SafeLoader)
-                return DataflowBuildConfig.from_yaml(data)
+                return DataflowBuildConfig.from_yaml(f)
         else:
             raise Exception("No DUT-specific YAML build definition found")
 
