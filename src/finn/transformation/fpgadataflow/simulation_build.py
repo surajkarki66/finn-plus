@@ -868,7 +868,6 @@ class SimulationBuilder:
             build_dir: Path,
         ) -> Any:
             """Build simulation for a single node."""
-            self.model.save("/scratch/pc2-mitarbeiter/linusjun/mvaumodel.onnx")
             nodemodel = self._isolated_node_model(node_index)
             nodemodel = nodemodel.transform(InferShapes())
             nodemodel = nodemodel.transform(PrepareIP(self.fpgapart, self.clk_ns))
