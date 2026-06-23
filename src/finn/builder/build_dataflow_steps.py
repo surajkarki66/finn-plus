@@ -1496,6 +1496,7 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
                     cfg.enable_hw_debug,
                     cfg.enable_instrumentation,
                     cfg.instrumentation_no_dma,
+                    cfg.instrumentation_avg_n,
                     cfg.auto_fifo_depths
                     and cfg.auto_fifo_strategy == AutoFIFOSizingMethod.LIVE_FIFO,
                     partition_model_dir=partition_model_dir,

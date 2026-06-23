@@ -43,12 +43,14 @@ class GenerateInstrumentationIP(Transformation):
         self,
         fpga_part,
         clk_period_ns,
+        avg_n=64,
         format="ip",  # "ip" for Vivado (Zynq) or "xo" for Vitis (Alveo/Versal)
     ):
         """Initialize instrumentation IP generation with FPGA part and clock settings."""
         super().__init__()
         self.fpga_part = fpga_part
         self.clk_period_ns = clk_period_ns
+        self.avg_n = avg_n
         self.format = format
 
     def apply(self, model):
@@ -86,6 +88,7 @@ class GenerateInstrumentationIP(Transformation):
         ) as f:
             instrwrp_cpp = f.read()
         instrwrp_cpp = instrwrp_cpp.replace("@PENDING@", str(pending))
+        instrwrp_cpp = instrwrp_cpp.replace("@AVG_N@", str(self.avg_n))
         instrwrp_cpp = instrwrp_cpp.replace("@ILEN@", str(ilen))
         instrwrp_cpp = instrwrp_cpp.replace("@OLEN@", str(olen))
         instrwrp_cpp = instrwrp_cpp.replace("@TI@", str(ti))
