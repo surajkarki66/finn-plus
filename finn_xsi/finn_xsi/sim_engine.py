@@ -55,7 +55,8 @@ class SimEngine:
         self, kernel: str, design: str, log: str | None = None, wdb: str | None = None
     ) -> None:
         """Create a simulation engine bound to the given kernel and design."""
-        top = xsi.Design(xsi.Kernel(kernel), design, log, wdb)
+        k = xsi.Kernel(kernel)
+        top = xsi.Design(k, design, log, wdb)
         clk = top.getPort("ap_clk")
         # If clock pumping is disabled, set clk2x to None
         try:

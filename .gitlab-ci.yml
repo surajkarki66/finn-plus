@@ -18,7 +18,7 @@ variables:
       - "full_ci"
   CPU_CORES:
     description: "Select number of CPU cores and test workers"
-    value: "16"
+    value: "32"
   CPU_CORES_BENCH:
     description: "Select number of CPU cores for benchmark runs"
     value: "32"
