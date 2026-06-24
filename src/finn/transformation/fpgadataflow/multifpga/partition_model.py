@@ -1,5 +1,6 @@
 import mip
 import rich.box
+import time
 import yaml
 from collections import Counter
 from math import ceil
@@ -27,6 +28,8 @@ from finn.util.exception import (
 )
 from finn.util.fpgadataflow import set_device_id
 from finn.util.logging import LogDisabledConsole, log
+from finn.util.platforms import platforms
+from finn.util.resources import available_resources_on_platform, get_estimated_model_resources
 
 
 class ApplyPartitioning(Transformation):
@@ -149,6 +152,124 @@ class PartitionForMultiFPGA(Transformation):
 
     def _log_pre_solve_information(self, partitioner: Partitioner) -> None:
         """Log some information before starting to solve the LP."""
+
+    def generate_partitioning_report(
+        self, model: ModelWrapper, mapping: dict[str, int] | None, elapsed_seconds: int
+    ) -> str:
+        """Generate a report in which the required resources, the resources available per device,
+        and much more are listed. Works even if no solution was found.
+        """
+        if self.partitioner is None or self.partitioner.status is None:
+            raise FINNInternalError(
+                "Cannot log post-solving information before the model was solved."
+            )
+        assert self.cfg.partitioning_configuration is not None
+        assert self.cfg.board is not None
+
+        s = ""
+
+        # General information
+        s += f"{' Model and Configuration ':=^80}\n"
+        s += "=" * 80 + "\n"
+        s += f"{'Layers: ' + str(len(model.graph.node)):<10}\n"
+        s += f"{'Devices: ' + str(self.cfg.partitioning_configuration.num_fpgas):<10}\n"
+        s += f"{'Time elapsed: ' + str(elapsed_seconds) + 's':<10}\n"
+
+        # Resources
+        resource_estimates = get_estimated_model_resources(
+            model,
+            self.cfg._resolve_fpga_part(),  # noqa
+            self.cfg.partitioning_configuration.considered_resources,
+            True,
+        )
+        device_resources = available_resources_on_platform(
+            platforms[self.cfg.board](), self.cfg.partitioning_configuration.considered_resources
+        )
+
+        s += f"\n{' Requires resources by the model ':=^80}\n"
+        s += "=" * 80 + "\n"
+        for restype in self.cfg.partitioning_configuration.considered_resources:
+            total_required = sum([rv[restype] for rv in resource_estimates.values()])
+            total_on_device = (
+                self.cfg.partitioning_configuration.max_utilization * device_resources[restype]
+            )
+            factor = total_required / total_on_device
+            s += (
+                f"{restype:<15}{total_required:<15_}   ({factor:.1f}x  "
+                f"on  {self.cfg.board}  at  "
+                f"{self.cfg.partitioning_configuration.max_utilization:.2%}  max utilization)\n"
+            )
+
+        s += f"\n{' Available Resources on Devices at Utilization Percentages':=^80}\n"
+        s += "=" * 80 + "\n"
+        maxutil = self.cfg.partitioning_configuration.max_utilization
+        maxutil_percent = f"{self.cfg.partitioning_configuration.max_utilization:.2%}"
+        devices = self.cfg.partitioning_configuration.num_fpgas
+        s += (
+            " " * 15 + f"{'1x @ ' + maxutil_percent:^15}"
+            f"{'1x @ 100%':^15}"
+            f"{str(devices) + 'x @ ' + maxutil_percent + '(!)':^15}"
+            f"{str(devices) + 'x @ 100%':^15}\n"
+        )
+        for restype in self.cfg.partitioning_configuration.considered_resources:
+            res = int(device_resources[restype])
+            s += (
+                f"{restype:<15}"
+                f"{int(res * maxutil):^15_}"
+                f"{int(res):^15_}"
+                f"{int(maxutil * res * devices):^15_}"
+                f"{int(devices * res):^15_}\n"
+            )
+
+        s += f"\n{' Largest Nodes by Resource Type ':=^80}\n"
+        s += "=" * 80 + "\n"
+        for restype in self.cfg.partitioning_configuration.considered_resources:
+            largest = ""
+            largest_amount = 0
+            for layer in resource_estimates.keys():
+                if int(resource_estimates[layer][restype]) > largest_amount:
+                    largest_amount = resource_estimates[layer][restype]
+                    largest = layer
+            s += f"{restype:<15}{largest_amount:<12_}{largest:<25}\n"
+
+        # Return early if no solution was found
+        if self.partitioner.model.status in [
+            mip.OptimizationStatus.INFEASIBLE,
+            mip.OptimizationStatus.NO_SOLUTION_FOUND,
+        ]:
+            return s
+
+        assert mapping is not None
+        s += f"\n{' Nodes per Device ':=^80}\n"
+        s += "=" * 80 + "\n"
+        counter = Counter(list(mapping.values()))
+        for device in counter.keys():
+            s += f"{'Device ' + str(device) + ': ':<10}{str(counter[device]) + ' nodes':<10}\n"
+
+        actual_resources = self.partitioner.get_resource_use_relative()
+        if actual_resources is not None:
+            s += f"\n{' Resources per Device ':=^80}\n"
+            for device in actual_resources.keys():
+                s += f"{' Device ' + str(device) + ' ':-^40}\n"
+                if actual_resources[device] is None:
+                    continue
+                for restype in actual_resources[device].keys():
+                    if actual_resources[device][restype] is None:
+                        continue
+                    s += f"{restype:<15}{actual_resources[device][restype]:<15_}\n"
+
+        return s
+
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
+        # Create the partitioner
+        self.partitioner = self.partitioner_type(self.cfg, model)
+
+        # Store the model definition for debugging.
+        logdir = Path(make_build_dir("partitioning_model_data_"))
+        model_definition_file = logdir / "model.lp"
+        self.partitioner.model.write(str(model_definition_file))
+
+        # Print some information before starting partitioning
         if self.verbosity.value > MFVerbosity.LOW.value:
             solver = (
                 self.pcfg.partition_solver.value
@@ -158,19 +279,18 @@ class PartitionForMultiFPGA(Transformation):
             log.info(f"Using solver: {solver}")
             log.info(f"Solver emphasis: {self.pcfg.partition_solver_emphasis.name}")
         if self.verbosity.value > MFVerbosity.MEDIUM.value:
-            log.info(f"Number of variables in model: {len(partitioner.model.vars)}")
-            log.info(f"Number of constraints in model: {len(partitioner.model.constrs)}")
+            log.info(f"Number of variables in model: {len(self.partitioner.model.vars)}")
+            log.info(f"Number of constraints in model: {len(self.partitioner.model.constrs)}")
 
-    def _log_post_solve_information(
-        self,
-        mapping: dict[str, int],
-        partitioner: Partitioner,
-    ) -> None:
-        """Log some information after the solver is done. Also shows the partitioning results."""
-        if self.partitioner is None or self.partitioner.status is None:
-            raise FINNInternalError(
-                "Cannot log post-solving information before the model was solved."
-            )
+        # Solve the model (timed)
+        start = time.time()
+        self.mapping = self.partitioner.solve(solver_timeout=self.pcfg.partition_solver_timeout)
+        elapsed_seconds = time.time() - start
+
+        # Generate report, regardless of whether partitioning was successful
+        report = self.generate_partitioning_report(model, self.mapping, int(elapsed_seconds))
+
+        # Display first results
         if self.verbosity.value > MFVerbosity.LOW.value:
             log.info("[bold green]Solver done.[/bold green]", extra={"markup": True})
         # Status
@@ -181,42 +301,20 @@ class PartitionForMultiFPGA(Transformation):
                 log.info("FEASIBLE solution found.")
             else:
                 log.info(f"Model optimization status: {self.partitioner.status.name}")
-        # Resource utilization
-        util = partitioner.get_resource_use_relative()
-        if util is not None and self.verbosity.value > MFVerbosity.NONE.value:
-            log.info("Relative resource utilization")
-            for device, device_util in util.items():
-                log.info(
-                    f"Device {device}:  "
-                    + ", ".join(f"{k}: {v:.1%}" for k, v in device_util.items())
-                )
-        # Report results
-        if self.verbosity.value == MFVerbosity.EXTRA_HIGH.value:
-            log.info(f"Model objective value: {partitioner.model.objective.x}")
-            self.show_mapping(mapping)
-        # Show layer-wise partitioning results
-        if self.verbosity.value > MFVerbosity.NONE.value:
-            counter = Counter(mapping.values())
-            log.info("Partitioning results:")
-            for dev in counter.keys():
-                percentage = counter[dev] / counter.total()
-                log.info(f"Device {dev}: {counter[dev]} nodes ({percentage:.1%})")
 
-    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
-        # Create the partitioner
-        self.partitioner = self.partitioner_type(self.cfg, model)
+        # Display / save report
+        if self.verbosity.value == self.verbosity.EXTRA_HIGH.value:
+            log.info("\n" + report)
+        report_path = Path(self.cfg.output_dir) / "report" / "partitioning_report.txt"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(report)
 
-        logdir = Path(make_build_dir("partitioning_model_data_"))
-        self.partitioner.model.write(str((logdir / "model.lp").absolute()))
-        self._log_pre_solve_information(self.partitioner)
-        self.mapping = self.partitioner.solve(solver_timeout=self.pcfg.partition_solver_timeout)
+        # If partitioning failed, return now
         if self.mapping is None:
             raise FINNMultiFPGAPartitionerError(
-                f"No feasible partitioning solution could be found for "
-                f"the given model and configuration. If you are sure "
-                f"that everything is set up correctly, try using a "
-                f"different solver. The generated model can be found at: "
-                f"{logdir.absolute()}"
+                f"Partitioning failed. Status: {self.partitioner.model.status.name}.\n"
+                f"A detailed report can be viewed at: {report_path.absolute()}\n"
+                f"The model definition can be found at: {model_definition_file.absolute()}"
             )
 
         # Apply results back to the model
@@ -224,9 +322,5 @@ class PartitionForMultiFPGA(Transformation):
 
         # Write results to build dir and log dir
         self.partitioner.write_results(logdir / "partitioning.yaml")
-        self.partitioner.write_results(Path(self.cfg.output_dir) / "partitioning.yaml")
-
-        # Print results to console
-        self._log_post_solve_information(self.mapping, self.partitioner)
-
+        self.partitioner.write_results(Path(self.cfg.output_dir) / "report" / "partitioning.yaml")
         return model, False

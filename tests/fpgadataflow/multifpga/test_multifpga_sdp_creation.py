@@ -17,6 +17,7 @@ from random import randint
 from typing import Literal, cast
 
 from finn.builder.build_dataflow_config import MFVerbosity
+from finn.transformation.fpgadataflow.insert_iodma import InsertIODMA
 from finn.transformation.fpgadataflow.multifpga.create_multi_sdp import (
     ClusterByNodeattribute,
     CreateMultiFPGAStreamingDataflowPartition,
@@ -202,6 +203,18 @@ test_graphs = {
 }
 
 
+def digraph_from_graph_definition(
+    graph: dict[str, list[tuple[int, int]] | list[set[int]]]
+) -> nx.DiGraph:
+    """Convert a graph definition as used in this test into a DiGraph."""
+    g = nx.DiGraph()
+    for node, device in graph["nodes"]:
+        g.add_node(node, device_id=device, partition_id=0, original_index=node)
+    for source, target in graph["edges"]:
+        g.add_edge(source, target)
+    return g
+
+
 @pytest.mark.parametrize(
     "graph",
     [pytest.param(graph_data, id=graph_name) for graph_name, graph_data in test_graphs.items()],
@@ -216,11 +229,7 @@ def test_sdp_creation(
     # the partitions are as expected. Since the ordering of nodes in the ONNX might not
     # yield the same indexes as the original node names/ids, we store them as a node attribute.
     # This way we can in the modelwrapper still identify which node "6" originally was.
-    g = nx.DiGraph()
-    for node, device in graph["nodes"]:
-        g.add_node(node, device_id=device, partition_id=0, original_index=node)
-    for source, target in graph["edges"]:
-        g.add_edge(source, target)
+    g: nx.DiGraph = digraph_from_graph_definition(graph)
     model = testing_model_from_nx(g)
 
     # Test clustering and SDP creation separately. First, clustering:
@@ -254,9 +263,70 @@ def test_sdp_creation(
             assert get_device_id(node) == get_device_id(sdp)
 
 
-def test_iodma_separation() -> None:
+@pytest.mark.parametrize(
+    "graph",
+    [pytest.param(graph_data, id=graph_name) for graph_name, graph_data in test_graphs.items()],
+)
+def test_iodma_separation(
+    graph: dict[str, list[tuple[int, int]] | list[set[int]]], request: pytest.FixtureRequest
+) -> None:
     """Test that IODMAs receive their own partition ID if requested."""
-    raise NotImplementedError()
+    name = request.node.callspec.id
+    g = digraph_from_graph_definition(graph)
+    model = testing_model_from_nx(g)
+    model = model.transform(InsertIODMA())
+    model = model.transform(
+        CreateMultiFPGAStreamingDataflowPartition(
+            separate_iodmas=True,
+            dataflow_partition_directory=Path(make_build_dir(f"test_sdp_iodma_separation_{name}_")),
+            verbosity=MFVerbosity.EXTRA_HIGH,
+        )
+    )
+
+    # Count input and output nodes, each should now have an IODMA
+    io_nodes = sum([1 for n in g.nodes if g.in_degree(n) == 0 or g.out_degree(n) == 0])
+    assert len(model.graph.node) == len(graph["expected_partitions"]) + io_nodes
+
+    # IO SDP nodes should be IODMA
+    for node in model.graph.node:
+        pre = model.find_direct_predecessors(node)
+        suc = model.find_direct_successors(node)
+        submodel, _ = get_submodel(node)
+        if pre is None or suc is None:
+            assert len(submodel.graph.node) == 1
+            assert "IODMA" in submodel.graph.node[0].op_type
+
+    # Only cluster, dont merge into SDPs
+    model = testing_model_from_nx(g)
+    model = model.transform(InsertIODMA())
+    model = model.transform(
+        ClusterByNodeattribute(
+            resolve_circular_dependencies=True,
+            compare_attribute="device_id",
+            partition_attribute="partition_id",
+        )
+    )
+
+    # Check the partitions
+    largest_partition_id = 0
+    for partition in graph["expected_partition"]:
+        for i in partition:
+            if i > largest_partition_id:
+                largest_partition_id = i
+
+    for additional_id in range(largest_partition_id, largest_partition_id + io_nodes):
+        nodes_with_this_id = 0
+        node_found = None
+        for node in model.graph.node:
+            if getCustomOp(node).get_nodeattr("partition_id") == additional_id:
+                nodes_with_this_id += 1
+                node_found = node
+        assert nodes_with_this_id == 1 and "IODMA" in node_found.op_type, (  # type: ignore
+            f"{name}: Expected exactly 1 node (of type IODMA) to have partition "
+            f"ID {additional_id}. The largest expected ID without IODMAs "
+            f"was {largest_partition_id} and there are {io_nodes} nodes "
+            f"that are IO nodes and thus require an IODMA. Op_type was {node.op_type}"
+        )
 
 
 def equal_device_assignment(devices: int, nodes: int) -> list[int]:

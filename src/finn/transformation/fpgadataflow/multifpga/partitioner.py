@@ -108,13 +108,13 @@ class Partitioner(ABC):
             yaml.dump(results, f, yaml.Dumper)
 
     @abstractmethod
-    def _get_resource_use_relative(self) -> dict[str, dict[str, Any]]:
+    def _get_resource_use_relative(self) -> dict[int, dict[str, Any]]:
         """Get resources used by the device in percent. Must fail if no
         partition was calculated yet.
         """
         pass  # noqa
 
-    def get_resource_use_relative(self) -> dict[str, dict[str, Any]] | None:
+    def get_resource_use_relative(self) -> dict[int, dict[str, Any]] | None:
         """Return the resources used by a device. This only works if the optimization goal was
         resource usage. If no optimization was done, the dict will contain None's
         Actual implementation is left to the subclasses.

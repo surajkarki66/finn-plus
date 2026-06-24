@@ -284,7 +284,7 @@ def networkx_to_onnx(g: DiGraph) -> ModelWrapper:
 # ---- CACHE ----
 
 
-def get_model(
+def get_model(  # noqa
     model: str,
     wbits: int,
     abits: int,
@@ -294,8 +294,10 @@ def get_model(
     cfg: DataflowBuildConfig,
     pytestconfig: pytest.Config | None,
     identifier: str | None = None,
-) -> tuple[ModelWrapper, DataflowBuildConfig]:  # noqa
-    """Get a prepared model.
+) -> tuple[ModelWrapper, DataflowBuildConfig]:
+    """Get a prepared model. The test identifier does not consider
+    partitioning configuration parameters. This means that configs with
+    for example 2 different device counts are considered the same model.
 
     Arguments:
     ---------

@@ -10,6 +10,8 @@ import contextlib
 import mip
 from fpgadataflow.multifpga.utils import get_model
 from pathlib import Path
+from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.custom_op.registry import getCustomOp
 from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
 
 from finn.builder.build_dataflow_config import (
@@ -38,7 +40,7 @@ from finn.util.exception import (
 )
 from finn.util.fpgadataflow import get_device_id
 from finn.util.platforms import platforms
-from finn.util.resources import available_resources
+from finn.util.resources import available_resources_on_platform, get_estimated_model_resources
 
 
 @pytest.mark.auroraflow
@@ -201,6 +203,34 @@ class TestAuroraFlowPartitioning:
             f"Unknown board type ({board}) for this test. Unsure which shell type to use."
         )
 
+    def requires_too_many_resources(self, model: ModelWrapper, cfg: DataflowBuildConfig) -> bool:
+        """Check if a model requires more resources than the given number of devices supplies.
+        Considers the number of devices, as well as the max utilization percentage.
+        """
+        assert cfg.partitioning_configuration is not None, "No partitioning configuration found!"
+        assert cfg.board is not None, (
+            "Partitioning requires the 'board' " "parameter to be set in the dataflow config."
+        )
+        resource_estimates = get_estimated_model_resources(
+            model,
+            cfg._resolve_fpga_part(),  # noqa
+            cfg.partitioning_configuration.considered_resources,
+            True,
+        )
+        device_resources = available_resources_on_platform(
+            platforms[cfg.board](), cfg.partitioning_configuration.considered_resources
+        )
+        for restype in cfg.partitioning_configuration.considered_resources:
+            total_required = sum([rv[restype] for rv in resource_estimates.values()])
+            total_on_devices = (
+                cfg.partitioning_configuration.max_utilization
+                * cfg.partitioning_configuration.num_fpgas
+                * device_resources[restype]
+            )
+            if total_required > total_on_devices:
+                return True
+        return False
+
     @pytest.mark.parametrize("network_ports", [2])
     @pytest.mark.parametrize("ideal_max_util", [(0.8, 0.9), (0.9, 1.0), (0.2, 0.8), (0.2, 1.0)])
     def test_enforce_utilization_limit(
@@ -211,44 +241,7 @@ class TestAuroraFlowPartitioning:
         ideal_max_util: tuple[float, float],
     ) -> None:
         """Test that the partitioner upholds the resource utilization limit."""
-        platform = platforms[board]
-        test_dir_identifier = f"test_util_limit_{platform.__class__.__name__}_{topology.name}"
-        diff = 0.05
-        max_util = ideal_max_util[1]
-        ideal_util = ideal_max_util[0]
-        devices = 2
-        nodes = 2
-        considered_resources = ["LUT", "FF", "DSP", "BRAM_18K"]
-        res_per_device = available_resources(platform(), considered_resources)
-
-        # Hypothetical resource use per node
-        # Node0 (and thus implicitly Device0) is underutilized
-        # Node1(and thus implicitly Device1) is overutilized
-        resource_estimates = {
-            0: {res: res_per_device[res] * (max_util - diff) for res in considered_resources},
-            1: {res: res_per_device[res] * (max_util + diff) for res in considered_resources},
-        }
-
-        # Since every device can have only one node, one device will be overutilized slightly,
-        # and no solution should be found.
-        with pytest.raises(FINNMultiFPGAPartitionerError):
-            part = AuroraPartitioner(
-                output_dir=Path(make_build_dir(test_dir_identifier + "_")),
-                network_ports_per_device=network_ports,
-                strategy=PartitioningStrategy.RESOURCE_UTILIZATION,
-                devices=devices,
-                nodes=nodes,
-                considered_resources=considered_resources,
-                resources_per_device=res_per_device,  # type: ignore
-                inseparable_nodes=[],
-                topology=topology,
-                max_utilization=max_util,
-                ideal_utilization=ideal_util,
-                resource_estimates=resource_estimates,
-                verbosity=MFVerbosity.NONE,
-            )
-            solution = part.solve(100)
-            assert solution is None
+        raise NotImplementedError()
 
     @pytest.mark.parametrize(
         "model_type",
@@ -298,17 +291,21 @@ class TestAuroraFlowPartitioning:
             pytest.skip(reason=f"Model {typename} too large for board {board}!")  # type: ignore
 
         # Skip the same tests that the end2end tests skip
-        if typename.lower() == "lfc" and not (wbits == 1 and abits == 1):
-            pytest.skip("Not running LFC models with W1A1.")  # type: ignore
+        if typename.lower() == "lfc" and wbits == 1 and devices == 2 and board == "Pynq-Z1":
+            pytest.skip(
+                "Not running LFC models with W1A1/W1A2 on "  # type: ignore
+                "2 Pynq-Z1 devices - there is no "
+                "way to partition this model for this particular config."
+            )
 
         # Build the config
         flow_type = self.get_shell_flow_type(board)
         cfg = DataflowBuildConfig(
             output_dir=make_build_dir(test_identifier),
             board=board,
-            mvau_wwidth_max=32,
-            target_fps=100,
-            synth_clk_period_ns=10.0,
+            mvau_wwidth_max=512,
+            target_fps=5000,
+            synth_clk_period_ns=5.0,
             standalone_thresholds=True,
             minimize_bit_width=True,
             shell_flow_type=flow_type,
@@ -322,6 +319,7 @@ class TestAuroraFlowPartitioning:
                 ports_per_device=2,
                 separate_iodmas=True,
                 partition_solver_timeout=180,
+                verbosity=MFVerbosity.EXTRA_HIGH,
             ),
         )
 
@@ -338,6 +336,13 @@ class TestAuroraFlowPartitioning:
             identifier="test_partitioning",
         )
 
+        # Skip tests for models that simply require too many resources
+        if self.requires_too_many_resources(model, cfg):
+            pytest.skip(
+                "Requires more resources than are available in "
+                "this partitioning configuration."  # type: ignore
+            )
+
         # Catch if there are more devices than nodes
         context = contextlib.nullcontext()
         if len(model.graph.node) < devices:
@@ -349,12 +354,7 @@ class TestAuroraFlowPartitioning:
         # despite the model being feasible. The current timeout should prevent this from happening.
         with context:
             assert cfg.partitioning_configuration is not None
-            part = PartitionForMultiFPGA(
-                cfg.partitioning_configuration,
-                cfg._resolve_fpga_part(),  # noqa
-                board,
-                Path(make_build_dir("")),
-            )
+            part = PartitionForMultiFPGA(cfg)
             model = model.transform(part)
 
         # If there are more devices than nodes, we are done here, since we already tested,
@@ -382,7 +382,7 @@ class TestAuroraFlowPartitioning:
             assert usage is not None
 
             # Available resources on this device
-            res_per_device = available_resources(
+            res_per_device = available_resources_on_platform(
                 platforms[board](), cfg.partitioning_configuration.considered_resources
             )
 
@@ -546,7 +546,7 @@ class TestAuroraFlowPartitioning:
             f"_node{nodes}_topo{topology.name}_{board}_dist{distribution}"
             f"_{max_util}_{ideal_util}_ins{len(inseparable_nodes)}_topology{topology}"
         )
-        res_per_device = available_resources(platforms[board](), considered_resources)
+        res_per_device = available_resources_on_platform(platforms[board](), considered_resources)
 
         # Check if we expect an error regarding usage of resources
         # If more resources than allowed are utilized, the partitioner will
@@ -657,7 +657,7 @@ class TestAuroraFlowPartitioning:
         max_util = 0.9
         ideal_util = 0.8
         considered_resources = ["LUT", "FF", "DSP", "BRAM_18K"]
-        res_per_device = available_resources(platforms[board](), considered_resources)
+        res_per_device = available_resources_on_platform(platforms[board](), considered_resources)
         resource_estimates = {
             node: {res: ideal_util * res_per_device[res] for res in considered_resources}
             for node in range(nodes)

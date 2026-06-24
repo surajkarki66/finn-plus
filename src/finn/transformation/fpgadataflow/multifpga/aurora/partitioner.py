@@ -1,4 +1,5 @@
 import mip
+from math import ceil
 from mip import xsum
 from onnx import NodeProto
 from qonnx.core.modelwrapper import ModelWrapper
@@ -87,13 +88,30 @@ class AuroraPartitioner(Partitioner):  # noqa
             # Warn about total resources
             for restype in self.pcfg.considered_resources:
                 total_required = sum([rv[restype] for rv in self.resource_estimates.values()])
-                total_on_devices = self.pcfg.num_fpgas * self.device_resources[restype]
-                if total_required > self.pcfg.max_utilization * total_on_devices:
+                total_on_devices = (
+                    self.pcfg.max_utilization * self.pcfg.num_fpgas * self.device_resources[restype]
+                )
+                if total_required > total_on_devices:
                     raise FINNMultiFPGAPartitionerError(
                         f"The model requires a total of "
                         f"{total_required} {restype}, but "
                         f"{self.pcfg.num_fpgas} devices combined only have "
-                        f"{total_on_devices} {restype} in total."
+                        f"{total_on_devices} {restype} in total "
+                        f"(considering the current max utilization value configured)."
+                    )
+                factor = total_required / total_on_devices
+                ceiled_factor = ceil(factor)
+                if (ceiled_factor - factor) < 0.15 and int(ceiled_factor) == int(
+                    self.pcfg.num_fpgas
+                ):
+                    log.warning(
+                        f"The total resources of type {restype} required by the "
+                        f"model are found on roughly {factor} devices. Since "
+                        f"this is just below the number of "
+                        f"available devices, partitioning might fail. Too coarse grained "
+                        f"layers might make partitioning impossible, "
+                        f"despite enough resources "
+                        f"being available overall."
                     )
 
             # Give a warning if resource usage gets close to its maximum
@@ -516,7 +534,7 @@ class AuroraPartitioner(Partitioner):  # noqa
             for node in self.modelwrapper.graph.node
         }
 
-    def _get_resource_use_relative(self) -> dict[str, dict[str, Any]]:
+    def _get_resource_use_relative(self) -> dict[int, dict[str, Any]]:
         if self.status is None:
             raise FINNMultiFPGAError(
                 "Resource utilization per device was requested "
