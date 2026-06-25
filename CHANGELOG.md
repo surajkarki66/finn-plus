@@ -9,17 +9,36 @@ Entries marked with `(Xilinx)` are features pulled from AMD's upstream dev branc
 ## Unreleased
 Planned release: 1.5.0.
 
+### Feature: Multi-FPGA
+We merge the Multi-FPGA from its own branch into dev.
+
 #### Added
+- Enabling MultiFPGA by providing a `PartitioningConfiguration` object in the `DataflowBuildConfig`
+    - If not provided, the flow is on SingleFPGA. If it is given, the flow automatically adjusts to MultiFPGA
+- Initial support for AuroraFlow as the communication backend
+    - MultiFPGA was written in a modular way and can be extended to other backends in the future
+- Parallel synthesis of multiple bitstreams
+
+#### Changed
+- Modular creation of linker files (New class: `VitisLinkConfig`)
+    - Linking configs (Vitis Alveo) are not fixed anymore. Transformations can be used to read and store the current linker config in the model itself, and modify it gradually
+    - The runner script and linker config are now provided as Jinja2 templates
+- New FINN+ Build/Link Path: After `hw_step_ipgen`, the only necessary steps are now: `step_prepare_synthesis` and `step_synthesize_bitfile`
+    - (Vitis Alveo) These add IODMAs, create StreamingDataflowPartitions, stitch IPs, generate XOs and finally link
+-
+
+
+### Added
 - Added a `CHANGELOG.md` file
 - Error lines from Vivado logs are printed to console in case of failing synthesis runs
 - Added `CITATION.cff` file
 
-#### Changed
+### Changed
 - Vivado Stitch Projects have names specifying the nodes they contain if there are 3 or fewer nodes in the project
 
 
 ## 1.4.0 - 03.03.2026
-#### Added
+### Added
 - Reworked user interface, settings and dependency management (#118)
     - Various new CLI commands. Documentation can be found in PR #118 or the Wiki or by typing `finn --help`
     - Added new method to fetch custom dependencies (`external_dependencies.yaml`)
@@ -38,7 +57,7 @@ Planned release: 1.5.0.
 - (Xilinx) Support for Relu activation as elementwise operator (Xilinx#1479)
 
 
-#### Changed
+### Changed
 - Build flow configs are not allowed to contain unknown keys anymore (#118)
 - By default _all_ `DataflowOutputType` will be produced now (#118)
 - Updated QONNX to version `1.0.0` and moved into project dependencies
@@ -51,13 +70,13 @@ Planned release: 1.5.0.
 - (Xilinx) Generalized transpose and reshape support (Xilinx#1419)
 
 
-#### Deprecated
+### Deprecated
 - Mostly deprecated use of environment variables in #118
 
-#### Removed
+### Removed
 - Removed unused parts of `build_dataflow.py`
 
-#### Fixes
+### Fixes
 - Fix possibility to neither specify a folding config nor a target FPS (#118)
 - Fixed wrong behaviour when specifying `output_dir: ~` in the build flow config
 - Fixed that just-installed packages were not immediately available
