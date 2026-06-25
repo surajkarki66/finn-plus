@@ -8,8 +8,15 @@ import pytest
 
 import contextlib
 import mip
+import types
 from dataclasses import dataclass
-from fpgadataflow.multifpga.utils import MockGraph, MockModelWrapper, get_model, mock_model
+from fpgadataflow.multifpga.utils import (
+    MockGraph,
+    MockModelWrapper,
+    MockNode,
+    get_model,
+    mock_model,
+)
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -500,7 +507,6 @@ class TestAuroraFlowPartitioning:
     @pytest.mark.parametrize("considered_resources", [["LUT", "FF", "DSP", "BRAM_18K"]])
     @pytest.mark.parametrize("max_util", [0.85])
     @pytest.mark.parametrize("ideal_util", [0.75])
-    @pytest.mark.parametrize("inseparable_nodes", [[]])
     @pytest.mark.parametrize("network_ports", [2])
     def test_resource_balancing_with_artificial_data(
         self,
@@ -513,8 +519,8 @@ class TestAuroraFlowPartitioning:
         ideal_util: float,
         max_util: float,
         topology: MFTopology,
-        inseparable_nodes: list[int],
         network_ports: int,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test partitioning with the Aurora model based
         on constructed data instead of real models.
@@ -541,24 +547,70 @@ class TestAuroraFlowPartitioning:
         # TODO: Change how the test is configured
         resource_estimates = {}
         for node in range(nodes):
-            resource_estimates[node] = dict(
+            resource_estimates[str(node)] = dict(
                 zip(
                     considered_resources, [0 for _ in range(len(considered_resources))], strict=True
                 )
             )
             if dist_type == "equal":
-                resource_estimates[node][dist_res] = distribution_args["level"]
+                resource_estimates[str(node)][dist_res] = distribution_args["level"]
+            else:
+                raise NotImplementedError("Unknown distribution type.")
 
-        test_dir_identifier = (
-            f"test_pure_aurora_resource_opt_device{devices}"
-            f"_node{nodes}_topo{topology.name}_{board}_dist{distribution}"
-            f"_{max_util}_{ideal_util}_ins{len(inseparable_nodes)}_topology{topology}"
+        # Patch the resource estimation function
+        monkeypatch.setattr(
+            "finn.transformation.fpgadataflow.multifpga"
+            ".aurora.partitioner.get_estimated_model_resources",
+            lambda _a, _b, _c, _d: resource_estimates,
         )
-        res_per_device = available_resources_on_platform(platforms[board](), considered_resources)
+
+        # Create the config
+        cfg = DataflowBuildConfig(
+            output_dir=make_build_dir("test_artificial_aurora_partitioning_"),
+            board=board,
+            partitioning_configuration=PartitioningConfiguration(
+                num_fpgas=devices,
+                max_utilization=max_util,
+                ideal_utilization=ideal_util,
+                verbosity=MFVerbosity.EXTRA_HIGH,
+                topology=topology,
+                ports_per_device=network_ports,
+                single_stream_network=False,
+                considered_resources=considered_resources,
+                partition_strategy=PartitioningStrategy.RESOURCE_UTILIZATION,
+            ),
+        )
+
+        # Create the model and patch its functions for this test
+        # The functions only simulate a linear case, so we patch them locally, to avoid false
+        # positives in other tests
+        def find_direct_predecessors(
+            self: MockModelWrapper, node: MockNode
+        ) -> list[MockNode] | None:
+            for i, n in enumerate(self.graph.node[1:]):
+                if n.name == node.name:
+                    return [self.graph.node[i - 1]]
+            return None
+
+        def find_direct_successors(self: MockModelWrapper, node: MockNode) -> list[MockNode] | None:
+            for i, n in enumerate(self.graph.node[:-1]):
+                if n.name == node.name:
+                    return [self.graph.node[i + 1]]
+            return None
+
+        # Create the patched MockModelWrapper
+        model = mock_model(nodes)
+        model.find_direct_successors = types.MethodType(  # type: ignore
+            find_direct_successors, model
+        )
+        model.find_direct_predecessors = types.MethodType(  # type: ignore
+            find_direct_predecessors, model
+        )
 
         # Check if we expect an error regarding usage of resources
         # If more resources than allowed are utilized, the partitioner will
         # raise an error upon intialization. Otherwise we have a nullcontext as a no-op
+        res_per_device = available_resources_on_platform(platforms[board](), considered_resources)
         exception_context = contextlib.nullcontext()
         for estimates in resource_estimates.values():
             for resource in considered_resources:
@@ -575,23 +627,13 @@ class TestAuroraFlowPartitioning:
             if total_estimates[rt] > max_util * res_per_device[rt] * devices:
                 exception_context = pytest.raises(FINNMultiFPGAPartitionerError)
 
+        # If we have more devices than nodes, partitioning will fail
+        if devices > nodes:
+            exception_context = pytest.raises(FINNMultiFPGAPartitionerError)
+
+        # Create the partitioner (and run checks implicitly)
         with exception_context:
-            part = AuroraPartitioner(
-                output_dir=Path(make_build_dir(test_dir_identifier + "_")),
-                network_ports_per_device=network_ports,
-                strategy=PartitioningStrategy.RESOURCE_UTILIZATION,
-                devices=devices,
-                nodes=nodes,
-                considered_resources=considered_resources,
-                resources_per_device=res_per_device,  # type: ignore
-                inseparable_nodes=[],
-                topology=topology,
-                max_utilization=max_util,
-                ideal_utilization=ideal_util,
-                resource_estimates=resource_estimates,
-                verbosity=MFVerbosity.NONE,
-                index_node_name_map={i: str(i) for i in range(nodes)},
-            )
+            part = AuroraPartitioner(cfg, cast("ModelWrapper", model))
 
         # If the model is infeasbile due to resource constraints end the test here
         if type(exception_context) is not contextlib.nullcontext:
