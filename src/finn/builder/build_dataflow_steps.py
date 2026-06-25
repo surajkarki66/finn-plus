@@ -1567,6 +1567,14 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
                         pc.separate_iodmas, sdp_partition_dir, pc.verbosity
                     )
                 )
+                if cfg.partitioning_configuration.single_stream_network:
+                    for node in model.graph.node:
+                        if model.is_fork_node(node):
+                            raise FINNUserError(
+                                "Multi-FPGA was configured with single_stream_network=True"
+                                ", but a forking node was found after "
+                                "StreamingDataflowPartition creation!"
+                            )
                 model = model.transform(
                     CreateNetworkMetadata(pc.communication_kernel, pc.verbosity)
                 )

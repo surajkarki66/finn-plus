@@ -19,15 +19,8 @@ from finn.builder.build_dataflow_config import FpgaMemoryType, VitisOptStrategy
 from finn.templates import get_jinja_environment
 from finn.util.basic import get_metadata_prop_path, make_build_dir
 from finn.util.exception import FINNInternalError, FINNUserError, FINNVitisLinkConfigError
-from finn.util.fpgadataflow import (
-    check_all_sdp_nodes,
-    check_graph_is_line,
-    get_device_id,
-    get_submodel,
-    get_vitis_xo,
-)
+from finn.util.fpgadataflow import check_all_sdp_nodes, get_device_id, get_submodel, get_vitis_xo
 from finn.util.logging import log
-
 
 if TYPE_CHECKING:
     from qonnx.core.modelwrapper import ModelWrapper
@@ -522,7 +515,7 @@ class BuildBasicVitisLinkConfig(Transformation):
     then check the `config_path` and `run_script_path` fields of the `VitisLinkConfiguration`.
     """
 
-    def __init__(
+    def __init__(  # noqa
         self,
         platform: str,
         board: str,
@@ -530,7 +523,7 @@ class BuildBasicVitisLinkConfig(Transformation):
         vitis_opt_strategy: VitisOptStrategy,
         optimization_level: str,
         f_mhz: int,
-    ) -> None:  # noqa
+    ) -> None:
         super().__init__()
         self.platform = platform
         self.board = board
@@ -568,30 +561,17 @@ class BuildBasicVitisLinkConfig(Transformation):
                 f"Stopping."
             )
 
-        # Set up all configs
-        is_multifpga = False
-        if number_of_device_ids == 0:
-            # Single FPGA
-            configs[0] = VitisLinkConfiguration(
-                config_path=Path(make_build_dir("vitis_single_link_")) / "config.txt",
-                platform=self.platform,
-                optimization_level=self.optimization_level,
-                f_mhz=self.f_mhz,
-            )
-        else:
-            # Multi-FPGA
-            is_multifpga = True
-            for node in model.graph.node:
-                device = get_device_id(node)
-                assert device is not None
-                if device not in configs:
-                    configs[device] = VitisLinkConfiguration(
-                        config_path=Path(make_build_dir(f"vitis_multi_link_device_{device}_"))
-                        / "config.txt",
-                        platform=self.platform,
-                        optimization_level=self.optimization_level,
-                        f_mhz=self.f_mhz,
-                    )
+        # Multi-FPGA
+        for node in model.graph.node:
+            device = get_device_id(node)
+            assert device is not None
+            if device not in configs:
+                configs[device] = VitisLinkConfiguration(
+                    config_path=Path(make_build_dir(f"vitis_link_device_{device}_")) / "config.txt",
+                    platform=self.platform,
+                    optimization_level=self.optimization_level,
+                    f_mhz=self.f_mhz,
+                )
 
         # Already add optimization strategies for all devices
         for device in configs.keys():
@@ -608,41 +588,83 @@ class BuildBasicVitisLinkConfig(Transformation):
         current_device: int
         cu_names: dict[str, str] = {}
 
-        # Loop through all SDPs
+        # List of node names that represent an IODMA
+        dma_nodes: list[str] = []
+
+        # Current count of DMAs on the device (key)
+        dmas: dict[int, int] = {}
+
+        # What index this node is (as a DMA) on that device.
+        # So A: 3 would mean that A is the 3rd DMA on that device
+        dma_on_device: dict[str, int] = {}
+
+        # Maps node names to number of input streams seen.
+        # This is used to count up. If node A has 3 inputs, we count up: s_axis_0, s_axis_1, etc.
+        # and increment this entry
+        cu_inputs: dict[str, int] = {}
+        cu_outputs: dict[str, int] = {}
+
+        # Loop through all SDPs and add all nodes
         check_all_sdp_nodes(model)
-        check_graph_is_line(model)
+        total_idmas = 0
+        total_odmas = 0
         for node in model.graph.node:
-            current_device = cast("int", get_device_id(node)) if is_multifpga else 0
+            current_device = cast("int", get_device_id(node))
             submodel, _ = get_submodel(node)
             predecessors = model.find_direct_predecessors(node)
             successors = model.find_direct_successors(node)
             is_input = predecessors is None and successors is not None
             is_output = successors is None and predecessors is not None
-            node_slr = getCustomOp(node).get_nodeattr("slr")
 
             # Add the SDPs XO file
             configs[current_device].add_xo(get_vitis_xo(node))
 
             # Instantiate the kernel
-            if len(submodel.graph.node) == 1 and "IODMA" in submodel.graph.node[0].name:
+            if len(submodel.graph.node) == 1 and "IODMA" in submodel.graph.node[0].op_type:
+                dma_nodes.append(node.name)
+                if current_device not in dmas:
+                    dmas[current_device] = 0
                 if is_input:
-                    configs[current_device].add_cu(node.name, "idma")
-                    cu_names[node.name] = "idma"
+                    idma = f"idma_{total_idmas}"
+                    total_idmas += 1
+                    configs[current_device].add_cu(node.name, idma)
+                    cu_names[node.name] = idma
+                    dma_on_device[node.name] = dmas[current_device]
+                    dmas[current_device] += 1
                 if is_output:
-                    configs[current_device].add_cu(node.name, "odma")
-                    cu_names[node.name] = "odma"
+                    odma = f"odma_{total_odmas}"
+                    total_odmas += 1
+                    configs[current_device].add_cu(node.name, odma)
+                    cu_names[node.name] = odma
+                    dma_on_device[node.name] = dmas[current_device]
+                    dmas[current_device] += 1
             else:
                 configs[current_device].add_cu(node.name, node.name)
                 cu_names[node.name] = node.name
 
-            # Add connection between kernels. For this we need a predecessor and be either
-            # Single-FPGA or Multi-FPGA and on the same device
-            if predecessors is not None and (
-                not is_multifpga or get_device_id(predecessors[0]) == current_device
-            ):
-                predecessor_cu = cu_names[predecessors[0].name] + ".m_axis_0"
-                this_cu = cu_names[node.name] + ".s_axis_0"
-                configs[current_device].add_sc(predecessor_cu, this_cu)
+        if total_idmas > 1 or total_odmas > 1:
+            log.warning("Multiple IODMAs were detected. Support for this is experimental.")
+
+        # Add connection between kernels.
+        for node in model.graph.node:
+            current_device = cast("int", get_device_id(node))
+            submodel, _ = get_submodel(node)
+            predecessors = model.find_direct_predecessors(node)
+            successors = model.find_direct_successors(node)
+            node_slr = getCustomOp(node).get_nodeattr("slr")
+
+            # TODO: This is currently assuming how branching SDPs would be implemented,
+            # and might need to be updated eventually
+            # If successor and we are on the same device, add a connection
+            if successors is not None:
+                for successor in successors:
+                    if get_device_id(node) == get_device_id(successor):
+                        configs[current_device].add_sc(
+                            f"{cu_names[node.name]}.m_axis_{cu_outputs[node.name]}",
+                            f"{cu_names[successor.name]}.s_axis_{cu_inputs[successor.name]}",
+                        )
+                        cu_outputs[node.name] += 1
+                        cu_inputs[successor.name] += 1
 
             # Add system ports
             mem_type: str
@@ -662,7 +684,14 @@ class BuildBasicVitisLinkConfig(Transformation):
                         raise FINNUserError(
                             f"Cannot do system-port placement for unknown board {self.board}"
                         )
-            if cu_names[node.name] in ["idma", "odma"]:
+            if node.name in dma_nodes:
+                if mem_idx != 0:
+                    log.warning(
+                        f"Overwriting expected mem_idx {dma_on_device[node.name]} "
+                        f"with specified Node SLR mem_idx: {mem_idx}"
+                    )
+                else:
+                    mem_idx = dma_on_device[node.name]
                 configs[current_device].add_sp(
                     cu_names[node.name] + ".m_axi_gmem0", f"{mem_type}[{mem_idx}]"
                 )

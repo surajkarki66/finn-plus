@@ -142,27 +142,6 @@ def check_all_sdp_nodes(model: ModelWrapper) -> None:
             )
 
 
-def check_graph_is_line(model: ModelWrapper) -> None:
-    """Verify that the graph has no multiple predecessors or successors between IOs."""
-    # TODO: Run check through onnx-passes' networkx utils.
-    io_nodes = [node for node, _ in get_input_nodes(model) + get_output_nodes(model)]
-    for node in model.graph.node:
-        if node in io_nodes:
-            continue
-        if model.is_fork_node(node):
-            raise FINNUserError(
-                f"Badly formed graph: Node {node.name} is a fork node, "
-                f"but not an IO node. Forks in SDP graphs cannot "
-                f"be synthesized."
-            )
-        if model.is_join_node(node):
-            raise FINNUserError(
-                f"Badly formed graph: Node {node.name} is a join node, "
-                f"but not an IO node. Joins in SDP graphs cannot "
-                f"be synthesized."
-            )
-
-
 def get_vitis_xo(node: NodeProto) -> Path:
     """Get the path to the XO file of the submodel of the given node. Raises an error if the
     path does not point to an existing file or the metadata prop does not exist.

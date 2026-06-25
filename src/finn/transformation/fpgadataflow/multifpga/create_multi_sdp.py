@@ -1,8 +1,8 @@
 """Create SDPs for Multi-FPGA usage."""
 
 from __future__ import annotations
-from onnx import NodeProto
 
+from onnx import NodeProto
 from qonnx.custom_op.registry import getCustomOp
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.general import GiveUniqueNodeNames
@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 from finn.builder.build_dataflow_config import MFVerbosity
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
+from finn.transformation.fpgadataflow.externalize_params import ExternalizeParams
 from finn.util.exception import FINNInternalError
 from finn.util.fpgadataflow import get_device_id, get_submodel, set_device_id
 from finn.util.logging import log
@@ -244,6 +245,10 @@ class CreateMultiFPGAStreamingDataflowPartition(Transformation):
         self.cdfp_dir = dataflow_partition_directory
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:  # noqa
+        # See "create_dataflow_partition.py". Should not modify the model if
+        # not necessary
+        model = model.transform(ExternalizeParams())
+
         # Cluster the partition IDs
         model = model.transform(
             ClusterByNodeattribute(

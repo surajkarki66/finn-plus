@@ -32,7 +32,7 @@ class AuroraPartitioner(Partitioner):  # noqa
         """
         if self.pcfg.num_fpgas > len(self.modelwrapper.graph.node):
             # Stop if there are more devices than nodes
-            raise FINNMultiFPGAConfigError(
+            raise FINNMultiFPGAPartitionerError(
                 f"Model infeasible: Cannot partition a model with "
                 f"{len(self.modelwrapper.graph.node)} nodes to {self.pcfg.num_fpgas} devices!"
             )

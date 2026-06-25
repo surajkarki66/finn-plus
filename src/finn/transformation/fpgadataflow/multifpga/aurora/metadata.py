@@ -78,7 +78,7 @@ class AuroraNetworkMetadata(NetworkMetadata, DataClassYAMLMixin):
     def load(p: Path) -> AuroraNetworkMetadata:
         """Load from a YAML file."""
         if not p.exists():
-            raise FINNInternalError(f"Tried loading Aurora metadata from invalid path: {p}")
+            raise FINNInternalError(f"Tried loading Aurora metadata from non-existing path: {p}")
         return AuroraNetworkMetadata.from_yaml(p.read_text())
 
     def save(self, p: Path | None = None) -> None:
@@ -162,7 +162,7 @@ class AuroraNetworkMetadata(NetworkMetadata, DataClassYAMLMixin):
                 f"{on_device} and {other_device}, because "
                 f"{on_device} already uses all of it's "
                 f"{self.ports_per_device} communication ports. "
-                f"Cannot map this model to this setup."
+                f"Unable to map this model to this setup."
             )
 
         # Leave the path as None for now - this will be initialized by the AuroraFlow preparation

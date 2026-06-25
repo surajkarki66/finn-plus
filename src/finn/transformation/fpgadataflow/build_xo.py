@@ -49,7 +49,7 @@ from finn.transformation.fpgadataflow.prepare_ip import PrepareIP
 from finn.transformation.fpgadataflow.specialize_layers import SpecializeLayers
 from finn.util.basic import launch_process_helper
 from finn.util.exception import FINNError, FINNInternalError, FINNUserError
-from finn.util.fpgadataflow import check_all_sdp_nodes, check_graph_is_line, get_submodel
+from finn.util.fpgadataflow import check_all_sdp_nodes, get_submodel
 from finn.util.logging import log
 from finn.util.vivado import check_vitis_envvars
 
@@ -196,7 +196,6 @@ class BuildAllXOs(Transformation):
         # Every other graph at this point is invalid.
         # Every node must be an SDP node at this point.
         check_all_sdp_nodes(model)
-        check_graph_is_line(model)
 
         # Do all other necessary steps on all SDPs
         for i, sdp_node in enumerate(model.graph.node):

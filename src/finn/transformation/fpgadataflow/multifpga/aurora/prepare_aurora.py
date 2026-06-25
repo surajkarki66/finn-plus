@@ -92,13 +92,15 @@ class PrepareAuroraFlow(Transformation):
         )
         if result.returncode != 0:
             raise FINNMultiFPGAUserError(
-                f"Error during creation of the AuroraFlow kernels:\n{result.stderr}"
+                f"Error during creation of the AuroraFlow "
+                f"kernels. Check build directory at: "
+                f"{build_dir.absolute()}\nSTDERR:\n{result.stderr}"
             )
         xo_path = build_dir / "build" / f"aurora_flow_hw_{index}.xo"
         if not xo_path.exists():
             raise FINNMultiFPGAError(
                 f"Packaging AuroraFlow failed. Expected "
-                f"kernel at path {xo_path}. Check logs in {build_dir}"
+                f"kernel at path {xo_path}. Check logs in {build_dir.absolute()}"
             )
         return xo_path.absolute()
 

@@ -78,7 +78,10 @@ class AddAuroraToLinkConfig(Transformation):
                         raise FINNUserError(
                             f"Cannot place AuroraFlow kernels on device with platform"
                             f"{type(self.platform).__name__} because expected SLR placement "
-                            f"of the kernel is not known."
+                            f"of the kernel is not known. This means that the selected "
+                            f"platform either does not have any QSFP ports, or that their location "
+                            f"on the platforms SLRs is missing from the platform definitions "
+                            f"(check platforms.py)."
                         )
                     configs[device].add_xo(aurora_data.aurora_xo)
                     configs[device].add_cu(aurora_cu, aurora_cu)

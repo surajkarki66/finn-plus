@@ -12,6 +12,7 @@ from brevitas.export import export_qonnx
 from brevitas_examples.bnn_pynq.models.resnet import quant_resnet18
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
 from networkx.classes.digraph import DiGraph
 from pathlib import Path
 from qonnx.core.datatype import DataType
@@ -42,6 +43,29 @@ from finn.transformation.streamline.reorder import MakeMaxPoolNHWC, MoveScalarLi
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.util.basic import make_build_dir
 from tests.end2end.test_end2end_bnn_pynq import get_folding_function
+
+# ---- MOCK MODEL CLASSES ----
+
+
+@dataclass
+class MockNode:  # noqa
+    name: str
+
+
+@dataclass
+class MockGraph:  # noqa
+    node: list[MockNode]
+
+
+@dataclass
+class MockModelWrapper:  # noqa
+    graph: MockGraph
+
+
+def mock_model(nodes: int) -> MockModelWrapper:
+    """Return a mock model with `nodes` nodes, with their indices as names."""
+    return MockModelWrapper(MockGraph([MockNode(str(i)) for i in range(nodes)]))
+
 
 # ---- RESNET 18 ----
 
@@ -294,10 +318,13 @@ def get_model(  # noqa
     cfg: DataflowBuildConfig,
     pytestconfig: pytest.Config | None,
     identifier: str | None = None,
+    write_cache: bool = False,
 ) -> tuple[ModelWrapper, DataflowBuildConfig]:
     """Get a prepared model. The test identifier does not consider
     partitioning configuration parameters. This means that configs with
     for example 2 different device counts are considered the same model.
+
+    By default, this does NOT fill the cache.
 
     Arguments:
     ---------
@@ -313,6 +340,9 @@ def get_model(  # noqa
         `identifier`: (Optional) unique identifier for cache requests, which is appended to the
             internally generated identifier.
         `skip_fifo_sizing`: Whether to skip step_set_fifo_depths.
+        `write_cache`: Can be set to False to skip writing the cache.
+            This can be done to avoid issues
+            during toolchain calls.
 
     Returns:
     -------
@@ -455,15 +485,18 @@ def get_model(  # noqa
         test_identifier = get_test_identifier(cached_steps + done)
 
         # Store the model with its identifier in the cache, using a pseudo-random filename
-        fn = cache_dir / ("".join([random.choice("ABCDEF0123456789") for _ in range(30)]) + ".onnx")
-        modelwrapper.save(str(fn))
-        if pytestconfig is not None:
-            log.debug(
-                f"STORING model after step: {done[-1]} ("
-                + get_cache_key(test_identifier)[:5]
-                + "...)"
+        if write_cache:
+            fn = cache_dir / (
+                "".join([random.choice("ABCDEF0123456789") for _ in range(30)]) + ".onnx"
             )
-            pytestconfig.cache.set(get_cache_key(test_identifier), str(fn))
+            modelwrapper.save(str(fn))
+            if pytestconfig is not None:
+                log.debug(
+                    f"STORING model after step: {done[-1]} ("
+                    + get_cache_key(test_identifier)[:5]
+                    + "...)"
+                )
+                pytestconfig.cache.set(get_cache_key(test_identifier), str(fn))
 
     # Restore steps
     cfg.steps = all_steps

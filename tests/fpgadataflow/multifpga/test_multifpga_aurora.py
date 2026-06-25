@@ -8,12 +8,15 @@ import pytest
 
 import contextlib
 import mip
-from fpgadataflow.multifpga.utils import get_model
+from dataclasses import dataclass
+from fpgadataflow.multifpga.utils import MockGraph, MockModelWrapper, get_model, mock_model
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
+from typing import cast
 
+import finn
 from finn.builder.build_dataflow_config import (
     DataflowBuildConfig,
     MFCommunicationKernel,
@@ -35,12 +38,17 @@ from finn.util.basic import make_build_dir
 from finn.util.exception import (
     FINNError,
     FINNMultiFPGAConfigError,
+    FINNMultiFPGAError,
     FINNMultiFPGAPartitionerError,
     FINNMultiFPGAUserError,
 )
 from finn.util.fpgadataflow import get_device_id
 from finn.util.platforms import platforms
-from finn.util.resources import available_resources_on_platform, get_estimated_model_resources
+from finn.util.resources import (
+    ResourceEstimates,
+    available_resources_on_platform,
+    get_estimated_model_resources,
+)
 
 
 @pytest.mark.auroraflow
@@ -643,44 +651,73 @@ class TestAuroraFlowPartitioning:
                     visited.append(solution[str(i + 1)])
         assert len(set(visited)) == len(visited)
 
-    @pytest.mark.parametrize("devices", [2, 3, 10, 100])
-    @pytest.mark.parametrize("nodes", [1, 2, 3, 10, 100, 110])
-    @pytest.mark.parametrize("network_ports", [2, 3, 4])
-    def test_impossible_inseparable_nodes_aurora(
-        self, devices: int, nodes: int, network_ports: int, topology: MFTopology, board: str
+    @pytest.mark.parametrize(
+        "fail_type", ["node_larger_than_device", "all_nodes_larger_than_device", "too_many_devices"]
+    )
+    def test_bad_resource_requirements(
+        self, fail_type: str, board: str, topology: MFTopology, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Check that impossible device node combinations are caught."""
-        # TODO: Check all conditions that can fail in the partitioner with regards to
-        # inseparable groups
+        """Test that configurations that require too many resources fail properly."""
+        devices = 0
+        nodes = 0
+        resource_table = {}
+        model = MockModelWrapper(MockGraph([]))
+        device_resources = available_resources_on_platform(platforms[board](), ["LUT"])
+        max_util = 0.7
 
-        test_dir_identifier = f"test_all_inseparable_{devices}_topology{topology.name}"
-        max_util = 0.9
-        ideal_util = 0.8
-        considered_resources = ["LUT", "FF", "DSP", "BRAM_18K"]
-        res_per_device = available_resources_on_platform(platforms[board](), considered_resources)
-        resource_estimates = {
-            node: {res: ideal_util * res_per_device[res] for res in considered_resources}
-            for node in range(nodes)
-        }
+        # Set up the config / mock the resource estimator so that the specified fail type
+        # appears
+        match fail_type:
+            case "node_larger_than_device":
+                devices = 2
+                nodes = 2
+                resource_table = {
+                    "0": {"LUT": int(max_util * device_resources["LUT"]) + 10},
+                    "1": {"LUT": 1},
+                }
+                model = mock_model(nodes)
+            case "all_nodes_larger_than_device":
+                devices = 2
+                nodes = 5
+                resource_table = {
+                    "0": {"LUT": int(max_util / 2 * device_resources["LUT"]) + 10},
+                    "1": {"LUT": int(max_util / 2 * device_resources["LUT"]) + 10},
+                    "2": {"LUT": int(max_util / 2 * device_resources["LUT"]) + 10},
+                    "3": {"LUT": int(max_util / 2 * device_resources["LUT"]) + 10},
+                }
+                model = mock_model(nodes)
+            case "too_many_devices":
+                devices = 10
+                nodes = 2
+                resource_table = {"0": {"LUT": 1}, "1": {"LUT": 1}}
+                model = mock_model(nodes)
+            case _:
+                raise AssertionError(f"Unknown fail_type: {fail_type}")
 
-        # Ignore working configs, only test wrong configurations
-        if (nodes < devices) or ((devices == nodes) and (devices > 1)):
-            # Test that the configuration causes an error during partitioning
-            with pytest.raises(FINNError):
-                part = AuroraPartitioner(
-                    network_ports_per_device=network_ports,
-                    strategy=PartitioningStrategy.RESOURCE_UTILIZATION,
-                    devices=devices,
-                    nodes=nodes,
-                    considered_resources=considered_resources,
-                    resources_per_device=res_per_device,
-                    inseparable_nodes=[list(range(devices))],
-                    topology=topology,
-                    max_utilization=max_util,
-                    ideal_utilization=ideal_util,
-                    resource_estimates=resource_estimates,
-                    verbosity=MFVerbosity.NONE,
-                    output_dir=Path(make_build_dir(test_dir_identifier + "_")),
-                )
-                solution = part.solve(100)
-                assert solution is None
+        # Patch the resource estimator
+        monkeypatch.setattr(
+            "finn.transformation.fpgadataflow.multifpga"
+            ".aurora.partitioner.get_estimated_model_resources",
+            lambda _a, _b, _c, _d: resource_table,
+        )
+
+        # Create the config
+        cfg = DataflowBuildConfig(
+            output_dir=make_build_dir(f"test_bad_config_{fail_type}_"),
+            board=board,
+            partitioning_configuration=PartitioningConfiguration(
+                num_fpgas=devices,
+                max_utilization=max_util,
+                ideal_utilization=0.4,
+                verbosity=MFVerbosity.EXTRA_HIGH,
+                topology=topology,
+                ports_per_device=2,
+                single_stream_network=False,
+                considered_resources=["LUT"],
+                partition_strategy=PartitioningStrategy.RESOURCE_UTILIZATION,
+            ),
+        )
+
+        # Assert the error that should be raised
+        with pytest.raises(FINNMultiFPGAPartitionerError):
+            _ = AuroraPartitioner(cfg, cast("ModelWrapper", model))

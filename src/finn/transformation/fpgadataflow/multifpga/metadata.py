@@ -31,7 +31,7 @@ class NetworkMetadata(ABC):
     @abstractmethod
     def from_model(model: ModelWrapper) -> NetworkMetadata:
         """Load the metadata from a modelwrapper."""
-        raise NotImplementedError()
+        pass  # noqa
 
     @abstractmethod
     def __getitem__(self, key: Any) -> Any:

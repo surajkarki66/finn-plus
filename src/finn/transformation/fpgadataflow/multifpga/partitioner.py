@@ -7,14 +7,16 @@ import mip
 import yaml
 from abc import ABC, abstractmethod
 from mip import Model
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from finn.builder.build_dataflow_config import DataflowBuildConfig, MIPSolver, PartitioningStrategy
-from finn.util.exception import FINNMultiFPGAUserError, FINNUserError
+from finn.util.basic import make_build_dir
+from finn.util.exception import FINNMultiFPGAError, FINNMultiFPGAUserError
 from finn.util.logging import log
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    pass
 
 
 class Partitioner(ABC):
@@ -50,7 +52,7 @@ class Partitioner(ABC):
             try:
                 return Model(solver_name=solver.value)
             except mip.exceptions.InterfacingError as e:
-                raise FINNUserError(
+                raise FINNMultiFPGAUserError(
                     f"Cannot create mip solver of type {solver.value}. Original error: {e}"
                 ) from e
 
@@ -82,6 +84,12 @@ class Partitioner(ABC):
         The method should also error, if it is called before a solution was found.
         """  # noqa
 
+    def dump_model_definition(self, dir_prefix: str = "model_definition") -> Path:
+        """Write the model definition to a new temporary directory for debugging."""
+        p = Path(make_build_dir(dir_prefix + "_")) / "model.lp"
+        self.model.write(str(p))
+        return p
+
     def solve(
         self,
         solver_timeout: int,
@@ -93,7 +101,12 @@ class Partitioner(ABC):
         """
         self.status = self.model.optimize(solver_timeout)  # type: ignore
         if self.status == mip.OptimizationStatus.ERROR:
-            raise FINNMultiFPGAUserError("The solver returned an error status!")
+            model_definition_file = self.dump_model_definition()
+            raise FINNMultiFPGAError(
+                f"The solver returned an ERROR optimization status! "
+                f"Please check the model definition file "
+                f"at: {model_definition_file.absolute()}"
+            )
         if self.status in [
             mip.OptimizationStatus.INFEASIBLE,
             mip.OptimizationStatus.NO_SOLUTION_FOUND,

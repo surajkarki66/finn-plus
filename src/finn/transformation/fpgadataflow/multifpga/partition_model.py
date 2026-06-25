@@ -22,7 +22,6 @@ from finn.util.basic import make_build_dir
 from finn.util.exception import (
     FINNInternalError,
     FINNMultiFPGAConfigError,
-    FINNMultiFPGAError,
     FINNMultiFPGAPartitionerError,
     FINNMultiFPGAUserError,
 )
@@ -59,7 +58,9 @@ class ApplyPartitioning(Transformation):
             with mapping.open("r") as f:
                 self.mapping = yaml.load(f, yaml.Loader)
         else:
-            raise FINNMultiFPGAError(f"Cannot read partitioning config of type {type(mapping)}.")
+            raise FINNMultiFPGAUserError(
+                f"Cannot read partitioning config of type {type(mapping)}."
+            )
 
     def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, bool]:
         """Assign the device ids to the nodes."""
@@ -67,7 +68,7 @@ class ApplyPartitioning(Transformation):
         for nodename, device in self.mapping.items():
             node = model.get_node_from_name(nodename)
             if node is None:
-                raise FINNMultiFPGAError(
+                raise FINNMultiFPGAUserError(
                     f"Tried assigning node {nodename} "
                     f"to device {device}, but the model does "
                     f"not contain any nodes of that name. "
@@ -195,7 +196,7 @@ class PartitionForMultiFPGA(Transformation):
             )
             factor = total_required / total_on_device
             s += (
-                f"{restype:<15}{total_required:<15_}   ({factor:.1f}x  "
+                f"{restype:<15}{total_required:<15_}   ({factor:.2f}x  "
                 f"on  {self.cfg.board}  at  "
                 f"{self.cfg.partitioning_configuration.max_utilization:.2%}  max utilization)\n"
             )

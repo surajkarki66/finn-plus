@@ -107,18 +107,16 @@ def _get_inseparable_nodes_nx(g: nx.DiGraph) -> list[list[str]]:
 
     IMPORTANT:
     ---------
-        This function will currently, when getting nested branches, use the smallest branches possible
-        as groups, as can be seen in the doctest. Since however, one side of the nested branch _must_
-        belong to the other side of the main branch, both groups share nodes. Because the partitioner ILP
-        requires then (e.g.) A and B to be on the same device, and B and C, it effectively groups together A,
-        B and C.
+        This function might deliver several smaller groups for a single branch/join section. Since
+        these groups share nodes however, for the partitioner there is no difference between
+        `[A, B], [B, C]` and `[A, B, C]`.
 
     >>> g = nx.DiGraph([(0,1), (1,2), (1,3), (2,4), (3,4), (4,5), (5,6), (5,7),
     ...     (6,8), (8,9), (9,10), (7,11), (11,12), (12,13), (12,14), (13,10), (14,10)])
     >>> nodelist = _get_inseparable_nodes_nx(g)
     >>> nodelist = [sorted(nl) for nl in nodelist]
     >>> nodelist
-    [[1, 2, 3, 4], [5, 6, 7, 8, 9, 10, 11, 12, 13], [10, 12, 13, 14]]
+    [[1, 2, 3, 4], [5, 6, 7, 8, 9, 10, 11, 12, 13, 14]]
     """  # noqa
     # Also count last nodes so that a graph ending in a join node also is processed correctly
     art_points = list(nx.articulation_points(g.to_undirected())) + _get_end_nodes_nx(g)

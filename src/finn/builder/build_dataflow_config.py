@@ -333,6 +333,7 @@ default_build_dataflow_steps = [
     "step_create_stitched_ip",
     "step_measure_rtlsim_performance",
     "step_out_of_context_synthesis",
+    "step_prepare_synthesis",
     "step_synthesize_bitfile",
     "step_make_driver",
     "step_deployment_package",
@@ -819,6 +820,11 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
                 fpga_part = part_map[self.board]
                 return fpga_part
             except KeyError:
+                if self.board is None:
+                    raise FINNConfigurationError(
+                        "Board / FPGA-Part unspecified. Set "
+                        "either 'board' or 'fpga_part' to continue."
+                    ) from None
                 raise FINNConfigurationError(
                     "Couldn't resolve fpga_part for " + self.board
                 ) from None
