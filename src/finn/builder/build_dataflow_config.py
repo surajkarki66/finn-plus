@@ -62,9 +62,6 @@ from finn.util.basic import alveo_default_platform, part_map
 from finn.util.exception import FINNConfigurationError
 
 
-from onnx import NodeProto  # noqa
-
-
 class LogLevel(str, Enum):
     """Log levels printed on the commandline for the build process."""
 
@@ -584,7 +581,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     #: For this node range, the PyTorch metadata hierarchy will be simulated
     #: TODO: this argument will be replaced or extended when there is a way
     #: to preserve node metadata from the PyTorch model (e.g. from dynamo exporter)
-    loop_body_range: Optional[tuple[NodeProto, NodeProto]] = None
+    loop_body_range: Optional[tuple[Any, Any]] = None
 
     #: (Only relevant if CPP_DRIVER output product is enabled) Selects C++ driver version.
     #: If set to "latest", newest version will be used.

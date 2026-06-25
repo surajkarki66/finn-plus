@@ -40,6 +40,7 @@ import shutil
 from collections.abc import Callable
 from copy import deepcopy
 from functools import partial
+from onnx import NodeProto
 from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -134,7 +135,6 @@ from finn.util.exception import FINNUserError
 from finn.util.execution import execute_parent
 from finn.util.logging import log
 from finn.util.mlo_sim import is_mlo, mlo_prehook_func_factory
-
 from finn.xsi import SimEngine
 
 if TYPE_CHECKING:
@@ -1628,7 +1628,11 @@ def step_loop_rolling(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWra
     """Roll a repeating sequence of layers into a loop. PyTorch metadata node hierarchy
     is used to indicate the loop structure."""
     if cfg.mlo:
-        if cfg.loop_body_range is not None:
+        if (
+            cfg.loop_body_range is not None
+            and isinstance(cfg.loop_body_range[0], NodeProto)
+            and isinstance(cfg.loop_body_range[1], NodeProto)
+        ):
             # set node metadata like loop rolling would expect
             node_metadata = {
                 "pkg.torch.onnx.name_scopes": "['', 'layers.0']",
