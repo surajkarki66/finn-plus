@@ -29,10 +29,14 @@
 
 import qonnx.custom_op.registry as registry
 from qonnx.core.modelwrapper import ModelWrapper
+from typing import TypeVar
+
 from finn.util.basic import getHWCustomOp
 
+T = TypeVar("T", int | float, int)
 
-def aggregate_dict_keys(res_dict: dict[str, dict[str, int]]) -> dict[str, int]:
+
+def aggregate_dict_keys(res_dict: dict[str, dict[str, T]]) -> dict[str, T]:
     """Aggregate counts across all nodes in the provided dictionary."""
     total_dict = {}
     for layer in res_dict:

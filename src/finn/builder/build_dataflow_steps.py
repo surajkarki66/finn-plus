@@ -188,7 +188,7 @@ def verify_step(
     model = model.transform(SortGraph())
     model = model.transform(GiveUniqueNodeNamesRecursive())
     model = model.transform(GiveReadableTensorNames())
-    os.makedirs(verify_out_dir, exist_ok=True)
+    verify_out_dir.mkdir(parents=True, exist_ok=True)
     if cfg.verify_steps is None:
         raise FINNUserError("verify_steps is not set in config, but verification step was called")
     (in_npy_all, exp_out_npy_all) = cast(
@@ -271,9 +271,7 @@ def verify_step(
         all_res = all_res and res
         res_str = res_to_str[bool(res)]
         if cfg.verify_save_full_context and (rtlsim_pre_hook is None):
-            verification_output_fn = os.path.join(
-                verify_out_dir, f"verify_{step_name}_{b}_{res_str}.npz"
-            )
+            verification_output_fn = verify_out_dir / f"verify_{step_name}_{b}_{res_str}.npz"
             np.savez(verification_output_fn, **out_dict)
 
             # Log tensor statistics for debugging (only output tensors, in topological order)
@@ -283,7 +281,7 @@ def verify_step(
                     raise FINNUserError("Parent model is needed for verification but is None")
                 for node in parent_model.graph.node:
                     for output in node.output:
-                        tensors_to_log.append(output)
+                        tensors_to_log.append(output)  # noqa: PERF402
                 sdp_node = parent_model.get_nodes_by_op_type("StreamingDataflowPartition")[0]
                 sdp_prefix = sdp_node.name + "_"
             else:
@@ -306,9 +304,7 @@ def verify_step(
                     tensor_stats.append(stat_dict)
 
             # Write tensor statistics in compact human-readable table format
-            with open(
-                os.path.join(verify_out_dir, f"verify_{step_name}_{b}_{res_str}_stats.txt"), "w"
-            ) as f:
+            with (verify_out_dir / f"verify_{step_name}_{b}_{res_str}_stats.txt").open("w") as f:
                 # Write header
                 f.write(
                     f"{'Tensor':<40} {'Shape':<20} {'Mean':<12} "
@@ -348,24 +344,22 @@ def verify_step(
         else:
             if cfg.verify_save_full_context:
                 log.warning("Warning: Unable to save the full context when using MLO")
-            verification_output_fn = os.path.join(
-                verify_out_dir, f"verify_{step_name}_{b}_{res_str}.npy"
-            )
+            verification_output_fn = verify_out_dir / f"verify_{step_name}_{b}_{res_str}.npy"
             np.save(verification_output_fn, out_npy)
 
         if cfg.verify_save_rtlsim_waveforms:
             # Handle model-level waveform (stitched IP rtlsim)
             wdb_path = model.get_metadata_prop("rtlsim_trace")
-            if wdb_path is not None and os.path.isfile(wdb_path):
-                new_wdb_path = wdb_path.replace(".wdb", "_%d.wdb" % b)
+            if wdb_path is not None and Path(wdb_path).is_file():
+                new_wdb_path = wdb_path.replace(".wdb", f"_{b}.wdb")
                 shutil.move(wdb_path, new_wdb_path)
             # Handle node-level waveforms (only for node-by-node rtlsim)
             if step_name == "node_by_node_rtlsim":
                 for node in model.graph.node:
                     node_inst = getCustomOp(node)
                     node_wdb_path = cast("str", node_inst.get_nodeattr("rtlsim_trace"))
-                    if node_wdb_path is not None and os.path.isfile(node_wdb_path):
-                        new_node_wdb_path = node_wdb_path.replace(".wdb", "_%d.wdb" % b)
+                    if node_wdb_path is not None and Path(node_wdb_path).is_file():
+                        new_node_wdb_path = node_wdb_path.replace(".wdb", f"_{b}.wdb")
                         shutil.move(node_wdb_path, new_node_wdb_path)
 
     log.info(f"Verification for {step_name} : {res_to_str[bool(all_res)]}")
@@ -981,9 +975,9 @@ def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig) 
     has_shuffle = bool(model.get_nodes_by_op_type("Shuffle"))
     loop_nodes = model.get_nodes_by_op_type("FINNLoop")
     for node in loop_nodes:
-        node_inst = getCustomOp(node)
-        loop_model = node_inst.get_nodeattr("body")
-        has_shuffle = True if loop_model.get_nodes_by_op_type("Shuffle") else False
+        node_inst = cast("FINNLoop", getCustomOp(node))
+        loop_model = cast("ModelWrapper", node_inst.get_nodeattr("body"))
+        has_shuffle = bool(loop_model.get_nodes_by_op_type("Shuffle"))
 
     if has_shuffle:
         model = model.transform(ShuffleDecomposition(), apply_to_subgraphs=True)
@@ -994,8 +988,8 @@ def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig) 
         model = model.transform(GiveUniqueNodeNamesRecursive())
         loop_nodes = model.get_nodes_by_op_type("FINNLoop")
         for node in loop_nodes:
-            node_inst = getCustomOp(node)
-            loop_model = node_inst.get_nodeattr("body")
+            node_inst = cast("FINNLoop", getCustomOp(node))
+            loop_model = cast("ModelWrapper", node_inst.get_nodeattr("body"))
             loop_model = loop_model.transform(GiveUniqueNodeNamesRecursive(prefix=node.name))
             node_inst.set_nodeattr("body", loop_model.graph)
     else:
@@ -1074,7 +1068,7 @@ def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig
         estimate_layer_cycles = model.analysis(exp_cycles_per_layer)
         with (report_dir / "estimate_layer_cycles.json").open("w") as f:
             json.dump(estimate_layer_cycles, f, indent=2)
-        estimate_layer_resources = model.analysis(
+        estimate_layer_resources: dict[str, dict[str, int | float]] = model.analysis(
             partial(res_estimation, fpgapart=cfg._resolve_fpga_part())
         )
         estimate_layer_resources["total"] = aggregate_dict_keys(estimate_layer_resources)
@@ -1167,14 +1161,14 @@ def step_minimize_bit_width(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
         model = model.transform(SetExecMode("cppsim"), apply_to_subgraphs=True)
         # Set iteration context path on FINNLoop nodes if verify_save_full_context is enabled
         if cfg.verify_save_full_context:
-            verify_out_dir = cfg.output_dir + "/verification_output"
-            os.makedirs(verify_out_dir, exist_ok=True)
+            verify_out_dir = Path(cfg.output_dir) / "verification_output"
+            verify_out_dir.mkdir(parents=True, exist_ok=True)
             for loop_node in model.get_nodes_by_op_type("FINNLoop"):
                 loop_inst = getCustomOp(loop_node)
-                ctx_path = os.path.join(
-                    verify_out_dir, f"iteration_context_{loop_node.name}_folded_hls_cppsim.npz"
+                ctx_path = (
+                    verify_out_dir / f"iteration_context_{loop_node.name}_folded_hls_cppsim.npz"
                 )
-                loop_inst.set_nodeattr("iteration_context_path", ctx_path)
+                loop_inst.set_nodeattr("iteration_context_path", str(ctx_path))
         verify_step(model, cfg, "folded_hls_cppsim", need_parent=True)
         # Clear iteration_context_path after verification
         if cfg.verify_save_full_context:
@@ -1191,7 +1185,7 @@ def step_insert_dwc(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapp
     return model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
 
 
-def verify_mlo(model: ModelWrapper, cfg: DataflowBuildConfig, step: str):
+def verify_mlo(model: ModelWrapper, cfg: DataflowBuildConfig, step: str) -> None:  # noqa: ARG001
     """Verify a multi-layer offload model via RTL simulation."""
     finn_loop = model.get_nodes_by_op_type("FINNLoop")
     # TODO: allow for multiple FINNLoops
@@ -1272,16 +1266,16 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
         verify_model = verify_model.transform(AnnotateCycles())
         liveness = get_liveness_threshold_cycles()
         perf = verify_model.analysis(dataflow_performance)
-        latency = perf["critical_path_cycles"]
+        latency = cast("int", perf["critical_path_cycles"])
         max_iters = max(liveness, int(np.ceil(latency * 1.1 + 20)))
         os.environ["LIVENESS_THRESHOLD"] = str(max_iters)
 
         if cfg.verify_save_rtlsim_waveforms:
-            verify_out_dir = cfg.output_dir + "/verification_output"
-            waveform_dir = verify_out_dir + "/stitched_ip_rtlsim_waveforms"
-            os.makedirs(waveform_dir, exist_ok=True)
-            abspath = os.path.abspath(waveform_dir)
-            verify_model.set_metadata_prop("rtlsim_trace", abspath + "/verify_rtlsim.wdb")
+            verify_out_dir = Path(cfg.output_dir) / "verification_output"
+            waveform_dir = verify_out_dir / "stitched_ip_rtlsim_waveforms"
+            waveform_dir.mkdir(parents=True, exist_ok=True)
+            abspath = waveform_dir.absolute()
+            verify_model.set_metadata_prop("rtlsim_trace", str(abspath / "verify_rtlsim.wdb"))
         if is_mlo(model):
             verify_mlo(verify_model, cfg, "stitched_ip_rtlsim")
         else:
@@ -1439,17 +1433,22 @@ def step_out_of_context_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig)
         model = model.transform(
             SynthOutOfContext(part=cfg._resolve_fpga_part(), clk_period_ns=cfg.synth_clk_period_ns)
         )
-        report_dir = cfg.output_dir + "/report"
-        os.makedirs(report_dir, exist_ok=True)
+        report_dir = Path(cfg.output_dir) / "report"
+        report_dir.mkdir(parents=True, exist_ok=True)
         ooc_res_dict = model.get_metadata_prop("res_total_ooc_synth")
+        if ooc_res_dict is None:
+            raise FINNUserError(
+                "Out-of-context synthesis results not found in model metadata. "
+                "Did the OOC synthesis step fail? Check the logs."
+            )
         ooc_res_dict = eval(ooc_res_dict)
 
         estimate_network_performance = model.analysis(dataflow_performance)
         # add some more metrics to estimated performance
         n_clock_cycles_per_sec = float(ooc_res_dict["fmax_mhz"]) * (10**6)
-        est_fps = n_clock_cycles_per_sec / estimate_network_performance["max_cycles"]
+        est_fps = n_clock_cycles_per_sec / cast("int", estimate_network_performance["max_cycles"])
         ooc_res_dict["estimated_throughput_fps"] = est_fps
-        with open(report_dir + "/ooc_synth_and_timing.json", "w") as f:
+        with (report_dir / "ooc_synth_and_timing.json").open("w") as f:
             json.dump(ooc_res_dict, f, indent=2)
 
     else:
@@ -1466,10 +1465,10 @@ def step_vivado_power_estimation(model: ModelWrapper, cfg: DataflowBuildConfig) 
     if DataflowOutputType.OOC_SYNTH not in cfg.generate_outputs:
         raise FINNUserError("Vivado power estimation needs OOC synth")
 
-    report_dir = cfg.output_dir + "/report"
+    report_dir = Path(cfg.output_dir) / "report"
     model.transform(
         VivadoPowerEstimation(
-            report_dir,
+            str(report_dir),
             cfg.synth_clk_period_ns,
             cfg.vivado_power_simulate_activity,
             cfg.vivado_power_simulation_type,
@@ -1483,12 +1482,16 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
     """Synthesize a bitfile for the using the specified shell flow, using either
     Vivado or Vitis, to target the specified board."""
     if DataflowOutputType.BITFILE in cfg.generate_outputs:
-        bitfile_dir = cfg.output_dir + "/bitfile"
-        os.makedirs(bitfile_dir, exist_ok=True)
-        report_dir = cfg.output_dir + "/report"
-        os.makedirs(report_dir, exist_ok=True)
-        partition_model_dir = cfg.output_dir + "/intermediate_models/kernel_partitions"
+        bitfile_dir = Path(cfg.output_dir) / "bitfile"
+        bitfile_dir.mkdir(parents=True, exist_ok=True)
+        report_dir = Path(cfg.output_dir) / "report"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        partition_model_dir = Path(cfg.output_dir) / "intermediate_models" / "kernel_partitions"
         if cfg.shell_flow_type == ShellFlowType.VIVADO_ZYNQ:
+            if cfg.instrumentation_no_dma is None:
+                raise FINNUserError(
+                    "instrumentation_no_dma must be set in the config for Vivado Zynq flow"
+                )
             model = model.transform(
                 ZynqBuild(
                     cfg.board,
@@ -1503,26 +1506,46 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
                 )
             )
 
-            bitfile_path = os.path.join(bitfile_dir, "finn-accel.bit")
-            copy(model.get_metadata_prop("bitfile"), bitfile_path)
-            copy(model.get_metadata_prop("hw_handoff"), bitfile_dir + "/finn-accel.hwh")
+            bitfile_path = bitfile_dir / "finn-accel.bit"
+            bitfile_src = model.get_metadata_prop("bitfile")
+            if bitfile_src is None:
+                raise FINNUserError(
+                    "Bitfile path not found in model metadata. "
+                    "Did the Vivado synthesis step fail? Check the logs."
+                )
+            hwh_src = model.get_metadata_prop("hw_handoff")
+            if hwh_src is None:
+                raise FINNUserError(
+                    "HWH path not found in model metadata. "
+                    "Did the Vivado synthesis step fail? Check the logs."
+                )
+            rpt_dir = model.get_metadata_prop("vivado_synth_rpt")
+            if rpt_dir is None:
+                raise FINNUserError(
+                    "Vivado synthesis report path not found in model metadata. "
+                    "Did the Vivado synthesis step fail? Check the logs."
+                )
+            copy(Path(bitfile_src), bitfile_path)
+            copy(Path(hwh_src), bitfile_dir / "finn-accel.hwh")
             copy(
-                model.get_metadata_prop("vivado_synth_rpt"),
-                report_dir + "/post_synth_resources.xml",
+                Path(rpt_dir),
+                report_dir / "/post_synth_resources.xml",
             )
 
-            model.set_metadata_prop("bitfile_output", os.path.abspath(bitfile_path))
+            model.set_metadata_prop("bitfile_output", str(bitfile_path.absolute()))
 
             post_synth_resources = model.analysis(post_synth_res)
-            with open(report_dir + "/post_synth_resources.json", "w") as f:
+            with (report_dir / "post_synth_resources.json").open("w") as f:
                 json.dump(post_synth_resources, f, indent=2)
 
             vivado_pynq_proj_dir = model.get_metadata_prop("vivado_pynq_proj")
             timing_rpt = (
-                "%s/finn_zynq_link.runs/impl_1/top_wrapper_timing_summary_routed.rpt"
-                % vivado_pynq_proj_dir
+                Path(f"{vivado_pynq_proj_dir}")
+                / "finn_zynq_link.runs"
+                / "impl_1"
+                / "top_wrapper_timing_summary_routed.rpt"
             )
-            copy(timing_rpt, report_dir + "/post_route_timing.rpt")
+            copy(timing_rpt, report_dir / "post_route_timing.rpt")
 
         elif cfg.shell_flow_type == ShellFlowType.VITIS_ALVEO:
             model = model.transform(
@@ -1538,17 +1561,29 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
                 )
             )
 
-            bitfile_path = os.path.join(bitfile_dir, "finn-accel.xclbin")
-            copy(model.get_metadata_prop("bitfile"), bitfile_path)
+            bitfile_path = bitfile_dir / "finn-accel.xclbin"
+            bitfile_src = model.get_metadata_prop("bitfile")
+            if bitfile_src is None:
+                raise FINNUserError(
+                    "Bitfile path not found in model metadata. "
+                    "Did the Vitis synthesis step fail? Check the logs."
+                )
+            rpt_dir = model.get_metadata_prop("vivado_synth_rpt")
+            if rpt_dir is None:
+                raise FINNUserError(
+                    "Vivado synthesis report path not found in model metadata. "
+                    "Did the Vitis synthesis step fail? Check the logs."
+                )
+            copy(Path(bitfile_src), bitfile_path)
             copy(
-                model.get_metadata_prop("vivado_synth_rpt"),
-                report_dir + "/post_synth_resources.xml",
+                Path(rpt_dir),
+                report_dir / "post_synth_resources.xml",
             )
 
-            model.set_metadata_prop("bitfile_output", os.path.abspath(bitfile_path))
+            model.set_metadata_prop("bitfile_output", str(bitfile_path.absolute()))
 
             post_synth_resources = model.analysis(post_synth_res)
-            with open(report_dir + "/post_synth_resources.json", "w") as f:
+            with (report_dir / "post_synth_resources.json").open("w") as f:
                 json.dump(post_synth_resources, f, indent=2)
         else:
             raise Exception("Unrecognized shell_flow_type: " + str(cfg.shell_flow_type))
@@ -1589,7 +1624,7 @@ def step_deployment_package(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
 
 
 @register_build_dataflow_step()
-def step_loop_rolling(model, cfg):
+def step_loop_rolling(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrapper:
     """Roll a repeating sequence of layers into a loop. PyTorch metadata node hierarchy
     is used to indicate the loop structure."""
     if cfg.mlo:
@@ -1610,7 +1645,7 @@ def step_loop_rolling(model, cfg):
             loop_extraction = LoopExtraction(cfg.loop_body_hierarchy)
             model = model.transform(loop_extraction)
             model = model.transform(LoopRolling(loop_extraction.loop_body_template))
-            move("loop-body-template.onnx", cfg.output_dir + "/loop-body-template.onnx")
+            move("loop-body-template.onnx", Path(cfg.output_dir) / "loop-body-template.onnx")
     else:
         log.info("MLO not selected, skipping step_loop_rolling.")
 

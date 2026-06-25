@@ -56,10 +56,13 @@ from enum import Enum
 from mashumaro.mixins.json import DataClassJSONMixin
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path, PosixPath, PurePath
-from typing import Any, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 
 from finn.util.basic import alveo_default_platform, part_map
 from finn.util.exception import FINNConfigurationError
+
+if TYPE_CHECKING:
+    from onnx import NodeProto
 
 
 class LogLevel(str, Enum):
@@ -581,7 +584,7 @@ class DataflowBuildConfig(DataClassJSONMixin, DataClassYAMLMixin):
     #: For this node range, the PyTorch metadata hierarchy will be simulated
     #: TODO: this argument will be replaced or extended when there is a way
     #: to preserve node metadata from the PyTorch model (e.g. from dynamo exporter)
-    loop_body_range: Optional[list[Any]] = None
+    loop_body_range: Optional[tuple[NodeProto, NodeProto]] = None
 
     #: (Only relevant if CPP_DRIVER output product is enabled) Selects C++ driver version.
     #: If set to "latest", newest version will be used.

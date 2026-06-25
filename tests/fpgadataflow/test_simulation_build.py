@@ -902,8 +902,6 @@ def test_isolated_node_model_binary_target_fifo_pre_transparency(
     )
     builder = SimulationBuilder(model, "xc7z020clg400-1", 5.0, "test_isolated_6_")
 
-    model.save("/scratch/pc2-mitarbeiter/linusjun/finn-tmp/source_model.onnx")
-
     isolated = _isolate_node_model(builder, "target_add")
 
     _assert_isolated_model(

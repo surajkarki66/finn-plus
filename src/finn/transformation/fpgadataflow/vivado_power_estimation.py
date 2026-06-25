@@ -23,7 +23,7 @@ class VivadoPowerEstimation(Transformation):
     def __init__(
         self,
         report_dir,
-        clk_period_ns=10,
+        clk_period_ns=10.0,
         simulate_switching_activity=True,
         vivado_power_simulation_type="functional",
     ):
