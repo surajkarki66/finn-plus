@@ -56,13 +56,13 @@ from enum import Enum
 from mashumaro.mixins.json import DataClassJSONMixin
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from pathlib import Path, PosixPath, PurePath
-from typing import TYPE_CHECKING, Any, Literal, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 from finn.util.basic import alveo_default_platform, part_map
 from finn.util.exception import FINNConfigurationError
 
-if TYPE_CHECKING:
-    from onnx import NodeProto
+
+from onnx import NodeProto  # noqa
 
 
 class LogLevel(str, Enum):
