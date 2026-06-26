@@ -778,9 +778,11 @@ class TestAuroraFlowPartitioning:
             assert solution[str(i)] is not None
 
         # Consecutive assignments
-        # TODO: For non-linear models this needs to check predecessors, not topology - 1 indexes
-        for i in range(nodes - 1):
-            assert abs(solution[str(i)] - solution[str(i + 1)]) <= 1
+        for i in range(nodes):
+            suc = model.find_direct_successors(str(i))  # type: ignore
+            if suc is None:
+                continue
+            assert abs(solution[str(i)] - solution[suc.name]) <= 1
 
         # No device was visited twice
         if topology == MFTopology.CHAIN:

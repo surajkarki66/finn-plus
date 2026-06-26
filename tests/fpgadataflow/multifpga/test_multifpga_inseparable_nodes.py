@@ -208,8 +208,6 @@ def test_onnx_to_networkx(
         assert data["onnx_node"] in model.graph.node
 
 
-# TODO: Doesnt yet work for two inputs. This should be caught by the transformation instead,
-# but it still should be well defined in the function.
 @pytest.mark.parametrize(
     "graph_data",
     [
