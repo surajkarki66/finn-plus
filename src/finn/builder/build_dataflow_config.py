@@ -234,7 +234,8 @@ class PartitioningConfiguration:
     custom_partitioning_constraints: dict[str, int] = field(default_factory=dict)
 
     # The number of FPGAs to use for Multi-FPGA
-    # TODO: Allow -1, etc.
+    # 0 or -1 or smaller activates an automatic search in an attempt to find a good
+    # device count
     num_fpgas: int = 0
 
     # The number of ports per device - this might change in meaning,

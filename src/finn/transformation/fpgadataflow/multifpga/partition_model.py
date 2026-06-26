@@ -265,7 +265,7 @@ class PartitionForMultiFPGA(Transformation):
 
         # Try solving with these device counts
         device_counts = [self.cfg.partitioning_configuration.num_fpgas]
-        if self.cfg.partitioning_configuration.num_fpgas < 0:
+        if self.cfg.partitioning_configuration.num_fpgas <= 0:
             # Calculate all factors and use the biggest one. Since 2.4x is not a valid device
             # count, ceil to the next value. This will be the lower bound for the number of
             # devices to try out.

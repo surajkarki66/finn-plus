@@ -9,6 +9,8 @@ import pytest
 import contextlib
 import mip
 import types
+import yaml
+from copy import deepcopy
 from dataclasses import dataclass
 from fpgadataflow.multifpga.utils import (
     MockGraph,
@@ -21,7 +23,7 @@ from pathlib import Path
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
 from test_multifpga_sdp_creation import create_sdp_ready_model_no_branches
-from typing import cast
+from typing import Final, cast
 
 import finn
 from finn.builder.build_dataflow_config import (
@@ -29,6 +31,7 @@ from finn.builder.build_dataflow_config import (
     MFCommunicationKernel,
     MFTopology,
     MFVerbosity,
+    MIPSolver,
     PartitioningConfiguration,
     PartitioningStrategy,
     ShellFlowType,
@@ -361,7 +364,7 @@ class TestAuroraFlowPartitioning:
         # Catch if there are more devices than nodes
         context = contextlib.nullcontext()
         if len(model.graph.node) < devices:
-            context = pytest.raises(FINNMultiFPGAConfigError)
+            context = pytest.raises(FINNMultiFPGAPartitionerError)
 
         # Do the partitioning
         # IMPORTANT: Large device counts open a very large search space for the model,
@@ -458,15 +461,10 @@ class TestAuroraFlowPartitioning:
             for successor_node in suc:
                 assert abs(solution[successor_node.name] - solution[node.name]) <= 1
 
-        # No device was visited twice
-
-        # TODO: This is slightly difficult for non-linear models!
-        # TODO: Also not necessarily required
-
     @pytest.mark.parametrize(
         "model_type",
         [
-            ("mobilenet", 4, 4, True),
+            ("mobilenetv1", 4, 4, True),
             ("resnet18", 4, 4, True),
         ],
     )
@@ -479,6 +477,7 @@ class TestAuroraFlowPartitioning:
         board: str,
         model_type: tuple[str, int, int, bool],
         strategy: PartitioningStrategy,
+        pytestconfig: pytest.Config,
     ) -> None:
         """Test that the partitioning of certain models has not regressed in recent commits.
         Specifically, test the final value of the objective function.
@@ -486,14 +485,112 @@ class TestAuroraFlowPartitioning:
         TODO: Save recent CI run data in proper infrastructure as soon as we have set it
         up, instead of hardcoding the values.
         """
-        # flow_type = self.get_shell_flow_type(board)
+        if board == "Pynq-Z1":
+            pytest.skip("Model too small for this specific test/configuration.")  # type: ignore
 
-        # TODO
-        raise NotImplementedError()
+        typename, wbits, abits, pretrained = model_type
 
-        # assert part.partitioner is not None
-        # assert part.partitioner.model.objective.x is not None
-        # assert part.partitioner.model.objective.x < 0
+        # Fixed numbers to get repeatable results
+        # These are not test paramters to avoid re-running the FINN
+        # flow for every configuration
+        DEVICES: Final[list[int]] = [2, 4, 6, 8, 9, 10]  # noqa
+        MAX_UTIL: Final[list[float]] = [0.7, 0.8, 0.9]  # noqa
+        IDEAL_UTIL: Final[list[float]] = [0.6, 0.7, 0.8]  # noqa
+        SOLVER: Final[MIPSolver] = MIPSolver.CBC  # noqa
+        TIMEOUT: Final[int] = 120  # noqa
+
+        # Tolerance of how far from the value the objective function may change:
+        # 1. Floating point comparison errors
+        # 2. Different tool calls may generate slightly different IPs -> different solutions
+        # 3. Different solver (calls) may not be deterministic
+        tolerance: float = 0.1
+
+        # Creating the model and the config
+        cfg = DataflowBuildConfig(
+            output_dir=make_build_dir("test_objective_regression_"),
+            board=board,
+            mvau_wwidth_max=128,
+            target_fps=500,
+            synth_clk_period_ns=5.0,
+            standalone_thresholds=True,
+            minimize_bit_width=True,
+            shell_flow_type=self.get_shell_flow_type(board),
+            partitioning_configuration=PartitioningConfiguration(
+                num_fpgas=2,
+                topology=topology,
+                communication_kernel=MFCommunicationKernel.AURORA,
+                partition_strategy=strategy,
+                max_utilization=0.8,
+                ideal_utilization=0.7,
+                ports_per_device=2,
+                separate_iodmas=True,
+                partition_solver=SOLVER,
+                partition_solver_timeout=TIMEOUT,
+                verbosity=MFVerbosity.EXTRA_HIGH,
+            ),
+        )
+        model, cfg = get_model(
+            typename, wbits, abits, pretrained, "step_set_fifo_depths", True, cfg, pytestconfig
+        )
+
+        # Write/read to/from file
+        file_identifier = (
+            f"aurora_partitioner_objective_function_{typename}_w{wbits}a{abits}_"
+            f"{pretrained}_{topology}_{strategy}_{board}"
+        )
+        filepath = Path(__file__).parent / "regression_data" / (file_identifier + ".yaml")
+        assert (
+            filepath.exists()
+        ), f"Could not find regression data. Is the test new? (Checked at: {filepath})"
+        expected_data = {}
+
+        # Read existing regression data
+        with filepath.open("r") as f:
+            expected_data = yaml.load(f, Loader=yaml.Loader)
+
+        # Partition
+        for device in DEVICES:
+            for maxutil in MAX_UTIL:
+                for idealutil in IDEAL_UTIL:
+                    if idealutil > maxutil:
+                        continue
+                    thisconfig = deepcopy(cfg)
+                    assert thisconfig.partitioning_configuration is not None
+                    thisconfig.partitioning_configuration.num_fpgas = device
+                    thisconfig.partitioning_configuration.max_utilization = maxutil
+                    thisconfig.partitioning_configuration.ideal_utilization = idealutil
+                    thismodel = deepcopy(model)
+
+                    # Identifier string for lookup of results
+                    identifier: str = (
+                        f"{SOLVER.name}_device{device}_maxutil{maxutil}"
+                        f"_idealutil{idealutil}_timeout{TIMEOUT}"
+                    )
+
+                    # Partition the model
+                    partition_transform = PartitionForMultiFPGA(thisconfig)
+                    thismodel = thismodel.transform(partition_transform)
+
+                    # Get the objective function value out of the transformation
+                    value = cast(
+                        "AuroraPartitioner", partition_transform.partitioner
+                    ).model.objective.x
+
+                    # Run checks
+                    assert (
+                        identifier in expected_data
+                    ), f"Identifier not found in existing data: {identifier}"
+
+                    lower_bound = expected_data[identifier] * (1 - tolerance)
+                    upper_bound = expected_data[identifier] * (1 + tolerance)
+                    assert value >= lower_bound, (
+                        f"Objective function value below lower bound {value} "
+                        f"< {lower_bound} (Tolerance: {tolerance:.2%})"
+                    )
+                    assert value <= upper_bound, (
+                        f"Objective function value above upper bound {value}"
+                        f" > {upper_bound} (Tolerance: {tolerance:.2%})"
+                    )
 
     @pytest.mark.parametrize(
         "distribution",
@@ -707,6 +804,7 @@ class TestAuroraFlowPartitioning:
         device_resources = available_resources_on_platform(platforms[board](), ["LUT"])
         max_util = 0.7
 
+        # TODO: More fail types
         # Set up the config / mock the resource estimator so that the specified fail type
         # appears
         match fail_type:
