@@ -111,6 +111,9 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
         """Create shape compatible op."""
         return super().make_shape_compatible_op(model)
 
+    def infer_node_datatype(self, model: "ModelWrapper") -> None:
+        """Not supported for datatype inference."""
+
     def global_includes(self) -> None:
         """Return global includes."""
         self.code_gen_dict["$GLOBALS$"] = ['#include "ap_axi_sdata.h"']
