@@ -39,7 +39,7 @@ class Partitioner(ABC):
                 log.warning(
                     "Creation of mip.Model failed. This might be known bug "
                     "(LD_LIBRARY_PATH only modified at runtime to point to "
-                    "libgurobi instead of before). Falling back to CBC"
+                    "libgurobi instead of before). Falling back to CBC."
                 )  # See finn-plus issue #67
                 return Model(solver_name=mip.CBC)
             except mip.exceptions.InterfacingError as e:

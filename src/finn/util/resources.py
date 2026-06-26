@@ -88,7 +88,7 @@ def get_estimated_model_resources(  # noqa
             if restype not in result[layer]:
                 if add_missing_resources:
                     result[layer][restype] = 0
-                    log.info(f"Added missing resource estimation on layer {layer} ({restype}: 0)")
+                    log.debug(f"Added missing resource estimation on layer {layer} ({restype}: 0)")
                 else:
                     resource_missing = True
                     log.error(f"Node {layer} has no resource estimation for resource {restype}!")
@@ -136,3 +136,33 @@ def available_resources_on_platform(p: Platform, considered_resources: list[str]
         for slr in resources_per_device:
             acc[restype] += resources_per_device[slr][restype]
     return acc
+
+
+def get_model_device_resource_factors(
+    model: ModelWrapper,
+    platform: Platform,
+    fpga_part: str,
+    considered_resources: list[str],
+    max_utilization: float,
+) -> dict[str, float] | None:
+    """For the given model and resources, return how many devices are required
+    per resource to fit the model. For example, {"LUT": 2.4} would mean that
+    2.4 of the given devices are required to fit the model (lower bound).
+
+    In case that a device or the model estimate does not have the requested
+    resource, None is returned.
+    """
+    estimated = get_estimated_model_resources(model, fpga_part, considered_resources, True)
+    total_estimated = dict.fromkeys(considered_resources, 0)
+    for resource in estimated.values():
+        for restype in considered_resources:
+            if restype not in resource:
+                return None
+            total_estimated[restype] += resource[restype]
+    device = available_resources_on_platform(platform, considered_resources)
+    factors = {}
+    for restype in considered_resources:
+        if restype not in device:
+            return None
+        factors[restype] = total_estimated[restype] / (device[restype] * max_utilization)
+    return factors
