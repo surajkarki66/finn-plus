@@ -85,7 +85,7 @@ class CreateDataflowPartition(Transformation):
         # first, use the generic partitioning functionality to split up the graph
         parent_model = model.transform(
             PartitionFromLambda(
-                partitioning=assign_partition_id, partition_dir=self.partition_model_dir
+                partitioning=assign_partition_id, partition_dir=str(self.partition_model_dir)
             )
         )
         # change node types to StreamingDataflowPartition

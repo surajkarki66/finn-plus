@@ -1492,6 +1492,8 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
                 raise FINNUserError(
                     "instrumentation_no_dma must be set in the config for Vivado Zynq flow"
                 )
+            if cfg.board is None:
+                raise FINNUserError("board must be set in the config for Vivado Zynq flow")
             model = model.transform(
                 ZynqBuild(
                     cfg.board,
@@ -1502,7 +1504,7 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
                     cfg.instrumentation_avg_n,
                     cfg.auto_fifo_depths
                     and cfg.auto_fifo_strategy == AutoFIFOSizingMethod.LIVE_FIFO,
-                    partition_model_dir=partition_model_dir,
+                    partition_model_dir=str(partition_model_dir),
                 )
             )
 

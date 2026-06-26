@@ -28,6 +28,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 """Transformation to create Zynq Vivado projects for FINN dataflow designs."""
+
 import json
 import math
 import os
@@ -39,6 +40,7 @@ from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNode
 from qonnx.transformation.infer_data_layouts import InferDataLayouts
 from shutil import copy
 from subprocess import CalledProcessError
+from typing import Literal
 
 from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
 from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
@@ -614,21 +616,20 @@ class MakeZYNQProject(Transformation):
 
 class ZynqBuild(Transformation):
     """Best-effort attempt at building the accelerator for Zynq.
-    It assumes the model has only fpgadataflow nodes
-
+    It assumes the model has only fpgadataflow nodes.
     """
 
     def __init__(
         self,
-        platform,
-        period_ns,
-        enable_debug=False,
-        enable_instrumentation=False,
-        instrumentation_no_dma=False,
-        instrumentation_avg_n=64,
-        live_fifo_sizing=False,
-        partition_model_dir=None,
-    ):
+        platform: str,
+        period_ns: float,
+        enable_debug: bool = False,
+        enable_instrumentation: bool = False,
+        instrumentation_no_dma: bool = False,
+        instrumentation_avg_n: int = 64,
+        live_fifo_sizing: bool = False,
+        partition_model_dir: str | None = None,
+    ) -> None:
         """Initialize ZynqBuild with platform and build settings."""
         super().__init__()
         self.fpga_part = pynq_part_map[platform]
@@ -642,7 +643,7 @@ class ZynqBuild(Transformation):
         self.live_fifo_sizing = live_fifo_sizing
         self.partition_model_dir = partition_model_dir
 
-    def apply(self, model):
+    def apply(self, model: ModelWrapper) -> tuple[ModelWrapper, Literal[False]]:
         """Apply the ZynqBuild transformation to create a complete Zynq accelerator."""
         model = model.transform(InferDataLayouts())
         # prepare at global level, then break up into kernels

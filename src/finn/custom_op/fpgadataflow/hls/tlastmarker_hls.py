@@ -93,8 +93,8 @@ class TLastMarker_hls(HLSBackend, HWCustomOp):
         return my_attrs
 
     def execute_node(
-        self, context: dict[str, np.ndarray], graph: "GraphProto"
-    ) -> None:  # noqa: ARG002
+        self, context: dict[str, np.ndarray], graph: "GraphProto"  # noqa: ARG002
+    ) -> None:
         # TLastMarker's behavior is only visible when doing
         # rtlsim with stitched IP, since it marks the end
         # of the current image/input sample. when executing
