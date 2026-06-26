@@ -15,6 +15,7 @@ from collections import OrderedDict
 from collections.abc import Iterable
 from junitparser import JUnitXml, TestSuite
 from junitparser.junitparser import TestCase
+from pathlib import Path
 from typing import Literal
 
 TestStatus = Literal["passed", "failed", "skipped", "unknown"]
@@ -103,6 +104,8 @@ def merge_reports(inputs: Iterable[str], output: str) -> None:
     by_key: OrderedDict[TestKey, TestCase] = OrderedDict()
 
     for path in inputs:
+        if not Path(path).is_file():
+            continue
         xml = JUnitXml.fromfile(path)
         for suite in xml:
             for tc in suite:

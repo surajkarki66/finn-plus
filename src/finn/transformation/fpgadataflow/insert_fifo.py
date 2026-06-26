@@ -43,7 +43,7 @@ from qonnx.transformation.base import Transformation
 from typing import cast
 
 from finn.util.basic import getHWCustomOp
-from finn.util.exception import FINNInternalError
+from finn.util.exception import FINNInternalError, FINNUserError
 from finn.util.fpgadataflow import is_fpgadataflow_node
 from finn.util.logging import log
 
@@ -300,10 +300,10 @@ class InsertFIFO(Transformation):
                     not final_node.op_type.startswith("StreamingFIFO")
                     and final_node.op_type != "IODMA_hls"
                 ):
-                    assert (
-                        final_node.op_type != "TLastMarker_hls"
-                    ), """Insert tlast marker should be done
-                        after inserting the FIFOs"""
+                    if final_node.op_type == "TLastMarker_hls":
+                        raise FINNUserError(
+                            "Inserting tlast marker should be done after inserting the FIFOs"
+                        )
                     n0 = getHWCustomOp(final_node)
                     out_ind = list(final_node.output).index(graph_out_name)
                     # determine fifo node attributes

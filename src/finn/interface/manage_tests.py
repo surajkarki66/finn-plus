@@ -115,7 +115,7 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
             crash_xml = f"{ci_project_dir}/reports/crash_rerun.xml"
             crash_html = f"{ci_project_dir}/reports/crash_rerun.html"
             end2end_xml = f"{ci_project_dir}/reports/end2end.xml"
-            # end2end_html = f"{ci_project_dir}/reports/end2end.html"
+            end2end_html = f"{ci_project_dir}/reports/end2end.html"
 
             crash_re: Pattern[str] = re.compile(
                 r"(worker.*crash|worker.*terminated|segmentation fault|sigsegv|signal 11|fatal python error)",  # noqa
@@ -250,22 +250,28 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
                 print("[INFO] No crash-like tests to rerun.")
             main_returncode = test_1_returncode or test_2_returncode
 
-            # test_2_process = subprocess.Popen(
-            #     shlex.split(
-            #         (
-            #             f"{sys.executable} -m pytest -v -m 'end2end or sanity_bnn or notebooks' "
-            #             f"--junitxml={end2end_xml} "
-            #             f"--html={end2end_html} "
-            #             f"--reruns 1 --dist loadgroup -n {num_workers}"
-            #         ),
-            #         posix=IS_POSIX,
-            #     )
-            # )
-            # test_2_process.communicate()
-            # test_2_returncode = test_2_process.returncode
+            # --------------------------
+            # 4) Run end2end tests
+            # --------------------------
 
-            # Run doctests for all FINN submodules
-            # test_3_returncode = run_doctests(int(num_workers))
+            test_3_process = subprocess.Popen(
+                shlex.split(
+                    (
+                        f"{sys.executable} -m pytest -v -m 'end2end or sanity_bnn or notebooks' "
+                        f"--junitxml={end2end_xml} "
+                        f"--html={end2end_html} "
+                        f"--reruns 1 --dist loadgroup -n {num_workers}"
+                    ),
+                    posix=IS_POSIX,
+                )
+            )
+            test_3_process.communicate()
+            test_3_returncode = test_3_process.returncode
+
+            # --------------------------
+            # 5) Run doctests and merge all reports into a single HTML and XML report
+            # --------------------------
+            test_4_returncode = run_doctests(int(num_workers))
 
             subprocess.run(
                 shlex.split(
@@ -292,7 +298,7 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
                 if Path(xml_file).exists():
                     Path(xml_file).unlink()
 
-            if main_returncode:  # or test_2_returncode or test_3_returncode:
+            if main_returncode or test_2_returncode or test_3_returncode or test_4_returncode:
                 sys.exit(1)
 
         case _:
