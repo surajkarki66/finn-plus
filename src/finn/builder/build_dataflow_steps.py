@@ -1531,7 +1531,7 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
             copy(Path(hwh_src), bitfile_dir / "finn-accel.hwh")
             copy(
                 Path(rpt_dir),
-                report_dir / "/post_synth_resources.xml",
+                report_dir / "post_synth_resources.xml",
             )
 
             model.set_metadata_prop("bitfile_output", str(bitfile_path.absolute()))
