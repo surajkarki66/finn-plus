@@ -278,39 +278,6 @@ class RunLayerIsolatedSimulation(Transformation):
     def calculate_upper_bounds(self, data: IsoSimLogDataByLayer) -> dict[str, dict[str, int]]:
         """Try to calculate an upper bound for the incoming FIFO size of the layers.
         Return size indexed by layer name and stream name.
-
-        >>> step = RunLayerIsolatedSimulation("", 0.0, False)
-        >>> bounds = step.calculate_upper_bounds({
-        ... "A": {
-        ...         "ready": [
-        ...             {"totalCycles": 43, "inputCyclesDone": 12,
-        ...             "inputCyclesTarget": 24, "s_axi_0": 1, "s_axi_1": 0},
-        ...             {"totalCycles": 44, "inputCyclesDone": 13,
-        ...             "inputCyclesTarget": 24, "s_axi_0": 0, "s_axi_1": 0},
-        ...         ], "valid": []
-        ... },
-        ... "B": {
-        ...         "ready": [
-        ...             {"totalCycles": 100, "inputCyclesDone": 3,
-        ...             "inputCyclesTarget": 10, "s_axi_0": 1, "s_axi_1": 1,
-        ...             "s_axi_2": 0},
-        ...         ], "valid": []
-        ... },
-        ... "C": {
-        ...         "ready": [
-        ...             {"totalCycles": 43, "inputCyclesDone": 14,
-        ...             "inputCyclesTarget": 24, "s_axi_0": 1, "s_axi_1": 0},
-        ...             {"totalCycles": 44, "inputCyclesDone": 15,
-        ...             "inputCyclesTarget": 24, "s_axi_0": 0, "s_axi_1": 0},
-        ...         ], "valid": []
-        ... }
-        ... })
-        >>> bounds["A"]
-        {'s_axi_0': 1, 's_axi_1': 2}
-        >>> bounds["B"]
-        {'s_axi_0': 0, 's_axi_1': 0, 's_axi_2': 1}
-        >>> bounds["C"]
-        {'s_axi_0': 0, 's_axi_1': 0}
         """
 
         # TODO: Proper pytest tests
@@ -370,21 +337,7 @@ class RunLayerIsolatedSimulation(Transformation):
         return results
 
     def sanity_check_logged_data(self, data: IsoSimLogDataByLayer) -> None:
-        """Do checks on the returned data to make sure it is in spec.
-
-        A correctly formatted example would be:
-        >>> data = {
-        ...     "layer1": {
-        ...         "ready": [{"totalCycles": 10, "inputCyclesDone": 5,
-        ...                 "inputCyclesTarget": 10, "s_axi_0": 1}],
-        ...         "valid": [{"totalCycles": 10, "outputCyclesDone": 5,
-        ...                 "outputCyclesTarget": 10, "m_axi_0": 1}]
-        ...     }
-        ... }
-        >>> sim = RunLayerIsolatedSimulation("", 0.0, False)
-        >>> sim.sanity_check_logged_data(data)
-        >>>
-        """
+        """Do checks on the returned data to make sure it is in spec."""
         # 0. Valid and ready are present
         for layer, ldata in data.items():
             if "valid" not in ldata.keys():

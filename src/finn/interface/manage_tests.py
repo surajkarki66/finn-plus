@@ -282,8 +282,8 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
                     posix=IS_POSIX,
                 )
             )
-            script_dir = Path(__file__).parent.parent.resolve() / "scripts" / "merge_xml_reports.py"
-            subprocess.run(
+            script_dir = Path(get_settings().finn_tests) / "testing_util" / "merge_xml_reports.py"
+            success = subprocess.run(
                 shlex.split(
                     (
                         f"{sys.executable} {script_dir} "
@@ -292,11 +292,14 @@ def run_test(variant: str, num_workers: str, name: str = "") -> None:
                     ),
                     posix=IS_POSIX,
                 )
-            )
-            # Remove individual XML reports to avoid confusion with the merged report
-            for xml_file in [main_xml, crash_xml, end2end_xml]:
-                if Path(xml_file).exists():
-                    Path(xml_file).unlink()
+            ).returncode
+            if success != 0:
+                print(f"[WARN] Merging XML reports failed with exit code {success}.")
+            else:
+                # Remove individual XML reports to avoid confusion with the merged report
+                for xml_file in [main_xml, crash_xml, end2end_xml]:
+                    if Path(xml_file).exists():
+                        Path(xml_file).unlink()
 
             if main_returncode or test_2_returncode or test_3_returncode or test_4_returncode:
                 sys.exit(1)
