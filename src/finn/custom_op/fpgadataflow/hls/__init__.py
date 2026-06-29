@@ -61,7 +61,6 @@ import finn.custom_op.fpgadataflow.hls.squeeze_hls
 
 # Import the submodule containing the specialization of the Unsqueeze operation
 import finn.custom_op.fpgadataflow.hls.unsqueeze_hls
-
 from finn.custom_op.fpgadataflow.hls.attention_heads_hls import (
     MergeMultiHeads_hls,
     SplitMultiHeads_hls,
@@ -79,6 +78,7 @@ from finn.custom_op.fpgadataflow.hls.labelselect_hls import LabelSelect_hls
 from finn.custom_op.fpgadataflow.hls.layernorm_hls import LayerNorm_hls
 from finn.custom_op.fpgadataflow.hls.lookup_hls import Lookup_hls
 from finn.custom_op.fpgadataflow.hls.matrixvectoractivation_hls import MVAU_hls
+from finn.custom_op.fpgadataflow.hls.multiplexer_hls import Multiplexer_hls
 from finn.custom_op.fpgadataflow.hls.outer_shuffle_hls import OuterShuffle_hls
 from finn.custom_op.fpgadataflow.hls.pool_hls import Pool_hls
 from finn.custom_op.fpgadataflow.hls.replicate_stream_hls import ReplicateStream_hls
@@ -121,3 +121,5 @@ custom_op["MergeMultiHeads_hls"] = MergeMultiHeads_hls
 custom_op["ReplicateStream_hls"] = ReplicateStream_hls
 custom_op["HWSoftmax_hls"] = HWSoftmax_hls
 custom_op["OuterShuffle_hls"] = OuterShuffle_hls
+
+custom_op["Multiplexer_hls"] = Multiplexer_hls
