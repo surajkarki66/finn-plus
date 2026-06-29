@@ -73,7 +73,7 @@ def test_end2end_multifpga_mobilenet(pytestconfig: pytest.Config) -> None:
         folding_two_pass_relaxation=False,
         standalone_thresholds=True,
         minimize_bit_width=True,
-        board="U280",
+        board="U55C",
         shell_flow_type=ShellFlowType.VITIS_ALVEO,
         auto_fifo_depths=True,
         auto_fifo_strategy=AutoFIFOSizingMethod.LARGEFIFO_RTLSIM,

@@ -12,6 +12,7 @@ from pathlib import Path
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
+from qonnx.transformation.general import GiveUniqueNodeNames
 from qonnx.util.basic import qonnx_make_model
 from random import randint
 from typing import Literal, cast
@@ -418,6 +419,7 @@ def create_sdp_ready_model_no_branches(
             set_device_id(model.graph.node[overall_node_index], current_device)
             overall_node_index += 1
             assignment[current_device] -= 1
+    model = model.transform(GiveUniqueNodeNames())
     return model
 
 

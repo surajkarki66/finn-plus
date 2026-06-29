@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 @pytest.mark.multifpga
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "platform", [("U280", ShellFlowType.VITIS_ALVEO), ("Pynq-Z1", ShellFlowType.VIVADO_ZYNQ)]
+    "platform", [("U55C", ShellFlowType.VITIS_ALVEO), ("Pynq-Z1", ShellFlowType.VIVADO_ZYNQ)]
 )
 @pytest.mark.parametrize(
     "model_type",
@@ -72,7 +72,7 @@ def test_resource_est_for_all_layers(
 
     # Run the resource estimation
     assert cfg.partitioning_configuration is not None
-    estimates: dict[int, dict[str, Real]] = get_estimated_model_resources(
+    estimates: dict[str, dict[str, int | float]] = get_estimated_model_resources(
         model,
         fpga_part=cfg._resolve_fpga_part(),  # noqa
         considered_resources=cfg.partitioning_configuration.considered_resources,
@@ -81,31 +81,26 @@ def test_resource_est_for_all_layers(
 
     # Checks
     for node in model.graph.node:
-        index = model.get_node_index(node)
-
         # Chat every layer has an estimate
-        assert (
-            index in estimates.keys()
-        ), f"No estimate found for layer {node.name} (index: {index})"
+        assert node.name in estimates.keys(), f"No estimate found for layer {node.name}"
 
         # Assert that every estimate is either an int or a float
-        for est in estimates[index].values():
+        for est in estimates[node.name].values():
             assert type(est) in [int, float]  # Efficiency measures use floats
 
         # Assert that every layer uses any resource at all
-        assert any(est > cast("Real", 0) for est in estimates[index].values()), (
-            f"Layer {node.name} (index: {index}) does not use "
-            f"any resources at all: {estimates[index]}"
+        assert any(est > 0 for est in estimates[node.name].values()), (
+            f"Layer {node.name} does not use " f"any resources at all: {estimates[node.name]}"
         )
 
     # Check that resource estimates were added if resource type was not used in a layer
     if model_name == "CNV" and wbits == 2 and abits == 2:
         no_ff = [f"ConvolutionInputGenerator_rtl_{i}" for i in range(8)]
         layers_seen: dict[str, bool] = dict.fromkeys(no_ff, False)
-        for i, node in enumerate(model.graph.node):
+        for node in model.graph.node:
             if node.name in no_ff:
                 layers_seen[node.name] = True
-                assert estimates[i]["FF"] == 0
+                assert estimates[node.name]["FF"] == 0
         assert all(
             list(layers_seen.values())
         ), "Not all expected layers were seen for this model type!"

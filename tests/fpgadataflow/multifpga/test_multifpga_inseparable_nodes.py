@@ -170,7 +170,7 @@ def test_onnx_to_networkx(
     model_name, wbits, abits, pretrained = model_type
     cfg = DataflowBuildConfig(
         output_dir=make_build_dir("test_onnx_nx_"),
-        board="U280",
+        board="U55C",
         shell_flow_type=ShellFlowType.VITIS_ALVEO,
         target_fps=1000,
         synth_clk_period_ns=5.0,
@@ -258,7 +258,7 @@ def test_resnet18_examples_inseparable_nodes(pytestconfig: pytest.Config) -> Non
     """
     cfg = DataflowBuildConfig(
         output_dir=make_build_dir("rn18_insep_nodes_"),
-        board="U280",
+        board="U55C",
         shell_flow_type=ShellFlowType.VITIS_ALVEO,
         target_fps=100,
     )

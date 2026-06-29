@@ -63,7 +63,7 @@ from finn.util.resources import (
 
 @pytest.mark.auroraflow
 @pytest.mark.multifpga
-@pytest.mark.parametrize("board", ["U280", "U55C"])
+@pytest.mark.parametrize("board", ["U55C"])
 @pytest.mark.parametrize("topology", [MFTopology.CHAIN])
 @pytest.mark.parametrize(
     "communication_kernel_args",
@@ -204,7 +204,7 @@ class TestAuroraFlowPreparationAndMetadata:
 
 
 @pytest.mark.auroraflow
-@pytest.mark.parametrize("board", ["U280", "Pynq-Z1"])
+@pytest.mark.parametrize("board", ["U55C", "Pynq-Z1"])
 @pytest.mark.parametrize("topology", [MFTopology.CHAIN])
 class TestAuroraFlowPartitioning:
     """Tests regarding the partitioning using the AuroraFlow kernel and partitioner class."""
@@ -213,7 +213,7 @@ class TestAuroraFlowPartitioning:
         """Return the shell flow type for the given board.
         Errors if a not assigned board is passed.
         """
-        if board in ["U280"]:
+        if board in ["U280", "U55C"]:
             return ShellFlowType.VITIS_ALVEO
         elif board in ["Pynq-Z1"]:  # noqa
             return ShellFlowType.VIVADO_ZYNQ
@@ -305,7 +305,7 @@ class TestAuroraFlowPartitioning:
         )
 
         # Skip tests for models that don't fit on certain devices
-        if typename in ["mobilenetv1", "resnet18"] and board not in ["U280"]:
+        if typename in ["mobilenetv1", "resnet18"] and board not in ["U55C"]:
             pytest.skip(reason=f"Model {typename} too large for board {board}!")  # type: ignore
 
         # Skip the same tests that the end2end tests skip
@@ -549,6 +549,7 @@ class TestAuroraFlowPartitioning:
             expected_data = yaml.load(f, Loader=yaml.Loader)
 
         # Partition
+        found_data = {}
         for device in DEVICES:
             for maxutil in MAX_UTIL:
                 for idealutil in IDEAL_UTIL:
@@ -575,6 +576,7 @@ class TestAuroraFlowPartitioning:
                     value = cast(
                         "AuroraPartitioner", partition_transform.partitioner
                     ).model.objective.x
+                    found_data[identifier] = value
 
                     # Run checks
                     assert (
@@ -591,6 +593,10 @@ class TestAuroraFlowPartitioning:
                         f"Objective function value above upper bound {value}"
                         f" > {upper_bound} (Tolerance: {tolerance:.2%})"
                     )
+
+        # Uncomment this to update the regression values
+        # with filepath.open("w+") as f:
+        #     yaml.dump(found_data, f, Dumper=yaml.Dumper)
 
     @pytest.mark.parametrize(
         "distribution",
@@ -778,8 +784,8 @@ class TestAuroraFlowPartitioning:
             assert solution[str(i)] is not None
 
         # Consecutive assignments
-        for i in range(nodes):
-            suc = model.find_direct_successors(str(i))  # type: ignore
+        for node in model.graph.node:
+            suc = model.find_direct_successors(node)  # type: ignore
             if suc is None:
                 continue
             assert abs(solution[str(i)] - solution[suc.name]) <= 1
