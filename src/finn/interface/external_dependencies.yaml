@@ -21,7 +21,7 @@ git_deps:
         install_editable: False
     AuroraFlow:
         url: "https://github.com/pc2/AuroraFlow.git"
-        commit: "261c22cce2a260d0eb965def8b90ffdd77d669af"
+        commit: "6438de8eb91ffa3fbbbaabe8fe75e419871d4a25"
         pip_install: False
         install_editable: False
     vitis_dummy_kernel:

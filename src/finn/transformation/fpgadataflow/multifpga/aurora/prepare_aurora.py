@@ -1,3 +1,4 @@
+import re
 import shlex
 import shutil
 import subprocess
@@ -9,7 +10,13 @@ from qonnx.transformation.base import Transformation
 from finn.builder.build_dataflow_config import MFVerbosity, PartitioningConfiguration
 from finn.transformation.fpgadataflow.multifpga.aurora.metadata import AuroraNetworkMetadata
 from finn.util.basic import make_build_dir
-from finn.util.exception import FINNMultiFPGAConfigError, FINNMultiFPGAError, FINNMultiFPGAUserError
+from finn.util.exception import (
+    FINNInternalError,
+    FINNMultiFPGAConfigError,
+    FINNMultiFPGAError,
+    FINNMultiFPGAUserError,
+    FINNUserError,
+)
 from finn.util.logging import log
 from finn.util.settings import get_settings
 
@@ -46,6 +53,30 @@ class PrepareAuroraFlow(Transformation):
                 f"and installed? (Searched at {self.aurora_path})."
             )
 
+        # The Aurora IP Core is version locked, so we figure out which Vivado version we use
+        vivado_path = shutil.which("vivado")
+        if vivado_path is None:
+            raise FINNUserError("Vivado is not available in PATH!")
+
+        # This will not match ISE versions, but we assume that Vivado is used everywhere now
+        match = re.compile(r"Vivado\/(\d{4})\.(\d*)").match(vivado_path)
+        if match is None:
+            raise FINNInternalError(
+                f"Could not parse the Vivado version number from its path: {vivado_path}"
+            )
+        year, _release = match.group(1, 2)
+        self.aurora_version = ""
+        if int(year) < 2024:
+            self.aurora_version = "12.0"
+        else:
+            # TODO: This might need to be updated for future versions.
+            self.aurora_version = "13.0"
+        log.debug(f"Using Aurora IP Version: {self.aurora_version}")
+
+        # Check in case a more complicated matching ever overlooks a version
+        if self.aurora_version == "":
+            raise FINNInternalError("Aurora IP Core Version undetermined!")
+
     def package_single(self, args: str, device: int, index: int) -> Path:
         """Package a single AuroraFlow kernel. Stored in a subdirectory of the
         aurora_storage directory,
@@ -57,7 +88,7 @@ class PrepareAuroraFlow(Transformation):
         >>> p = PartitioningConfiguration(
         ...     num_fpgas=2, ports_per_device=2, communication_kernel=MFCommunicationKernel.AURORA
         ... )
-        >>> t = PrepareAuroraFlow("xilinx_u280_gen3x16_xdma_1_202211_1", "xcu280-fsvh2892-2L-e", p)
+        >>> t = PrepareAuroraFlow("xilinx_u55c_gen3x16_xdma_3_202210_1", "xcu55c-fsvh2892-2L-e", p)
         >>> xo = t.package_single("", device=0, index=0)
         >>> xo.exists()
         True
@@ -85,7 +116,9 @@ class PrepareAuroraFlow(Transformation):
                 f"Packaging AuroraFlow kernel with additional make arguments: {self.make_args}"
             )
         result = subprocess.run(
-            shlex.split(f"make aurora_hw {args} {self.make_args}"),
+            shlex.split(
+                f"make aurora_hw AURORA_VERSION={self.aurora_version} " f"{args} {self.make_args}"
+            ),
             cwd=build_dir,
             capture_output=True,
             text=True,
