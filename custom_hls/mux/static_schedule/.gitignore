@@ -1,0 +1,4 @@
+*.log
+static_mux_test
+*_test/
+.clangd
