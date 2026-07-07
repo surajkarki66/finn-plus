@@ -711,7 +711,10 @@ class FINNLoop(HWCustomOp, RTLBackend):
 
         adj_list = adjacency_list(
             loop_body,
-            lambda node: node.op_type == "Thresholding_rtl"
+            lambda node: (
+                node.op_type == "Thresholding_rtl"
+                and any(attr.name == "mlo_max_iter" and attr.i > 0 for attr in node.attribute)
+            )
             or (
                 node.op_type == "MVAU_rtl"
                 and any(attr.name == "mlo_max_iter" and attr.i > 0 for attr in node.attribute)
