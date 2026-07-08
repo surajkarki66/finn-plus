@@ -25,6 +25,9 @@ class PrepareAuroraFlow(Transformation):
     """Prepares all AuroraFlow kernel XO files and stores them in the network
     metadata of the ModelWrapper.
 
+    If the Aurora Version is passed, the given one is used, otherwise we try to figure out
+    the version that best matches the used Vivado version automatically.
+
     Requires: A metadata creation transformation needs to be run beforehand, so that this transform
     knows, which kernels it needs to package.
 
@@ -32,7 +35,11 @@ class PrepareAuroraFlow(Transformation):
     """
 
     def __init__(
-        self, platform: str, part: str, partitioning_configuration: PartitioningConfiguration
+        self,
+        platform: str,
+        part: str,
+        partitioning_configuration: PartitioningConfiguration,
+        aurora_version: str | None = None,
     ) -> None:
         """Prepare AuroraFlow."""
         super().__init__()
@@ -53,24 +60,29 @@ class PrepareAuroraFlow(Transformation):
                 f"and installed? (Searched at {self.aurora_path})."
             )
 
-        # The Aurora IP Core is version locked, so we figure out which Vivado version we use
-        vivado_path = shutil.which("vivado")
-        if vivado_path is None:
-            raise FINNUserError("Vivado is not available in PATH!")
+        if aurora_version is None:
+            # The Aurora IP Core is version locked, so we figure out which Vivado version we use
+            vivado_path = shutil.which("vivado")
+            if vivado_path is None:
+                raise FINNUserError("Vivado is not available in PATH!")
 
-        # This will not match ISE versions, but we assume that Vivado is used everywhere now
-        match = re.compile(r"Vivado\/(\d{4})\.(\d*)").match(vivado_path)
-        if match is None:
-            raise FINNInternalError(
-                f"Could not parse the Vivado version number from its path: {vivado_path}"
-            )
-        year, _release = match.group(1, 2)
-        self.aurora_version = ""
-        if int(year) < 2024:
-            self.aurora_version = "12.0"
+            # This will not match ISE versions, but we assume that Vivado is used everywhere now
+            match = re.compile(r".*?Vivado\/(\d{4})\.(\d*)\/.*").match(vivado_path)
+            if match is None:
+                raise FINNInternalError(
+                    f"Could not parse the Vivado version number from its path: {vivado_path}. "
+                    f'If this is not fixable, pass aurora_version="..." to the '
+                    f"PrepareAuroraFlow transformation manually."
+                )
+            year, _release = match.group(1, 2)
+            self.aurora_version = ""
+            if int(year) < 2024:
+                self.aurora_version = "12.0"
+            else:
+                # TODO: This might need to be updated for future versions.
+                self.aurora_version = "13.0"
         else:
-            # TODO: This might need to be updated for future versions.
-            self.aurora_version = "13.0"
+            self.aurora_version = aurora_version
         log.debug(f"Using Aurora IP Version: {self.aurora_version}")
 
         # Check in case a more complicated matching ever overlooks a version

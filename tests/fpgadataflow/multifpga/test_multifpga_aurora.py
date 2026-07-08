@@ -788,7 +788,8 @@ class TestAuroraFlowPartitioning:
             suc = model.find_direct_successors(node)  # type: ignore
             if suc is None:
                 continue
-            assert abs(solution[str(i)] - solution[suc.name]) <= 1
+            for s in suc:
+                assert abs(solution[node.name] - solution[s.name]) <= 1
 
         # No device was visited twice
         if topology == MFTopology.CHAIN:
