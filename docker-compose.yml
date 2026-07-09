@@ -1,0 +1,34 @@
+services:
+  finn:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: finn-plus:22.04
+    container_name: finn-plus
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/workspace
+      - finn_build:/finn_build
+      - finn_deps:/finn_deps
+      # Mount at the SAME path as on the host — Xilinx settings64.sh uses hardcoded absolute paths.
+      - ${FINN_XILINX_PATH}:${FINN_XILINX_PATH}:ro
+      # Uncomment if you use a node-locked license stored in ~/.Xilinx on the host:
+      # - ${HOME}/.Xilinx:/home/finn/.Xilinx:ro
+    environment:
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+      CONTAINER_USER: finn
+      FINN_XILINX_PATH: ${FINN_XILINX_PATH}
+      FINN_XILINX_VERSION: ${FINN_XILINX_VERSION:-2024.2}
+      FINN_BUILD_DIR: /finn_build
+      FINN_DEPS: /finn_deps
+      NUM_DEFAULT_WORKERS: ${NUM_DEFAULT_WORKERS:-4}
+      XILINXD_LICENSE_FILE: ${XILINXD_LICENSE_FILE:-}
+    ulimits:
+      stack: -1
+
+volumes:
+  finn_build:
+  finn_deps:

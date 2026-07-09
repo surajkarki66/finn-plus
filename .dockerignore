@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/build
+**/dist
+**/*.egg-info
+finn_build
+finn_deps
+board_files
+dataset
+data
+*.log
+settings.yaml
