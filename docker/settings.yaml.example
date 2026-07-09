@@ -1,0 +1,5 @@
+# Copy to settings.yaml in the repo root (or ~/.finn/settings.yaml)
+automatic_dependency_updates: true
+finn_build_dir: /finn_build
+finn_deps: /finn_deps
+num_default_workers: 4
