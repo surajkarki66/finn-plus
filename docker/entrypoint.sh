@@ -106,6 +106,9 @@ setup_finn_development() {
 
     activate_poetry_venv
 
+    # Not in tests/pyproject.toml; required by end2end/test_end2end_bnn_pynq.py
+    poetry -C /workspace run pip install finn-dataset-loading
+
     if [[ ! -f "${VIRTUAL_ENV}/.finn-deps-updated" || "${FINN_FORCE_DEPS_UPDATE:-0}" == "1" ]]; then
         echo "Updating FINN+ git/download dependencies (finn deps update)..."
         if finn deps update --accept-defaults; then
