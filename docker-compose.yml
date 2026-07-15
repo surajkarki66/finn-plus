@@ -12,10 +12,7 @@ services:
       - .:/workspace
       - finn_build:/finn_build
       - finn_deps:/finn_deps
-      # Mount at the SAME path as on the host — Xilinx settings64.sh uses hardcoded absolute paths.
       - ${FINN_XILINX_PATH}:${FINN_XILINX_PATH}:ro
-      # Uncomment if you use a node-locked license stored in ~/.Xilinx on the host:
-      # - ${HOME}/.Xilinx:/home/finn/.Xilinx:ro
     environment:
       HOST_UID: ${HOST_UID:-1000}
       HOST_GID: ${HOST_GID:-1000}
@@ -25,7 +22,6 @@ services:
       FINN_BUILD_DIR: /finn_build
       FINN_DEPS: /finn_deps
       NUM_DEFAULT_WORKERS: ${NUM_DEFAULT_WORKERS:-4}
-      XILINXD_LICENSE_FILE: ${XILINXD_LICENSE_FILE:-}
     ulimits:
       stack: -1
 

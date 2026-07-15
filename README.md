@@ -1,111 +1,220 @@
-<img src="https://cs.uni-paderborn.de/fileadmin-eim/informatik/fg/ce/MiscImages/finn-plus_logo.png" width=196/>
+# FINN+
 
-# Dataflow Compiler for Fast, Scalable Quantized Neural Network Inference on FPGAs
+**FINN+** is a fork of [FINN](https://github.com/Xilinx/finn) — a dataflow compiler for fast, scalable quantized neural network inference on AMD/Xilinx FPGAs. It targets QNNs and generates customized dataflow architectures for high throughput and low latency on FPGAs.
 
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/finn-plus?period=total&units=ABBREVIATION&left_color=GREY&right_color=GREEN&left_text=Downloads)](https://pepy.tech/projects/finn-plus)
-[![PyPI version](https://img.shields.io/pypi/v/finn-plus?logo=pypi&logoColor=white&color=brightgreen)](https://badge.fury.io/py/finn-plus)
-[![GitHub license](https://img.shields.io/badge/License-BSD-purple.svg?logo=bsd)](https://raw.githubusercontent.com/eki-project/finn-plus/refs/heads/main/LICENSE.txt)
-[![Documentation](https://img.shields.io/badge/Documentation-Wiki-blue?logo=github)](https://github.com/eki-project/finn-plus/wiki)
-![GitHub branch status](https://img.shields.io/github/checks-status/eki-project/finn-plus/main?label=CI&logo=gitlab&logoColor=white)
-[![Go to Python website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Feki-project%2Ffinn-plus%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=tool.poetry.dependencies.python&label=python&logo=python&logoColor=white)](https://python.org)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr/eki-project/finn-plus?label=Pull%20Requests&color=green&logo=githubactions&logoColor=white)
-![GitLab CI](https://img.shields.io/badge/GitLab%20CI-FC6D26?logo=gitlab&logoColor=fff)
-![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)
-[![Go to QONNX website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Feki-project%2Ffinn-plus%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=tool.poetry.dependencies.qonnx&label=QONNX&logo=onnx&logoColor=white&color=orange)](https://github.com/fastmachinelearning/qonnx)
-[![Go to Brevitas website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Feki-project%2Ffinn-plus%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=tool.poetry.dependencies.brevitas&logo=pytorch&logoColor=white&label=Brevitas&color=%23bd0000)](https://github.com/Xilinx/brevitas)
+- [Wiki documentation](https://github.com/eki-project/finn-plus/wiki)
+- [EKI project](https://www.eki-project.tech/)
 
-**FINN+** is a fork of **FINN**, an experimental framework from the Integrated Communications and AI Lab of AMD Research & Advanced Development to explore deep neural network inference on FPGAs.
-It specifically targets quantized neural networks, with emphasis on generating dataflow-style architectures customized for each network.
-The resulting FPGA accelerators are highly efficient and can yield high throughput and low latency.
-The framework is fully open-source in order to give a higher degree of flexibility, and is intended to enable neural network research spanning several layers of the software/hardware abstraction stack.
+This repository includes a **Docker-based development environment** so you can work on FINN+ without installing Python dependencies and system packages directly on your host. Xilinx tools (Vivado/Vitis) stay on the host and are mounted into the container.
 
-## Quick Links
+## Why Docker?
 
-- **[Getting Started](#getting-started)** - Start using FINN+ in minutes
-- **[Wiki Documentation](https://github.com/eki-project/finn-plus/wiki)** - Complete documentation and guides
-- **[Feature Tracker](https://github.com/orgs/eki-project/projects/1)** - Current development status
-- **[Contributing](#contributing)** - Learn how to contribute to FINN+
 
-## What's New in FINN+
+| On the host                 | Inside the container                     |
+| --------------------------- | ---------------------------------------- |
+| Ubuntu 24.04 (or similar)   | Ubuntu 22.04 (`finn-plus:22.04`)         |
+| Vivado / Vitis installation | Same path, read-only mount               |
+| Docker + Docker Compose     | Poetry, Python 3.10, FINN+ dev deps, XRT |
 
-FINN+ incorporates all upstream FINN development while adding significant enhancements across multiple areas:
 
-### Core Improvements
+The container handles Poetry install, `finn deps update`, and `finn check` on first start (see [wiki Quick Start — Option B](https://github.com/eki-project/finn-plus/wiki)).
 
-- **Transformer/Attention Support** - Native support for modern transformer architectures
-- **Enhanced Streamlining** - Improved optimization pipeline for better performance
-- **Smart FIFO Sizing (WIP)** - Automatic folding and FIFO-sizing with better algorithms
-- **QoR Estimation (WIP)** - Empirical quality-of-result estimation for design space exploration
+## Prerequisites
 
-### Backend Extensions
+**On the host:**
 
-- **Hardware Profiling** - Instrumentation for accurate performance measurement in simulation and hardware
-- **Alveo Support** - Enhanced build flow for Xilinx Alveo cards
-- **Multi-FPGA** - Support for distributed inference across multiple FPGAs
-- **Optimized Drivers** - High-performance C++ drivers for better host-accelerator communication
+1. **Docker** with the **Compose plugin** (`docker compose version`)
+2. **Xilinx tools** — Vivado and Vitis (tested with **2024.2**; 2022.2 is also supported upstream)
+3. Enough disk space for build artifacts and dependencies (`finn_build` and `finn_deps` volumes)
 
-### Developer Experience
+**Not required on the host:** Python 3.10, Poetry, or FINN+ Python packages — the container sets those up.
 
-- **Better Diagnostics** - Improved logging and error handling throughout the framework
-- **Type Safety** - Comprehensive type hinting and checking for better code quality
-- **YAML Configuration** - Alternative YAML-based build configuration system
-- **Simplified Setup** - Containerless installation and setup process
+## Quick start
 
-**Track Development**: Check our [Feature Tracker](https://github.com/orgs/eki-project/projects/1) for real-time status updates on all features. We merge improvements early to accelerate development and enable cutting-edge research.
+### 1. Clone the repository
 
-## Getting Started
-
-This is a quick overview of how to get started, for additional information please refer to our [**Wiki**](https://github.com/eki-project/finn-plus/wiki)!
-
-### Prerequisites
-
-Before installing FINN+, ensure you have:
-
-- **Python**: Version 3.10 or 3.11 (Python 3.12+ not yet supported)
-- **Xilinx Tools**: Vivado, Vitis, and Vitis HLS (2022.2 or 2024.2)
-- **System Dependencies**: See our [dependency installation script](installDependencies.sh) for required packages
-
-### Installing via pip
-
-After preparing the dependencies mentioned above, simply run the following to start a build flow:
-
-```
-# Make sure to create a fresh virtual environment for FINN+
-pip install finn-plus                     # Install FINN+ and its Python dependencies via pip
-finn deps update                          # Ensure FINN+ pulled all further dependencies (this might update packages in your venv!)
-finn build build_config.yaml model.onnx   # Run a FINN+ build defined in a YAML file
+```bash
+git clone https://github.com/surajkarki66/finn-plus.git
+cd finn-plus
 ```
 
-For more detailed instructions, like installation for development use, please refer to our [**Wiki**](https://github.com/eki-project/finn-plus/wiki)!
+This fork ([surajkarki66/finn-plus](https://github.com/surajkarki66/finn-plus)) is based on [eki-project/finn-plus](https://github.com/eki-project/finn-plus) and adds the Docker development workflow described below.
 
-> [!NOTE]
-> Please note, that `finn deps update` (and most other commands) will automatically download and update dependencies required for FINN to work (mostly the same as the original FINN repository).
-> This is done to provide a better user experience and to not require the user to manage a dozen dependencies on their own.
-> If you want to know which dependencies will be installed before continuing, check out `external_dependencies.yaml`.
+### 2. Configure environment
+
+Copy the example env file and point it at your Xilinx installation:
+
+```bash
+cp docker/.env.example .env
+```
+
+Edit `.env` and set at least:
+
+```bash
+FINN_XILINX_PATH=/tools/Xilinx      # same absolute path as on your host
+FINN_XILINX_VERSION=2024.2          # must match your installed version
+```
+
+`run-docker.sh` auto-detects your user/group IDs (`HOST_UID` / `HOST_GID`) so files created in the container are owned by your host user.
+
+### 3. Start the development container
+
+```bash
+./run-docker.sh
+```
+
+This script will:
+
+- Verify Docker and Xilinx paths
+- Build the image `finn-plus:22.04` if needed
+- Start a container with the repo mounted at `/workspace`
+- Run first-time setup: `poetry install`, `finn deps update`, `finn check`
+- Drop you into an interactive shell
+
+First launch can take a while (Poetry install + dependency downloads).
+
+### 4. Use FINN+ inside the container
+
+```bash
+# Verify setup
+finn check
+
+# Run tests (example)
+finn test tests/util/test_config.py
+
+# Run a YAML build
+finn build path/to/build_config.yaml path/to/model.onnx
+
+# Open a Jupyter notebook (notebooks extra is installed in dev mode)
+jupyter notebook --ip=0.0.0.0 notebooks/
+```
+
+Project files under `/workspace` are the same as on your host — edits persist immediately.
+
+**Key files:**
+
+
+| File                           | Purpose                                                      |
+| ------------------------------ | ------------------------------------------------------------ |
+| `run-docker.sh`                | Host entry point — loads `.env`, checks Xilinx, runs Compose |
+| `docker-compose.yml`           | Service definition, volumes, environment                     |
+| `docker/Dockerfile`            | Ubuntu 22.04 image with Poetry, XRT, build tools             |
+| `docker/entrypoint.sh`         | User mapping, Xilinx `settings64.sh`, dev setup              |
+| `docker/.env.example`          | Template for `.env`                                          |
+| `docker/settings.yaml.example` | Template copied to `settings.yaml` on first run              |
+
+
+## Configuration
+
+### Environment variables (`.env`)
+
+
+| Variable                | Default         | Description                                                           |
+| ----------------------- | --------------- | --------------------------------------------------------------------- |
+| `FINN_XILINX_PATH`      | `/tools/Xilinx` | Host path to Xilinx tools (mounted at the same path in the container) |
+| `FINN_XILINX_VERSION`   | `2024.2`        | Vivado/Vitis version folder name                                      |
+| `NUM_DEFAULT_WORKERS`   | `4`             | Parallel workers for HLS / Vivado                                     |
+| `HOST_UID` / `HOST_GID` | auto            | Match container file ownership to your host user                      |
+
+
+### FINN settings (`settings.yaml`)
+
+On first start, `docker/settings.yaml.example` is copied to `settings.yaml` in the repo root (gitignored). Adjust build dirs and workers there if needed.
+
+### Force reinstall / re-check
+
+Set these in `.env` to re-run setup steps:
+
+```bash
+FINN_FORCE_POETRY_INSTALL=1   # poetry install
+FINN_FORCE_DEPS_UPDATE=1      # finn deps update
+FINN_FORCE_CHECK=1            # finn check
+```
+
+## Common commands
+
+**From the host** (any command after `./run-docker.sh` is passed into the container):
+
+```bash
+./run-docker.sh                    # interactive shell
+./run-docker.sh finn check         # one-off command
+./run-docker.sh finn test -k mobilenet
+./run-docker.sh bash -c "cd tutorials/fpga_flow && python build.py"
+```
+
+**Inside the container:**
+
+```bash
+finn --help
+finn deps update
+finn build <config.yaml> <model.onnx>
+poetry install                     # after pyproject.toml changes
+```
+
+**Rebuild the image** after Dockerfile changes:
+
+```bash
+docker compose build finn
+```
+
+## Troubleshooting
+
+### Xilinx tools not found
+
+```
+ERROR: Xilinx tools not found at /tools/Xilinx
+```
+
+Install Vivado/Vitis on the host and set `FINN_XILINX_PATH` in `.env` to the real install path. The path **must be identical** inside and outside the container — Xilinx scripts use hardcoded absolute paths.
+
+### Vivado version mismatch
+
+If you see a warning about `settings64.sh`, check that `FINN_XILINX_VERSION` matches the folder under `$FINN_XILINX_PATH/Vivado/`.
+
+### PYNQ board files download fails
+
+If `finn deps update` cannot fetch PYNQ board files inside the container, run on the **host**:
+
+```bash
+./docker/fetch-pynq-boardfiles.sh
+```
+
+Board files are placed under `finn_deps/board_files/` in the repo.
+
+### Permission issues on created files
+
+Ensure `HOST_UID` and `HOST_GID` in `.env` match your host user (`id -u` / `id -g`). `run-docker.sh` sets these automatically if omitted.
+
+### Clean build / dependency caches
+
+```bash
+docker compose down -v    # removes finn_build and finn_deps volumes
+rm -rf .venv              # forces poetry reinstall on next start
+```
+
+## Project layout (high level)
+
+```
+finn-plus/
+├── run-docker.sh          # Docker entry point
+├── docker-compose.yml
+├── docker/                # Dockerfile, entrypoint, env templates
+├── src/finn/              # FINN+ Python package
+├── finn-rtllib/           # RTL building blocks
+├── models/                # Example models (DVC)
+├── notebooks/             # Jupyter tutorials
+├── tests/                 # Test suite
+└── tutorials/             # Example flows (e.g. FPGA integration)
+```
 
 ## Contributing
 
-Contributions are very welcome! Whether you are fixing a bug, adding a new feature, improving documentation, or sharing a model — every contribution helps.
+See [CONTRIBUTING.md](CONTRIBUTING.md). For larger changes, check the [feature tracker](https://github.com/orgs/eki-project/projects/1) and open an issue first.
 
-To get started:
+## License
 
-1. **Fork** the repository and create a feature branch from `main`.
-2. **Check** the [Feature Tracker](https://github.com/orgs/eki-project/projects/1) to see what is planned or already in progress.
-3. **Open an issue** to discuss larger changes before investing significant effort.
-4. **Submit a pull request** with a clear description of your changes.
+BSD — see [LICENSE.txt](LICENSE.txt).
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on code style, testing, and the review process.
+## About
 
-## About Us
-
-FINN+ is maintained by researchers from the [Computer Engineering Group](https://en.cs.uni-paderborn.de/ceg) (CEG) and [Paderborn Center for Parallel Computing](https://pc2.uni-paderborn.de/) (PC²) at Paderborn University, Germany as part of the [eki research project](https://www.eki-project.tech/).
-
-<p align="left">
-<a href="https://en.cs.uni-paderborn.de/ceg"><img align="top" src="https://cs.uni-paderborn.de/fileadmin-eim/informatik/fg/ce/MiscImages/UPB_Logo_ENG_coloured_RGB.jpg" alt="logo" style="margin-right: 20px" width="250"/></a>
-<a href="https://pc2.uni-paderborn.de/"><img align="top" src="https://cs.uni-paderborn.de/fileadmin-eim/informatik/fg/ce/MiscImages/PC2_logo.png" alt="logo" style="margin-right: 20px" width="250"/></a>
-</p>
-
-<p align="left">
-<a href="https://www.eki-project.tech/"><img align="top" src="https://cs.uni-paderborn.de/fileadmin-eim/informatik/fg/ce/MiscImages/eki-RGB-EN-s.png" alt="logo" style="margin-right: 20px" width="250"/></a>
-<a href="https://www.bmuv.de/"><img align="top" src="https://cs.uni-paderborn.de/fileadmin-eim/informatik/fg/ce/MiscImages/BMUV_Fz_2021_Office_Farbe_en.png" alt="logo" style="margin-right: 20px" width="250"/></a>
-</p>
+FINN+ is maintained by researchers from [Paderborn University](https://en.cs.uni-paderborn.de/ceg) (CEG) and [PC²](https://pc2.uni-paderborn.de/) as part of the [eki research project](https://www.eki-project.tech/).

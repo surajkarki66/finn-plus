@@ -51,8 +51,8 @@ if [[ -n "${XILINX_VIVADO:-}" && -n "${XILINX_VITIS:-}" ]]; then
     export LD_LIBRARY_PATH="${XILINX_VIVADO}/lib/lnx64.o:${XILINX_VITIS}/lnx64/tools/fpo_v7_1:${LD_LIBRARY_PATH:-}"
 fi
 
-# AMD AR 000034450: Vivado/Flexera license code crashes in Docker during udev device scan
-# (realloc abort in libudev → libXil_lmgr11.so). Preload the system libudev as workaround.
+# AMD AR 000034450: Vivado crashes in Docker during udev device scan (realloc abort in
+# libudev). Preload the system libudev as workaround.
 if [[ -f /lib/x86_64-linux-gnu/libudev.so.1 ]]; then
     export LD_PRELOAD="/lib/x86_64-linux-gnu/libudev.so.1${LD_PRELOAD:+:${LD_PRELOAD}}"
 fi
