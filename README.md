@@ -157,6 +157,35 @@ poetry install                     # after pyproject.toml changes
 docker compose build finn
 ```
 
+## Object detection models
+
+To deploy object detection models with FINN+, the model must first be trained and exported with **quantization-aware training (QAT)**. FINN+ expects a quantized ONNX model compatible with its dataflow compiler — standard floating-point YOLO checkpoints cannot be used directly.
+
+Perform QAT and export using one of these repositories, depending on your model:
+
+| Model | Repository |
+|-------|------------|
+| YOLOv5 | [surajkarki66/finn_yolov5](https://github.com/surajkarki66/finn_yolov5.git) |
+| YOLOv8 | [surajkarki66/finn_yolov8](https://github.com/surajkarki66/finn_yolov8.git) |
+| YOLOv8-OBB (oriented bounding boxes) | [surajkarki66/YOLOv8-obb-pytorch](https://github.com/surajkarki66/YOLOv8-obb-pytorch.git) |
+
+Each repository includes a **`finn_scripts/`** directory with custom build scripts tailored for that model architecture. These scripts are required to compile the exported ONNX model in FINN+ — a generic `finn build` configuration is not sufficient for YOLO models.
+
+**Typical workflow:**
+
+1. Clone the matching QAT repository and train/export your quantized model (ONNX).
+2. Copy or mount the exported model and the corresponding `finn_scripts/` from that repository into your FINN+ workspace.
+3. Start the FINN+ Docker environment (`./run-docker.sh`).
+4. Run the custom build script from `finn_scripts/` (inside the container):
+
+```bash
+# Example — exact script name and arguments vary per repository
+cd /path/to/finn_scripts
+python build.py
+```
+
+Refer to each QAT repository for training instructions, ONNX export steps, and the specific `finn_scripts/` usage for that model.
+
 ## Troubleshooting
 
 ### Xilinx tools not found
