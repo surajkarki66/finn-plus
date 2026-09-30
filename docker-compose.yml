@@ -1,0 +1,41 @@
+services:
+  finn:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: finn-plus:22.04
+    container_name: finn-plus
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/workspace
+      - ../FINN+:/yolo_build
+      - finn_build:/finn_build
+      - finn_deps:/finn_deps
+      # Host Xilinx install
+      - ${FINN_XILINX_PATH}:${FINN_XILINX_PATH}:ro
+      # Alveo platforms + XRT
+      - ${PLATFORM_REPO_PATHS}:${PLATFORM_REPO_PATHS}:ro
+
+    environment:
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+      CONTAINER_USER: finn
+      FINN_XILINX_PATH: ${FINN_XILINX_PATH}
+      FINN_XILINX_VERSION: ${FINN_XILINX_VERSION:-2024.2}
+      FINN_BUILD_DIR: /finn_build
+      FINN_DEPS: /finn_deps
+      NUM_DEFAULT_WORKERS: ${NUM_DEFAULT_WORKERS:-4}
+    
+      # Alveo / Vitis
+      PLATFORM_REPO_PATHS: ${PLATFORM_REPO_PATHS}
+      VIVADO_PATH: ${VIVADO_PATH:-}
+      VITIS_PATH: ${VITIS_PATH:-}
+      HLS_PATH: ${HLS_PATH:-}
+    ulimits:
+      stack: -1
+
+volumes:
+  finn_build:
+  finn_deps:
