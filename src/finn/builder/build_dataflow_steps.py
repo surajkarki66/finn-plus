@@ -273,7 +273,8 @@ def _generate_pblock_svg(report_json_path, svg_path):
     for pblock_name, data in regions.items():
         m = slice_pat.search(data.get("grid_ranges", ""))
         if m:
-            x0, y0, x1, y1 = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            x0, y0, x1, y1 = int(m.group(1)), int(
+                m.group(2)), int(m.group(3)), int(m.group(4))
             # Fall back on pblock extents if device extents not in report
             dev_max_x = max(dev_max_x, x1)
             dev_max_y = max(dev_max_y, y1)
@@ -389,7 +390,8 @@ def verify_step(
     model = model.transform(GiveUniqueNodeNamesRecursive())
     model = model.transform(GiveReadableTensorNames())
     if cfg.verify_steps is None:
-        raise FINNUserError("verify_steps is not set in config, but verification step was called")
+        raise FINNUserError(
+            "verify_steps is not set in config, but verification step was called")
     (in_npy_all, exp_out_npy_all) = cast(
         "tuple[np.ndarray, np.ndarray]", cfg._resolve_verification_io_pair()
     )
@@ -406,11 +408,13 @@ def verify_step(
         if need_parent:
             assert cfg.save_intermediate_models, "Enable save_intermediate_models for verification"
             parent_model_fn = intermediate_models_dir / "dataflow_parent.onnx"
-            child_model_fn = intermediate_models_dir / f"verify_{step_name}.onnx"
+            child_model_fn = intermediate_models_dir / \
+                f"verify_{step_name}.onnx"
             model.save(child_model_fn)
             parent_model = ModelWrapper(str(parent_model_fn))
             out_tensor_name = parent_model.get_first_global_out()
-            exp_ishape = parent_model.get_tensor_shape(parent_model.get_first_global_in())
+            exp_ishape = parent_model.get_tensor_shape(
+                parent_model.get_first_global_in())
             if exp_ishape is None:
                 raise FINNUserError(
                     f"Unable to determine expected input shape for verification. "
@@ -426,7 +430,8 @@ def verify_step(
                 in_npy = in_npy.reshape(target_ishape)
             out_dict = cast(
                 "dict[str, np.ndarray]",
-                execute_parent(parent_model_fn, child_model_fn, in_npy, return_full_ctx=True),
+                execute_parent(parent_model_fn, child_model_fn,
+                               in_npy, return_full_ctx=True),
             )
             out_npy = out_dict[out_tensor_name]
             if cfg.verify_nodewise_report:
@@ -437,7 +442,8 @@ def verify_step(
                         "Node-wise verification report is not available for stitched-IP rtlsim"
                     )
                 else:
-                    sdp_node = parent_model.get_nodes_by_op_type("StreamingDataflowPartition")[0]
+                    sdp_node = parent_model.get_nodes_by_op_type(
+                        "StreamingDataflowPartition")[0]
                     child_inputs = {
                         child_inp.name: out_dict[sdp_node.input[i]]
                         for i, child_inp in enumerate(model.graph.input)
@@ -453,7 +459,8 @@ def verify_step(
                         child_inputs,
                         out_dict,
                         sdp_node.name + "_",
-                        verify_out_dir / f"verify_{step_name}_{b}_nodewise.txt",
+                        verify_out_dir /
+                        f"verify_{step_name}_{b}_nodewise.txt",
                         cfg.verification_atol,
                         cfg.verification_rtol,
                         header=f"Node-wise comparison of {step_name} against the Python "
@@ -478,7 +485,8 @@ def verify_step(
                 log.info("Attempting to force model shape on verification input")
                 in_npy = in_npy.reshape(target_ishape)
             inp_dict = {inp_tensor_name: in_npy}
-            out_dict = execute_onnx(model, inp_dict, True, pre_hook=rtlsim_pre_hook)
+            out_dict = execute_onnx(
+                model, inp_dict, True, pre_hook=rtlsim_pre_hook)
             out_npy = out_dict[out_tensor_name]
         exp_oshape = exp_out_npy.shape
         if out_npy.shape != exp_oshape:
@@ -496,7 +504,8 @@ def verify_step(
         num_elements = out_npy.size
         abs_error = np.abs(out_npy - exp_out_npy)
         # Avoid division by zero for relative error
-        exp_out_npy_safe = np.where(exp_out_npy == 0, np.finfo(float).eps, exp_out_npy)
+        exp_out_npy_safe = np.where(
+            exp_out_npy == 0, np.finfo(float).eps, exp_out_npy)
         rel_error = np.abs((out_npy - exp_out_npy) / exp_out_npy_safe)
         res2 = np.mean(abs_error) <= cfg.verification_mean_atol
         res3 = np.mean(rel_error) <= cfg.verification_mean_rtol
@@ -505,18 +514,21 @@ def verify_step(
         all_res = all_res and res
         res_str = res_to_str[bool(res)]
         if cfg.verify_save_full_context and (rtlsim_pre_hook is None):
-            verification_output_fn = verify_out_dir / f"verify_{step_name}_{b}_{res_str}.npz"
+            verification_output_fn = verify_out_dir / \
+                f"verify_{step_name}_{b}_{res_str}.npz"
             np.savez(verification_output_fn, **out_dict)
 
             # Log tensor statistics for debugging (only output tensors, in topological order)
             tensors_to_log = ["global_in"]
             if need_parent:
                 if parent_model is None:
-                    raise FINNUserError("Parent model is needed for verification but is None")
+                    raise FINNUserError(
+                        "Parent model is needed for verification but is None")
                 for node in parent_model.graph.node:
                     for output in node.output:
                         tensors_to_log.append(output)  # noqa: PERF402
-                sdp_node = parent_model.get_nodes_by_op_type("StreamingDataflowPartition")[0]
+                sdp_node = parent_model.get_nodes_by_op_type(
+                    "StreamingDataflowPartition")[0]
                 sdp_prefix = sdp_node.name + "_"
             else:
                 sdp_prefix = ""
@@ -549,7 +561,8 @@ def verify_step(
                 # Write data rows
                 for stat in tensor_stats:
                     # Shorten/truncate long names and shapes
-                    tensor_name = stat["tensor"].replace("GenericPartition", "GP")[:39]
+                    tensor_name = stat["tensor"].replace(
+                        "GenericPartition", "GP")[:39]
                     shape_str = str(stat["shape"])[:19]
                     f.write(
                         f"{tensor_name:<40} {shape_str:<20} {stat['mean']:<12.6f} "
@@ -562,23 +575,33 @@ def verify_step(
                 f.write("=" * 108 + "\n")
 
                 f.write(f"Number of elements:           {num_elements}\n")
-                f.write(f"Min absolute error:           {np.min(abs_error):.6e}\n")
-                f.write(f"Max absolute error:           {np.max(abs_error):.6e}\n")
-                f.write(f"Mean absolute error:          {np.mean(abs_error):.6e}\n")
-                f.write(f"Min relative error:           {np.min(rel_error):.6e}\n")
-                f.write(f"Max relative error:           {np.max(rel_error):.6e}\n")
-                f.write(f"Mean relative error:          {np.mean(rel_error):.6e}\n")
+                f.write(
+                    f"Min absolute error:           {np.min(abs_error):.6e}\n")
+                f.write(
+                    f"Max absolute error:           {np.max(abs_error):.6e}\n")
+                f.write(
+                    f"Mean absolute error:          {np.mean(abs_error):.6e}\n")
+                f.write(
+                    f"Min relative error:           {np.min(rel_error):.6e}\n")
+                f.write(
+                    f"Max relative error:           {np.max(rel_error):.6e}\n")
+                f.write(
+                    f"Mean relative error:          {np.mean(rel_error):.6e}\n")
                 f.write(
                     f"Tolerance per element:        atol={cfg.verification_atol:.6e} + "
                     f"rtol={cfg.verification_rtol:.6e}\n"
                 )
-                f.write(f"Tolerance for mean abs. err:  {cfg.verification_mean_atol:.6e}\n")
-                f.write(f"Tolerance for mean rel. err:  {cfg.verification_mean_rtol:.6e}\n")
+                f.write(
+                    f"Tolerance for mean abs. err:  {cfg.verification_mean_atol:.6e}\n")
+                f.write(
+                    f"Tolerance for mean rel. err:  {cfg.verification_mean_rtol:.6e}\n")
                 f.write(f"Verification result:          {res_str}\n")
         else:
             if cfg.verify_save_full_context:
-                log.warning("Warning: Unable to save the full context when using MLO")
-            verification_output_fn = verify_out_dir / f"verify_{step_name}_{b}_{res_str}.npy"
+                log.warning(
+                    "Warning: Unable to save the full context when using MLO")
+            verification_output_fn = verify_out_dir / \
+                f"verify_{step_name}_{b}_{res_str}.npy"
             np.save(verification_output_fn, out_npy)
 
         if cfg.verify_save_rtlsim_waveforms:
@@ -591,9 +614,11 @@ def verify_step(
             if step_name == "node_by_node_rtlsim":
                 for node in model.graph.node:
                     node_inst = getCustomOp(node)
-                    node_wdb_path = cast("str", node_inst.get_nodeattr("rtlsim_trace"))
+                    node_wdb_path = cast(
+                        "str", node_inst.get_nodeattr("rtlsim_trace"))
                     if node_wdb_path is not None and Path(node_wdb_path).is_file():
-                        new_node_wdb_path = node_wdb_path.replace(".wdb", f"_{b}.wdb")
+                        new_node_wdb_path = node_wdb_path.replace(
+                            ".wdb", f"_{b}.wdb")
                         shutil.move(node_wdb_path, new_node_wdb_path)
 
     log.info(f"Verification for {step_name} : {res_to_str[bool(all_res)]}")
@@ -617,7 +642,8 @@ def step_hw_codegen(
             if node_inst.get_nodeattr("debug_log_path") == "":
                 prefix = f"{parent_node}_" if parent_node else ""
                 node_inst.set_nodeattr(
-                    "debug_log_path", str(fifo_log_dir / f"{prefix}{node.name}.log")
+                    "debug_log_path", str(
+                        fifo_log_dir / f"{prefix}{node.name}.log")
                 )
     model = model.transform(
         PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period()),
@@ -639,7 +665,8 @@ def step_hw_ipgen(
     # Emit resource consumption reports
     report_dir = cfg.get_report_directory()
     estimate_layer_resources_hls = model.analysis(hls_synth_res_estimation)
-    estimate_layer_resources_hls["total"] = aggregate_dict_keys(estimate_layer_resources_hls)
+    estimate_layer_resources_hls["total"] = aggregate_dict_keys(
+        estimate_layer_resources_hls)
     filename = (
         "estimate_layer_resources_hls.json"
         if parent_node is None
@@ -679,8 +706,10 @@ def step_hw_ipgen(
                 # Set rtlsim_trace on each node BEFORE PrepareRTLSim so compilation uses debug=True
                 for node in model.graph.node:
                     node_inst = getCustomOp(node)
-                    node_inst.set_nodeattr("rtlsim_trace", f"{abspath}/{node.name}_rtlsim.wdb")
-            model = model.transform(PrepareRTLSim(behav=cfg.verify_rtlsim_behavioral))
+                    node_inst.set_nodeattr(
+                        "rtlsim_trace", f"{abspath}/{node.name}_rtlsim.wdb")
+            model = model.transform(PrepareRTLSim(
+                behav=cfg.verify_rtlsim_behavioral))
             model = model.transform(SetExecMode("rtlsim"))
             verify_step(model, cfg, "node_by_node_rtlsim", need_parent=True)
             # Clear rtlsim_trace attributes to prevent later simulations from
@@ -709,7 +738,8 @@ def step_set_fifo_depths(
     if cfg.auto_fifo_depths:
         if cfg.fifosim_save_waveform:
             report_dir = cfg.get_report_directory()
-            model.set_metadata_prop("rtlsim_trace", str(report_dir.resolve() / "fifosim_trace.wdb"))
+            model.set_metadata_prop("rtlsim_trace", str(
+                report_dir.resolve() / "fifosim_trace.wdb"))
         if cfg.auto_fifo_strategy == AutoFIFOSizingMethod.DISTRIBUTED_SIMULATION:
             requested_sim_comm_mode = cfg.fifosim_comm_mode.lower()
             # Make the request explicit on the model so both build and run transforms
@@ -741,7 +771,8 @@ def step_set_fifo_depths(
                 # (shared with simulation_build/simulation_connected) assigns ranks/workers
                 # using this same host list, and so the MPI launcher's -H flag later matches.
                 model.set_metadata_prop(
-                    "sim_mpi_hosts", ",".join([f"{h}:{local_cores}" for h in hosts])
+                    "sim_mpi_hosts", ",".join(
+                        [f"{h}:{local_cores}" for h in hosts])
                 )
                 distribute_mpi_ranks(model)
                 log.info(
@@ -758,7 +789,8 @@ def step_set_fifo_depths(
                     if parent_node is not None
                     else "fifosim_trace.wdb"
                 )
-                model.set_metadata_prop("rtlsim_trace", str(report_dir.absolute() / tracefile))
+                model.set_metadata_prop("rtlsim_trace", str(
+                    report_dir.absolute() / tracefile))
 
             model = model.transform(
                 BuildSimulation(
@@ -802,7 +834,8 @@ def step_set_fifo_depths(
 
             # Clean up model
             model = model.transform(SortGraph())
-            model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
+            model = model.transform(
+                GiveUniqueNodeNamesRecursive(prefix=parent_node))
             model = model.transform(GiveReadableTensorNames())
 
             # Save the exact folding configuration for the live-sizing follow-up build.
@@ -816,14 +849,16 @@ def step_set_fifo_depths(
                     node_inst = getCustomOp(node)
                     try:
                         if node_inst.get_nodeattr("runtime_writeable_weights") == 1:
-                            node_inst.set_nodeattr("runtime_writeable_weights", 0)
+                            node_inst.set_nodeattr(
+                                "runtime_writeable_weights", 0)
                             if node_inst.get_nodeattr("ram_style") == "ultra":
                                 node_inst.set_nodeattr("ram_style", "block")
                     except AttributeError:
                         pass
                     try:
                         if node_inst.get_nodeattr("mem_mode") == "external":
-                            node_inst.set_nodeattr("mem_mode", "internal_decoupled")
+                            node_inst.set_nodeattr(
+                                "mem_mode", "internal_decoupled")
                     except AttributeError:
                         pass
                     try:
@@ -840,7 +875,8 @@ def step_set_fifo_depths(
 
             # Clean up model
             model = model.transform(SortGraph())
-            model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
+            model = model.transform(
+                GiveUniqueNodeNamesRecursive(prefix=parent_node))
             model = model.transform(GiveReadableTensorNames())
 
             # Set impl_style + ID attributes
@@ -863,14 +899,17 @@ def step_set_fifo_depths(
             model = model.transform(InsertDWC())
             model = model.transform(InsertFIFO(create_shallow_fifos=True))
             model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-            model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
+            model = model.transform(
+                GiveUniqueNodeNamesRecursive(prefix=parent_node))
             model = model.transform(GiveReadableTensorNames())
         else:
-            raise FINNUserError("Unsupported auto_fifo_strategy: " + cfg.auto_fifo_strategy)
+            raise FINNUserError(
+                "Unsupported auto_fifo_strategy: " + cfg.auto_fifo_strategy)
 
     else:
         if cfg.fifo_config_file is None:
-            raise FINNUserError("auto_fifo_depths is set to False but no fifo_config_file provided")
+            raise FINNUserError(
+                "auto_fifo_depths is set to False but no fifo_config_file provided")
         log.info(
             f"auto_fifo_depths is set to False, applying FIFO sizes from {cfg.fifo_config_file}"
         )
@@ -880,7 +919,8 @@ def step_set_fifo_depths(
         # set by ApplyConfig, so create_shallow_fifos=True
         model = model.transform(InsertFIFO(create_shallow_fifos=True))
         model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()))
-        model = model.transform(GiveUniqueNodeNamesRecursive(prefix=parent_node))
+        model = model.transform(
+            GiveUniqueNodeNamesRecursive(prefix=parent_node))
         model = model.transform(GiveReadableTensorNames())
         model = model.transform(ApplyFIFODepthsFromFile(cfg.fifo_config_file))
 
@@ -893,7 +933,8 @@ def step_set_fifo_depths(
             if node_inst.get_nodeattr("ram_style") != "auto":
                 continue
             if node_inst.resolve_ram_style() in ("block", "ultra"):
-                node_inst.set_nodeattr("ram_style", cfg.large_fifo_mem_style.value)
+                node_inst.set_nodeattr(
+                    "ram_style", cfg.large_fifo_mem_style.value)
 
     # Generate a dedicated report about final FIFO sizes.
     fifo_info = {
@@ -915,7 +956,8 @@ def step_set_fifo_depths(
         fifo_info["fifo_depths"][node.name] = depth
         fifo_info["fifo_sizes"][node.name] = fifo_size
         fifo_info["fifo_sizes_effective"][node.name] = fifo_size_effective
-        fifo_info["impl_style"][node.name] = node_inst.get_nodeattr("impl_style")
+        fifo_info["impl_style"][node.name] = node_inst.get_nodeattr(
+            "impl_style")
         fifo_info["ram_style"][node.name] = node_inst.get_nodeattr("ram_style")
         total_fifo_size += fifo_size
         total_fifo_size_effective += fifo_size_effective
@@ -957,7 +999,8 @@ def step_generate_hardware(
         loop_model.set_metadata_prop("parent_node", node.name)
         loop_model.set_metadata_prop("is_mlo", "1")
         # Recursion here
-        loop_model = step_generate_hardware(loop_model, cfg, parent_node=node.name)
+        loop_model = step_generate_hardware(
+            loop_model, cfg, parent_node=node.name)
 
         node_inst.set_nodeattr("body", loop_model.graph)
     # Codegen for the current model
@@ -1107,7 +1150,8 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
         model = apply_if_relevant(
             model,
             ["MultiThreshold", "Quant"],
-            InferRequantLayer(bitwidth_threshold=cfg.requant_bitwidth_threshold),
+            InferRequantLayer(
+                bitwidth_threshold=cfg.requant_bitwidth_threshold),
             "high-bitwidth quantization as requant",
         )
         # Then: Convert remaining MultiThreshold to Thresholding
@@ -1135,14 +1179,17 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
         "binary matmul layers",
     )
     model = apply_if_relevant(
-        model, ["MatMul"], InferQuantizedMatrixVectorActivation(), "quantized matmul layers"
+        model, ["MatMul"], InferQuantizedMatrixVectorActivation(
+        ), "quantized matmul layers"
     )
     model = apply_if_relevant(
-        model, ["MatMul"], InferVectorVectorActivation(), "vector-vector activation"
+        model, ["MatMul"], InferVectorVectorActivation(
+        ), "vector-vector activation"
     )
 
     # Classification/output layers
-    model = apply_if_relevant(model, ["TopK"], InferLabelSelectLayer(), "label select layers")
+    model = apply_if_relevant(
+        model, ["TopK"], InferLabelSelectLayer(), "label select layers")
 
     # Input quantization (if any) - high-bitwidth MultiThreshold and Quant as Requant,
     # low-bitwidth MultiThreshold as Thresholding
@@ -1155,7 +1202,8 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
     model = apply_if_relevant(
         model, ["MultiThreshold"], InferThresholdingLayer(), "threshold layers"
     )
-    model = apply_if_relevant(model, ["Pad"], InferFMPadding(), "padding layers")
+    model = apply_if_relevant(
+        model, ["Pad"], InferFMPadding(), "padding layers")
 
     # Convolution-related transformations
     model = apply_if_relevant(
@@ -1170,7 +1218,8 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
         InferPoolFromReduce(),
         "reduce layers",
     )
-    model = apply_if_relevant(model, ["Im2Col"], InferConvInpGen(), "conv input generator")
+    model = apply_if_relevant(
+        model, ["Im2Col"], InferConvInpGen(), "conv input generator")
     # If ConvInpGen derived, run remove cnv to fc flatten transform
     model = apply_if_relevant(
         model, ["ConvolutionInputGenerator"], RemoveCNVtoFCFlatten(), "Flatten"
@@ -1178,10 +1227,13 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
 
     # Streaming operations
     model = apply_if_relevant(
-        model, ["Concat"], InferPad1DLayer(), "1D padding and CLS token insertion"
+        model, ["Concat"], InferPad1DLayer(
+        ), "1D padding and CLS token insertion"
     )
-    model = apply_if_relevant(model, ["Concat"], InferConcatLayer(), "concat layers")
-    model = apply_if_relevant(model, ["Split"], InferSplitLayer(), "split layers")
+    model = apply_if_relevant(
+        model, ["Concat"], InferConcatLayer(), "concat layers")
+    model = apply_if_relevant(
+        model, ["Split"], InferSplitLayer(), "split layers")
 
     # Elementwise operations
     model = apply_if_relevant(
@@ -1203,13 +1255,15 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
         InferElementwiseBinaryOperation(),
         "elementwise binary operations",
     )
-    model = apply_if_relevant(model, ["Where"], InferWhereLayer(), "where selection")
+    model = apply_if_relevant(
+        model, ["Where"], InferWhereLayer(), "where selection")
     model = apply_if_relevant(
         model, ["Relu"], InferReLUAsElementwiseMax(), "ReLU as elementwise max"
     )
 
     # Upsampling and resizing
-    model = apply_if_relevant(model, ["Upsample"], InferUpsample(), "upsample layers")
+    model = apply_if_relevant(
+        model, ["Upsample"], InferUpsample(), "upsample layers")
 
     # Global pooling
     model = apply_if_relevant(
@@ -1218,12 +1272,15 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
 
     # Gather-derived layers. SelectToken must run first because scalar Gather
     # removes the selected axis, whereas the generic Crop keeps it.
-    model = apply_if_relevant(model, ["Gather"], InferSelectTokenLayer(), "token selection layers")
+    model = apply_if_relevant(
+        model, ["Gather"], InferSelectTokenLayer(), "token selection layers")
     model = apply_if_relevant(model, ["Gather"], InferCrop(), "crop layers")
-    model = apply_if_relevant(model, ["Gather"], InferLookupLayer(), "lookup layers")
+    model = apply_if_relevant(
+        model, ["Gather"], InferLookupLayer(), "lookup layers")
 
     # Activation functions
-    model = apply_if_relevant(model, ["Softmax"], InferHWSoftmax(), "softmax layers")
+    model = apply_if_relevant(
+        model, ["Softmax"], InferHWSoftmax(), "softmax layers")
     # Piecewise polynomial activations (GELU, SiLU, Sigmoid, Tanh)
     model = apply_if_relevant(
         model,
@@ -1267,7 +1324,8 @@ def step_convert_to_hw(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWr
     # Shuffle inference (should come after InferDataLayouts and handles Transpose+Reshape patterns)
     # InferShuffle skips first Transpose by default; override to convert all if disabled
     if cfg.infer_shuffle_skip_first:
-        model = apply_if_relevant(model, ["Transpose"], InferShuffle(), "shuffle/transpose layers")
+        model = apply_if_relevant(
+            model, ["Transpose"], InferShuffle(), "shuffle/transpose layers")
     else:
         model = apply_if_relevant(
             model,
@@ -1349,12 +1407,14 @@ def step_create_dataflow_partition(model: ModelWrapper, cfg: DataflowBuildConfig
         )
     )
     sdp_nodes = parent_model.get_nodes_by_op_type("StreamingDataflowPartition")
-    assert len(sdp_nodes) == 1, "Only a single StreamingDataflowPartition supported."
+    assert len(
+        sdp_nodes) == 1, "Only a single StreamingDataflowPartition supported."
     sdp_node = sdp_nodes[0]
     sdp_node = getCustomOp(sdp_node)
     dataflow_model_filename = cast("str", sdp_node.get_nodeattr("model"))
     if cfg.save_intermediate_models:
-        parent_model.save(str(cfg.get_intermediate_models_directory() / "dataflow_parent.onnx"))
+        parent_model.save(
+            str(cfg.get_intermediate_models_directory() / "dataflow_parent.onnx"))
     model = ModelWrapper(dataflow_model_filename)
 
     # create a configuration json file that can be used to set the specialize layer config
@@ -1362,7 +1422,8 @@ def step_create_dataflow_partition(model: ModelWrapper, cfg: DataflowBuildConfig
         "preferred_impl_style",
     ]
     extract_model_config_to_json(
-        model, Path(cfg.output_dir) / "template_specialize_layers_config.json", attrs
+        model, Path(cfg.output_dir) /
+        "template_specialize_layers_config.json", attrs
     )
 
     return model
@@ -1400,9 +1461,12 @@ def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig) 
         has_shuffle = bool(loop_model.get_nodes_by_op_type("Shuffle"))
 
     if has_shuffle:
-        model = model.transform(ShuffleDecomposition(), apply_to_subgraphs=True)
-        model = model.transform(InferInnerOuterShuffles(), apply_to_subgraphs=True)
-        model = model.transform(SpecializeLayers(cfg._resolve_fpga_part()), apply_to_subgraphs=True)
+        model = model.transform(ShuffleDecomposition(),
+                                apply_to_subgraphs=True)
+        model = model.transform(
+            InferInnerOuterShuffles(), apply_to_subgraphs=True)
+        model = model.transform(SpecializeLayers(
+            cfg._resolve_fpga_part()), apply_to_subgraphs=True)
         model = model.transform(InferShapes(), apply_to_subgraphs=True)
         model = model.transform(InferDataTypes(), apply_to_subgraphs=True)
         model = model.transform(GiveUniqueNodeNamesRecursive())
@@ -1410,10 +1474,12 @@ def step_transpose_decomposition(model: ModelWrapper, cfg: DataflowBuildConfig) 
         for node in loop_nodes:
             node_inst = cast("FINNLoop", getCustomOp(node))
             loop_model = cast("ModelWrapper", node_inst.get_nodeattr("body"))
-            loop_model = loop_model.transform(GiveUniqueNodeNamesRecursive(prefix=node.name))
+            loop_model = loop_model.transform(
+                GiveUniqueNodeNamesRecursive(prefix=node.name))
             node_inst.set_nodeattr("body", loop_model.graph)
     else:
-        log.info("Model doesn't contain any Shuffle nodes, skipping step_transpose_decomposition.")
+        log.info(
+            "Model doesn't contain any Shuffle nodes, skipping step_transpose_decomposition.")
     return model
 
 
@@ -1458,7 +1524,8 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
         )
 
     else:
-        log.warning("No target_fps provided, skipping step_target_fps_parallelization.")
+        log.warning(
+            "No target_fps provided, skipping step_target_fps_parallelization.")
 
     return model
 
@@ -1469,7 +1536,8 @@ def step_apply_folding_config(model: ModelWrapper, cfg: DataflowBuildConfig) -> 
     and other attributes, if config file is specified."""
     model = model.transform(GiveUniqueNodeNamesRecursive())
     if cfg.folding_config_file is not None:
-        model = model.transform(ApplyConfig(cfg.folding_config_file), apply_to_subgraphs=True)
+        model = model.transform(ApplyConfig(
+            cfg.folding_config_file), apply_to_subgraphs=True)
 
         # Write the changed configuration back as confirmation for the user
         hw_attrs = [
@@ -1494,7 +1562,8 @@ def step_apply_folding_config(model: ModelWrapper, cfg: DataflowBuildConfig) -> 
             model, cfg.get_report_directory() / "applied_folding_config.json", hw_attrs
         )
     else:
-        log.info("No folding config json provided, skipping step_apply_folding_config.")
+        log.info(
+            "No folding config json provided, skipping step_apply_folding_config.")
 
     return model
 
@@ -1510,7 +1579,8 @@ def generate_empirical_estimate_reports(
         log.info("No empirical QoR models available (FINN_QOR_MODEL_DIR), skipping")
         return
     resources: dict[str, dict[str, int | float]] = model.analysis(
-        partial(empirical_res_estimation, fpgapart=cfg._resolve_fpga_part(), models=models)
+        partial(empirical_res_estimation,
+                fpgapart=cfg._resolve_fpga_part(), models=models)
     )
     resources["total"] = aggregate_dict_keys(resources)
     with (report_dir / f"estimate_layer_resources_empirical{suffix}.json").open("w") as f:
@@ -1539,7 +1609,8 @@ def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig
         estimate_layer_resources: dict[str, dict[str, int | float]] = model.analysis(
             partial(res_estimation, fpgapart=cfg._resolve_fpga_part())
         )
-        estimate_layer_resources["total"] = aggregate_dict_keys(estimate_layer_resources)
+        estimate_layer_resources["total"] = aggregate_dict_keys(
+            estimate_layer_resources)
         with (report_dir / "estimate_layer_resources.json").open("w") as f:
             json.dump(estimate_layer_resources, f, indent=2)
         estimate_layer_resources_complete = model.analysis(
@@ -1563,21 +1634,25 @@ def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig
             estimate_layer_resources = loop_model.analysis(
                 partial(res_estimation, fpgapart=cfg._resolve_fpga_part())
             )
-            estimate_layer_resources["total"] = aggregate_dict_keys(estimate_layer_resources)
+            estimate_layer_resources["total"] = aggregate_dict_keys(
+                estimate_layer_resources)
             with (report_dir / f"estimate_layer_resources_{node.name}.json").open("w") as f:
                 json.dump(estimate_layer_resources, f, indent=2)
             estimate_layer_resources_complete = loop_model.analysis(
-                partial(res_estimation_complete, fpgapart=cfg._resolve_fpga_part())
+                partial(res_estimation_complete,
+                        fpgapart=cfg._resolve_fpga_part())
             )
             with (report_dir / f"estimate_layer_config_alternatives_{node.name}.json").open(
                 "w"
             ) as f:
                 json.dump(estimate_layer_resources_complete, f, indent=2)
-            generate_empirical_estimate_reports(loop_model, cfg, report_dir, f"_{node.name}")
+            generate_empirical_estimate_reports(
+                loop_model, cfg, report_dir, f"_{node.name}")
 
         if not is_mlo(model):
             # need to call AnnotateCycles before dataflow_performance
-            model = model.transform(AnnotateCycles(), apply_to_subgraphs=apply_to_subgraphs)
+            model = model.transform(
+                AnnotateCycles(), apply_to_subgraphs=apply_to_subgraphs)
             estimate_network_performance: dict[str, str | int | float] = dict(
                 model.analysis(dataflow_performance)
             )
@@ -1588,7 +1663,8 @@ def step_generate_estimate_reports(model: ModelWrapper, cfg: DataflowBuildConfig
             )
             estimate_network_performance["estimated_throughput_fps"] = est_fps
             est_latency_ns = (
-                cast("int", estimate_network_performance["critical_path_cycles"])
+                cast(
+                    "int", estimate_network_performance["critical_path_cycles"])
                 * cfg.synth_clk_period_ns
             )
             estimate_network_performance["estimated_latency_ns"] = est_latency_ns
@@ -1618,8 +1694,10 @@ def step_minimize_bit_width_datatype_only(
     an INT64 placeholder that a datatype-only pass leaves in place, so specialization
     would still see the inflated widths. This step is kept for configurations ported
     from upstream."""
-    model = model.transform(MinimizeWeightBitWidth(datatype_only=True), apply_to_subgraphs=True)
-    model = model.transform(MinimizeAccumulatorWidth(datatype_only=True), apply_to_subgraphs=True)
+    model = model.transform(MinimizeWeightBitWidth(
+        datatype_only=True), apply_to_subgraphs=True)
+    model = model.transform(MinimizeAccumulatorWidth(
+        datatype_only=True), apply_to_subgraphs=True)
     model = model.transform(InferDataTypes(), apply_to_subgraphs=True)
     return model
 
@@ -1628,8 +1706,10 @@ def _minimize_bit_width(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelW
     """Tighten the weight and accumulator bit widths for each layer and round/clip
     the thresholds accordingly."""
     if cfg.minimize_bit_width:
-        model = model.transform(MinimizeWeightBitWidth(), apply_to_subgraphs=True)
-        model = model.transform(MinimizeAccumulatorWidth(), apply_to_subgraphs=True)
+        model = model.transform(MinimizeWeightBitWidth(),
+                                apply_to_subgraphs=True)
+        model = model.transform(
+            MinimizeAccumulatorWidth(), apply_to_subgraphs=True)
         # make sure the changed datatypes are propagated through the network
         model = model.transform(InferDataTypes(), apply_to_subgraphs=True)
     else:
@@ -1639,7 +1719,8 @@ def _minimize_bit_width(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelW
     model = model.transform(InferDataTypes(), apply_to_subgraphs=True)
     # Run MinimizeWeightBitWidth again to minimize threshold datatypes after rounding/clipping
     if cfg.minimize_bit_width:
-        model = model.transform(MinimizeWeightBitWidth(), apply_to_subgraphs=True)
+        model = model.transform(MinimizeWeightBitWidth(),
+                                apply_to_subgraphs=True)
         model = model.transform(InferDataTypes(), apply_to_subgraphs=True)
     return model
 
@@ -1672,7 +1753,8 @@ def step_minimize_bit_width(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
             for loop_node in model.get_nodes_by_op_type("FINNLoop"):
                 loop_inst = getCustomOp(loop_node)
                 ctx_path = (
-                    verify_out_dir / f"iteration_context_{loop_node.name}_folded_hls_cppsim.npz"
+                    verify_out_dir /
+                    f"iteration_context_{loop_node.name}_folded_hls_cppsim.npz"
                 )
                 loop_inst.set_nodeattr("iteration_context_path", str(ctx_path))
         verify_step(model, cfg, "folded_hls_cppsim", need_parent=True)
@@ -1694,7 +1776,8 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
     # dfx_tuser_passthrough, which regenerate tlast internally via NUM_OUTPUT_BEATS.
     if cfg.enable_instrumentation and cfg.multi_dnn_config_path is None:
         if cfg.shell_flow_type == ShellFlowType.VITIS_ALVEO:
-            raise FINNUserError("Instrumentation is not yet implemented for Alveo/Vitis flow")
+            raise FINNUserError(
+                "Instrumentation is not yet implemented for Alveo/Vitis flow")
         model = model.transform(
             InsertTLastMarker(
                 # only insert marker on output (input TLAST is ignored for these use-cases anyway)
@@ -1710,7 +1793,8 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
         model.graph.node[-1].name = "TLastMarker_0"
         # re-run codegen and HLS IP gen, will affect only the new TLastMarker layer assuming
         # all other IPs have been generated already
-        model = model.transform(PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period()))
+        model = model.transform(
+            PrepareIP(cfg._resolve_fpga_part(), cfg._resolve_hls_clk_period()))
         model = model.transform(HLSSynthIP())
 
     if DataflowOutputType.STITCHED_IP in cast("list[DataflowOutputType]", cfg.generate_outputs):
@@ -1733,7 +1817,8 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
         log.info(f"Vivado stitched IP written into {stitched_ip_dir}")
 
         if cfg.stitched_ip_gen_dcp:
-            copy_synthesis_reports(model, Path(report_dir), name_prefix="post_synth_resources_dcp")
+            copy_synthesis_reports(model, Path(
+                report_dir), name_prefix="post_synth_resources_dcp")
             post_synth_resources = model.analysis(post_synth_res)
             with (report_dir / "post_synth_resources_dcp.json").open("w") as f:
                 json.dump(post_synth_resources, f, indent=2)
@@ -1769,12 +1854,14 @@ def step_create_stitched_ip(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
                 waveform_dir = verify_out_dir / "stitched_ip_rtlsim_waveforms"
                 waveform_dir.mkdir(parents=True, exist_ok=True)
                 abspath = waveform_dir.absolute()
-                verify_model.set_metadata_prop("rtlsim_trace", str(abspath / "verify_rtlsim.wdb"))
+                verify_model.set_metadata_prop(
+                    "rtlsim_trace", str(abspath / "verify_rtlsim.wdb"))
             if cfg.verify_rtlsim_behavioral:
                 verify_model.set_metadata_prop("rtlsim_behavioral", "1")
             # MLO and non-MLO both route through the parent (need_parent=True); the
             # stitched child self-derives its FINNLoop memory-init pre-hook (rtlsim_exec).
-            verify_step(verify_model, cfg, "stitched_ip_rtlsim", need_parent=True)
+            verify_step(verify_model, cfg,
+                        "stitched_ip_rtlsim", need_parent=True)
     return model
 
 
@@ -1799,7 +1886,8 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
     if cfg.verify_save_rtlsim_waveforms:
         # set depth to 3 for layer-by-layer visibility
         os.environ["RTLSIM_TRACE_DEPTH"] = "3"
-        model.set_metadata_prop("rtlsim_trace", str(report_dir.resolve() / "rtlsim_perf_trace.wdb"))
+        model.set_metadata_prop("rtlsim_trace", str(
+            report_dir.resolve() / "rtlsim_perf_trace.wdb"))
 
     if (not cfg.auto_fifo_depths and cfg.fifo_config_file is not None) or (
         cfg.auto_fifo_depths and cfg.auto_fifo_strategy == AutoFIFOSizingMethod.FORCE_MINIMAL_FIFOS
@@ -1857,7 +1945,8 @@ def step_measure_rtlsim_performance(model: ModelWrapper, cfg: DataflowBuildConfi
             del res["fifo_depth"]
             del res["fifo_cycles_until_first_valid"]
             cycle_per_sec = 1e9 / cfg.synth_clk_period_ns
-            res["throughput_fps"] = cycle_per_sec / res["intervals"][0]  # type: ignore
+            res["throughput_fps"] = cycle_per_sec / \
+                res["intervals"][0]  # type: ignore
             # Attach entry to output
             outputs.append(res)
 
@@ -1894,7 +1983,8 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrap
             copy_function=shutil.copyfile,
         )
 
-        log.info("C++ driver written into " + str(cfg.get_driver_directory() / "cpp"))
+        log.info("C++ driver written into " +
+                 str(cfg.get_driver_directory() / "cpp"))
     else:
         log.warning(
             """Neither DataflowOutputType.PYNQ_DRIVER nor DataflowOutputType.CPP_DRIVER
@@ -1937,7 +2027,8 @@ def step_make_driver(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWrap
             cfg.get_driver_directory(),
             dirs_exist_ok=True,
         )
-        log.info("PYNQ Python driver written into " + str(cfg.get_driver_directory()))
+        log.info("PYNQ Python driver written into " +
+                 str(cfg.get_driver_directory()))
     return model
 
 
@@ -1948,7 +2039,8 @@ def step_out_of_context_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig)
     if DataflowOutputType.OOC_SYNTH in cfg.generate_outputs:
         assert DataflowOutputType.STITCHED_IP in cfg.generate_outputs, "OOC needs stitched IP"
         model = model.transform(
-            SynthOutOfContext(part=cfg._resolve_fpga_part(), clk_period_ns=cfg.synth_clk_period_ns)
+            SynthOutOfContext(part=cfg._resolve_fpga_part(),
+                              clk_period_ns=cfg.synth_clk_period_ns)
         )
         report_dir = cfg.get_report_directory()
         ooc_res_dict = model.get_metadata_prop("res_total_ooc_synth")
@@ -1962,7 +2054,8 @@ def step_out_of_context_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig)
         estimate_network_performance = model.analysis(dataflow_performance)
         # add some more metrics to estimated performance
         n_clock_cycles_per_sec = float(ooc_res_dict["fmax_mhz"]) * (10**6)
-        est_fps = n_clock_cycles_per_sec / cast("int", estimate_network_performance["max_cycles"])
+        est_fps = n_clock_cycles_per_sec / \
+            cast("int", estimate_network_performance["max_cycles"])
         ooc_res_dict["estimated_throughput_fps"] = est_fps
         with (report_dir / "ooc_synth_and_timing.json").open("w") as f:
             json.dump(ooc_res_dict, f, indent=2)
@@ -2010,7 +2103,8 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
     match cfg.shell_flow_type:
         case ShellFlowType.VITIS_ALVEO:
             # Insert IODMAs
-            model = model.transform(InsertIODMA(max_intfwidth=cfg.vitis_iodma_intf_max_width))
+            model = model.transform(InsertIODMA(
+                max_intfwidth=cfg.vitis_iodma_intf_max_width))
             model = model.transform(GiveUniqueNodeNamesRecursive())
             model = model.transform(GiveReadableTensorNames())
             model = model.transform(InsertDWC())
@@ -2029,7 +2123,8 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
             if cfg.partitioning_configuration is None:
                 # Single FPGA
                 model = model.transform(Floorplan(cfg.vitis_floorplan_file))
-                model = model.transform(CreateDataflowPartition(str(sdp_partition_dir)))
+                model = model.transform(
+                    CreateDataflowPartition(str(sdp_partition_dir)))
                 model = model.transform(GiveUniqueNodeNamesRecursive())
                 model = model.transform(GiveReadableTensorNames())
             else:
@@ -2056,9 +2151,11 @@ def step_prepare_synthesis(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mod
                                 "StreamingDataflowPartition creation!"
                             )
                 model = model.transform(
-                    CreateNetworkMetadata(pc.communication_kernel, pc.verbosity)
+                    CreateNetworkMetadata(
+                        pc.communication_kernel, pc.verbosity)
                 )
-                model = model.transform(PrepareCommunicationKernels(platform, part, pc))
+                model = model.transform(
+                    PrepareCommunicationKernels(platform, part, pc))
 
             # Create / package XOs for all SDPs
             model = model.transform(BuildAllXOs(part, clk_ns))
@@ -2152,13 +2249,16 @@ def copy_and_rename_bitfiles(
 
     # Copy and rename the files
     if len(list(bitfile_json.keys())) == 1:
-        bitfile_path = bitfile_dir / f"finn-accel{single_device_suffix}{suffix}"
+        bitfile_path = bitfile_dir / \
+            f"finn-accel{single_device_suffix}{suffix}"
         copy(next(iter(bitfile_json.values())), bitfile_path)
         log.info("Stored bitfile at: " + str(bitfile_path))
         if cfg.shell_flow_type == ShellFlowType.VIVADO_ZYNQ:
-            model.set_metadata_prop("bitfile_output", str(bitfile_path.absolute()))
+            model.set_metadata_prop(
+                "bitfile_output", str(bitfile_path.absolute()))
         elif cfg.shell_flow_type == ShellFlowType.VITIS_ALVEO:
-            model.set_metadata_prop("bitfile_output", json.dumps({0: str(bitfile_path.absolute())}))
+            model.set_metadata_prop("bitfile_output", json.dumps(
+                {0: str(bitfile_path.absolute())}))
     else:
         paths = {}
         for device, path in bitfile_json.items():
@@ -2171,7 +2271,8 @@ def copy_and_rename_bitfiles(
     # For Zynq, copy the hwh file too
     if cfg.shell_flow_type == ShellFlowType.VIVADO_ZYNQ:
         # Store synthesis artifacts
-        hw_handoff = get_metadata_prop_path(model, "hw_handoff", must_exist=True)
+        hw_handoff = get_metadata_prop_path(
+            model, "hw_handoff", must_exist=True)
         copy(hw_handoff, bitfile_dir / "finn-accel.hwh")
 
 
@@ -2214,7 +2315,8 @@ def copy_partial_reconfiguration_artifacts(
     partial_bitfiles_dir = model.get_metadata_prop("partial_bitfiles_dir")
     if partial_bitfiles_dir is not None and os.path.isdir(partial_bitfiles_dir):
         partial_bitfile_out_dir = bitfile_dir / "partial_bitstreams"
-        shutil.copytree(partial_bitfiles_dir, partial_bitfile_out_dir, dirs_exist_ok=True)
+        shutil.copytree(partial_bitfiles_dir,
+                        partial_bitfile_out_dir, dirs_exist_ok=True)
         log.info(f"Partial bitstreams copied into {partial_bitfile_out_dir}")
 
     pr_resources_json = model.get_metadata_prop("pr_region_resources_json")
@@ -2258,7 +2360,8 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
     # The actual synthesis step!
     if cfg.shell_flow_type == ShellFlowType.VIVADO_ZYNQ:
         if cfg.board is None:
-            raise FINNUserError("Please specify the 'board' parameter for Zynq builds.")
+            raise FINNUserError(
+                "Please specify the 'board' parameter for Zynq builds.")
         if cfg.instrumentation_no_dma is None:
             raise FINNUserError(
                 "Please specify the " "'instrumentation_no_dma' parameter for Zynq builds."
@@ -2279,7 +2382,8 @@ def step_synthesize_bitfile(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
     elif cfg.shell_flow_type == ShellFlowType.VITIS_ALVEO:
         model = model.transform(VitisBuild(cfg))
     else:
-        raise Exception("Unrecognized shell_flow_type: " + str(cfg.shell_flow_type))
+        raise Exception("Unrecognized shell_flow_type: " +
+                        str(cfg.shell_flow_type))
     log.info("Synthesis done. Post-processing reports and generated files...")
 
     # SYNTHESIS POST-PROCESSING
@@ -2312,7 +2416,8 @@ def step_deployment_package(model: ModelWrapper, cfg: DataflowBuildConfig) -> Mo
         deploy_dir = cfg.get_deploy_directory()
         bitfile_dir = cfg.get_bitfile_directory()
         driver_dir = cfg.get_driver_directory()
-        shutil.copytree(bitfile_dir, deploy_dir / "bitfile", dirs_exist_ok=True)
+        shutil.copytree(bitfile_dir, deploy_dir /
+                        "bitfile", dirs_exist_ok=True)
         shutil.copytree(
             driver_dir, deploy_dir / "driver", dirs_exist_ok=True, copy_function=shutil.copyfile
         )
@@ -2362,18 +2467,22 @@ def step_loop_rolling(model: ModelWrapper, cfg: DataflowBuildConfig) -> ModelWra
                 "pkg.torch.onnx.name_scopes": "['', 'layers.0']",
                 "pkg.torch.onnx.class_hierarchy": "['TestModule', 'test']",
             }
-            model = model.transform(SetLoopBoundary(node_metadata, cfg.loop_body_range))
+            model = model.transform(SetLoopBoundary(
+                node_metadata, cfg.loop_body_range))
         else:
             log.warning(
                 """MLO is selected but no loop range for the subgraph is specified,
                 this might cause an error during loop rolling."""
             )
         if cfg.loop_body_hierarchy is not None:
-            log.info(f"Running Loop Rolling on {cfg.loop_body_hierarchy} hierarchy")
+            log.info(
+                f"Running Loop Rolling on {cfg.loop_body_hierarchy} hierarchy")
             template_path = Path(cfg.output_dir) / "loop-body-template.onnx"
-            loop_extraction = LoopExtraction(cfg.loop_body_hierarchy, template_path)
+            loop_extraction = LoopExtraction(
+                cfg.loop_body_hierarchy, template_path)
             model = model.transform(loop_extraction)
-            model = model.transform(LoopRolling(loop_extraction.loop_body_template))
+            model = model.transform(LoopRolling(
+                loop_extraction.loop_body_template))
     else:
         log.info("MLO not selected, skipping step_loop_rolling.")
 

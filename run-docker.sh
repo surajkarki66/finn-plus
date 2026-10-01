@@ -52,4 +52,12 @@ echo "Xilinx (from host): ${FINN_XILINX_PATH} (same path inside container)"
 echo "User inside container: ${HOST_UID}:${HOST_GID}"
 
 docker compose build finn
-docker compose run --rm finn "$@"
+
+# Optional extra docker compose run flags (e.g. submodule gitdir mount for poetry-dynamic-versioning).
+compose_run=(compose run --rm)
+if [[ -n "${FINN_DOCKER_EXTRA:-}" ]]; then
+    # shellcheck disable=SC2206
+    compose_run+=(${FINN_DOCKER_EXTRA})
+fi
+compose_run+=(finn)
+docker "${compose_run[@]}" "$@"
